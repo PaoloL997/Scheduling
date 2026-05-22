@@ -1,0 +1,112 @@
+{% extends "ui/base.html" %}
+{% block title %}Aggiungi attività — Step 1{% endblock %}
+
+{% block content %}
+<main style="padding: 2rem 1rem;">
+  <div style="max-width: 640px; margin: 0 auto;">
+
+    <!-- Wizard step indicator -->
+    <div class="step-indicator">
+      <div class="step-dot">
+        <div class="step-dot-circle step-active">1</div>
+        <span class="step-dot-label step-active">Info base</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step-dot">
+        <div class="step-dot-circle">2</div>
+        <span class="step-dot-label">Carica WPS</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step-dot">
+        <div class="step-dot-circle">3</div>
+        <span class="step-dot-label">Conferma</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step-dot">
+        <div class="step-dot-circle">4</div>
+        <span class="step-dot-label">Pianificazione</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step-dot">
+        <div class="step-dot-circle">5</div>
+        <span class="step-dot-label">Risorse</span>
+      </div>
+    </div>
+
+    <div class="form-card">
+      <h2 class="card-title">Informazioni di base</h2>
+
+      {% if messages %}
+      <div style="margin-bottom:1rem;">
+        {% for msg in messages %}
+        <div class="alert alert-error">{{ msg }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <form method="post" novalidate>
+        {% csrf_token %}
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem;">
+          <!-- Stabilimento -->
+          <div class="form-group">
+            <label>
+              {{ form.stabilimento.label }} <span class="required">*</span>
+            </label>
+            <select name="stabilimento" class="{% if form.stabilimento.errors %}is-error{% endif %}">
+              {% for val, lbl in form.stabilimento.field.choices %}
+              <option value="{{ val }}" {% if form.stabilimento.value == val %}selected{% endif %}>{{ lbl }}</option>
+              {% endfor %}
+            </select>
+            {% if form.stabilimento.errors %}<p class="form-error">{{ form.stabilimento.errors.0 }}</p>{% endif %}
+          </div>
+
+          <!-- Responsabile -->
+          <div class="form-group">
+            <label>
+              {{ form.responsabile.label }} <span class="required">*</span>
+            </label>
+            <select name="responsabile" id="sel-responsabile" class="{% if form.responsabile.errors %}is-error{% endif %}">
+              {% for val, lbl in form.responsabile.field.choices %}
+              <option value="{{ val }}" {% if form.responsabile.value == val %}selected{% endif %}>{{ lbl }}</option>
+              {% endfor %}
+            </select>
+            {% if form.responsabile.errors %}<p class="form-error">{{ form.responsabile.errors.0 }}</p>{% endif %}
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1.5rem;">
+          <!-- Costo -->
+          <div class="form-group">
+            <label>{{ form.costo.label }}</label>
+            <div class="input-wrap has-prefix">
+              <span class="input-prefix">€</span>
+              <input type="number" name="costo" step="0.01" min="0" placeholder="Es. 15000.00"
+                value="{{ form.costo.value|default:'' }}"
+                class="{% if form.costo.errors %}is-error{% endif %}">
+            </div>
+            {% if form.costo.errors %}<p class="form-error">{{ form.costo.errors.0 }}</p>{% endif %}
+          </div>
+
+          <!-- Penale -->
+          <div class="form-group">
+            <label>{{ form.penale_percentuale.label }}</label>
+            <div class="input-wrap has-suffix">
+              <input type="number" name="penale_percentuale" step="0.01" min="0" max="100" placeholder="Es. 5.00"
+                value="{{ form.penale_percentuale.value|default:'' }}"
+                class="{% if form.penale_percentuale.errors %}is-error{% endif %}">
+              <span class="input-suffix">%</span>
+            </div>
+            {% if form.penale_percentuale.errors %}<p class="form-error">{{ form.penale_percentuale.errors.0 }}</p>{% endif %}
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end;">
+          <button type="submit" class="btn btn-primary">Avanti →</button>
+        </div>
+      </form>
+    </div>
+
+  </div>
+</main>
+{% endblock %}

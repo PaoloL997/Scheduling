@@ -1,0 +1,855 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Inventario{% endblock %}
+
+{% block content %}
+<main style="padding: 2rem 1rem;">
+  <div style="max-width: 900px; margin: 0 auto;">
+
+    <!-- Import success toast (shown after Excel import, hidden by default) -->
+    <div id="import-success-banner" style="display:none;"></div>
+
+    <!-- Toggle switch + Add button row -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+      <div id="inv-toggle" class="toggle-group" role="group">
+        <button id="btn-generatori" class="toggle-btn active" onclick="showInv('generatori')">Generatori</button>
+        <button id="btn-mandrini"   class="toggle-btn"        onclick="showInv('mandrini')">Mandrini</button>
+        <button id="btn-maschere"   class="toggle-btn"        onclick="showInv('maschere')">Maschere</button>
+        <button id="btn-tastatori"  class="toggle-btn"        onclick="showInv('tastatori')">Tastatori</button>
+        <button id="btn-teste"      class="toggle-btn"        onclick="showInv('teste')">Teste</button>
+      </div>
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <input id="inv-search" class="tbl-search-input" style="width:14rem;" placeholder="Cerca…" oninput="filterActiveTable()">
+        <div style="position:relative;">
+          <button id="btn-add" class="btn btn-primary" onclick="toggleAddDropdown(event)">
+            Aggiungi
+          </button>
+          <div id="add-dropdown" style="display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px hsl(0,0%,0%,0.25);min-width:180px;overflow:hidden;">
+            <button class="add-dropdown-item" onclick="openManualAddModal()">Aggiungi manualmente</button>
+            <button class="add-dropdown-item" onclick="openImportModal()">Importa da Excel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Generatori -->
+    <div id="inv-generatori" class="inv-section">
+      {% if generatori %}
+      <div class="data-table-wrap">
+        <table id="tbl-generatori" class="data-table">
+          <thead>
+            <tr>
+              <th>Codice Univoco</th>
+              <th>Modello</th>
+              <th>Stabilimento</th>
+              <th>Note</th>
+              <th style="width:2.5rem;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in generatori %}
+            <tr data-uid="{{ row.uid }}" data-model="{{ row.model|default:'' }}" data-plant="{{ row.plant|default:'' }}" data-notes="{{ row.notes|default:'' }}">
+              <td class="td-primary">{{ row.uid }}</td>
+              <td>{{ row.model|default:"—" }}</td>
+              <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
+              <td class="td-muted">{{ row.notes|default:"—" }}</td>
+              <td style="text-align:center;"><button class="btn-delete" onclick="deleteRow('Generatore', '{{ row.uid }}', this)" title="Elimina">🗑</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p id="empty-generatori" style="text-align:center;color:var(--text-subtle);margin-top:4rem;font-size:0.9rem;">Nessun generatore disponibile.</p>
+      {% endif %}
+    </div>
+
+    <!-- Mandrini -->
+    <div id="inv-mandrini" class="inv-section" style="display:none;">
+      {% if mandrini %}
+      <div class="data-table-wrap">
+        <table id="tbl-mandrini" class="data-table">
+          <thead>
+            <tr>
+              <th>Codice Univoco</th>
+              <th>Diametro (mm)</th>
+              <th>Stabilimento</th>
+              <th>Note</th>
+              <th style="width:2.5rem;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in mandrini %}
+            <tr data-uid="{{ row.uid }}" data-diameter="{{ row.diameter|default:'' }}" data-plant="{{ row.plant|default:'' }}" data-notes="{{ row.notes|default:'' }}">
+              <td class="td-primary">{{ row.uid }}</td>
+              <td>{{ row.diameter|default:"—" }}</td>
+              <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
+              <td class="td-muted">{{ row.notes|default:"—" }}</td>
+              <td style="text-align:center;"><button class="btn-delete" onclick="deleteRow('Mandrino', '{{ row.uid }}', this)" title="Elimina">🗑</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p id="empty-mandrini" style="text-align:center;color:var(--text-subtle);margin-top:4rem;font-size:0.9rem;">Nessun mandrino disponibile.</p>
+      {% endif %}
+    </div>
+
+    <!-- Maschere -->
+    <div id="inv-maschere" class="inv-section" style="display:none;">
+      {% if maschere %}
+      <div class="data-table-wrap">
+        <table id="tbl-maschere" class="data-table">
+          <thead>
+            <tr>
+              <th>Codice Univoco</th>
+              <th>Passo (mm)</th>
+              <th>Stabilimento</th>
+              <th class="td-right">Interasse (mm)</th>
+              <th style="width:2.5rem;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in maschere %}
+            <tr data-uid="{{ row.uid }}" data-pitch="{{ row.pitch|default:'' }}" data-plant="{{ row.plant|default:'' }}" data-center-distance="{{ row.center_distance|default:'' }}">
+              <td class="td-primary">{{ row.uid }}</td>
+              <td>{{ row.pitch|default:"—" }}</td>
+              <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
+              <td class="td-right">{{ row.center_distance|default:"—" }}</td>
+              <td style="text-align:center;"><button class="btn-delete" onclick="deleteRow('Maschera', '{{ row.uid }}', this)" title="Elimina">🗑</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p id="empty-maschere" style="text-align:center;color:var(--text-subtle);margin-top:4rem;font-size:0.9rem;">Nessuna maschera disponibile.</p>
+      {% endif %}
+    </div>
+
+    <!-- Tastatori -->
+    <div id="inv-tastatori" class="inv-section" style="display:none;">
+      {% if tastatori %}
+      <div class="data-table-wrap">
+        <table id="tbl-tastatori" class="data-table">
+          <thead>
+            <tr>
+              <th>Codice Univoco</th>
+              <th>Diametro (mm)</th>
+              <th>Stabilimento</th>
+              <th>Note</th>
+              <th style="width:2.5rem;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in tastatori %}
+            <tr data-uid="{{ row.uid }}" data-diameter="{{ row.diameter|default:'' }}" data-plant="{{ row.plant|default:'' }}" data-notes="{{ row.notes|default:'' }}">
+              <td class="td-primary">{{ row.uid }}</td>
+              <td>{{ row.diameter|default:"—" }}</td>
+              <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
+              <td class="td-muted">{{ row.notes|default:"—" }}</td>
+              <td style="text-align:center;"><button class="btn-delete" onclick="deleteRow('Tastatore', '{{ row.uid }}', this)" title="Elimina">🗑</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p id="empty-tastatori" style="text-align:center;color:var(--text-subtle);margin-top:4rem;font-size:0.9rem;">Nessun tastatore disponibile.</p>
+      {% endif %}
+    </div>
+
+    <!-- Teste -->
+    <div id="inv-teste" class="inv-section" style="display:none;">
+      {% if teste %}
+      <div class="data-table-wrap">
+        <table id="tbl-teste" class="data-table">
+          <thead>
+            <tr>
+              <th>Codice Univoco</th>
+              <th>Modello</th>
+              <th>Stabilimento</th>
+              <th>Note</th>
+              <th style="width:2.5rem;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in teste %}
+            <tr data-uid="{{ row.uid }}" data-model="{{ row.model|default:'' }}" data-plant="{{ row.plant|default:'' }}" data-notes="{{ row.notes|default:'' }}">
+              <td class="td-primary">{{ row.uid }}</td>
+              <td>{{ row.model|default:"—" }}</td>
+              <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
+              <td class="td-muted">{{ row.notes|default:"—" }}</td>
+              <td style="text-align:center;"><button class="btn-delete" onclick="deleteRow('Testa', '{{ row.uid }}', this)" title="Elimina">🗑</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p id="empty-teste" style="text-align:center;color:var(--text-subtle);margin-top:4rem;font-size:0.9rem;">Nessuna testa disponibile.</p>
+      {% endif %}
+    </div>
+
+  </div>
+</main>
+
+<!-- Import from Excel modal -->
+<div class="inv-overlay" id="import-modal-overlay" role="dialog" aria-modal="true" style="display:none;">
+  <div class="import-modal">
+
+    <div class="import-modal-hd">
+      <div>
+        <h2 class="import-modal-title">Importa risorse da Excel</h2>
+        <p class="import-modal-sub">5 colonne nell'ordine indicato — i nomi non contano, la prima riga viene saltata.</p>
+      </div>
+      <button class="btn-icon" onclick="closeImportModal()" aria-label="Chiudi">&#x2715;</button>
+    </div>
+
+    <ol class="import-cols">
+      <li class="import-col-item">
+        <span class="import-col-name">Categoria</span>
+        <span class="import-col-desc">Generatore · Testa · Mandrino · Tastatore · Maschera</span>
+      </li>
+      <li class="import-col-item">
+        <span class="import-col-name">Codice univoco</span>
+        <span class="import-col-desc">Identificatore unico della risorsa</span>
+      </li>
+      <li class="import-col-item">
+        <span class="import-col-name">Misura / Modello</span>
+        <span class="import-col-desc">Modello (Gen./Testa) &middot; Diametro mm (Mandrino/Tastatore) &middot; Passo mm (Maschera)</span>
+      </li>
+      <li class="import-col-item">
+        <span class="import-col-name">Stabilimento</span>
+        <span class="import-col-desc">Stabilimento di appartenenza della risorsa</span>
+      </li>
+      <li class="import-col-item">
+        <span class="import-col-name">Note</span>
+        <span class="import-col-desc">Note libere &middot; per Maschera: interasse mm</span>
+      </li>
+    </ol>
+
+    <div class="import-modal-body">
+      <label id="import-drop-zone" for="import-file-input" class="drop-zone"
+        ondragover="event.preventDefault();this.classList.add('is-drag');"
+        ondragleave="this.classList.remove('is-drag');"
+        ondrop="importHandleDrop(event);">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <span class="drop-zone-label">Trascina il file <code>.xlsx</code> oppure <span class="drop-zone-link">sfoglia</span></span>
+        <span id="import-fname" class="drop-zone-fname"></span>
+      </label>
+      <input id="import-file-input" type="file" accept=".xlsx" style="display:none;" onchange="importHandleSelect(this);">
+      <div id="import-result" style="display:none;margin-top:0.75rem;"></div>
+    </div>
+
+    <div class="import-modal-ft">
+      <button type="button" class="btn btn-ghost" onclick="closeImportModal()">Annulla</button>
+      <button id="import-btn" class="btn btn-primary" onclick="submitImport()">Importa</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- Add resource modal (manual) -->
+<div class="inv-overlay" id="add-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="add-modal-title">
+  <div class="inv-modal">
+    <h2 id="add-modal-title" style="font-size:1rem;font-weight:600;margin-bottom:1.25rem;"></h2>
+    <form id="add-form" onsubmit="submitAdd(event)" novalidate>
+      <div id="add-fields" style="display:flex;flex-direction:column;gap:0.75rem;"></div>
+      <div id="add-error" class="modal-error" style="display:none;"></div>
+      <div style="display:flex;justify-content:flex-end;gap:0.5rem;margin-top:1.5rem;">
+        <button type="button" class="btn btn-ghost" onclick="closeAddModal()">Annulla</button>
+        <button type="submit" id="add-submit-btn" class="btn btn-primary">Aggiungi</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Detail / Edit modal -->
+<div class="det-overlay" id="det-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="det-title">
+  <div class="det-modal">
+    <div class="det-header">
+      <h2 id="det-title"></h2>
+      <button class="btn-icon" onclick="closeDetailModal()" aria-label="Chiudi">&#x2715;</button>
+    </div>
+    <div class="det-body-wrap">
+      <div id="det-body" class="det-grid"></div>
+      <div id="det-error" class="det-error" style="display:none;"></div>
+    </div>
+    <div class="det-footer">
+      <div id="det-view-btns">
+        <button class="btn btn-primary" onclick="enterEditMode()">Modifica</button>
+      </div>
+      <div id="det-edit-btns" style="display:none; gap:0.5rem;">
+        <button class="btn btn-ghost" onclick="cancelEdit()">Annulla</button>
+        <button id="det-save-btn" class="btn btn-primary" onclick="saveEdit()">Salva</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const INV_KEYS = ['generatori', 'mandrini', 'maschere', 'tastatori', 'teste'];
+
+  const STAB_OPTIONS = {{ stabilimenti_json|safe }}.map(function(nome) {
+    return '<option value="' + nome.replace(/"/g, '&quot;') + '">' + nome.replace(/</g, '&lt;') + '</option>';
+  }).join('');
+
+  const INV_CONFIG = {
+    generatori: {
+      table: 'Generatore',
+      label: 'Generatore',
+      fields: [
+        { name: 'uid',   label: 'Codice Univoco *', required: true },
+        { name: 'model', label: 'Modello' },
+        { name: 'plant', label: 'Stabilimento' },
+        { name: 'notes', label: 'Note' },
+      ],
+      renderRow: function(d) {
+        return `<td class="td-primary">${esc(d.uid)}</td>
+                <td>${esc(d.model)}</td>
+                <td>${stabBadge(d.plant)}</td>
+                <td class="td-muted">${esc(d.notes)}</td>
+                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Generatore','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
+      }
+    },
+    mandrini: {
+      table: 'Mandrino',
+      label: 'Mandrino',
+      fields: [
+        { name: 'uid',      label: 'Codice Univoco *', required: true },
+        { name: 'diameter', label: 'Diametro' },
+        { name: 'plant',    label: 'Stabilimento' },
+        { name: 'notes',    label: 'Note' },
+      ],
+      renderRow: function(d) {
+        return `<td class="td-primary">${esc(d.uid)}</td>
+                <td>${esc(d.diameter)}</td>
+                <td>${stabBadge(d.plant)}</td>
+                <td class="td-muted">${esc(d.notes)}</td>
+                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Mandrino','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
+      }
+    },
+    maschere: {
+      table: 'Maschera',
+      label: 'Maschera',
+      fields: [
+        { name: 'uid',             label: 'Codice Univoco *', required: true },
+        { name: 'pitch',           label: 'Passo' },
+        { name: 'plant',           label: 'Stabilimento' },
+        { name: 'center_distance', label: 'Interasse' },
+      ],
+      renderRow: function(d) {
+        return `<td class="td-primary">${esc(d.uid)}</td>
+                <td>${esc(d.pitch)}</td>
+                <td>${stabBadge(d.plant)}</td>
+                <td class="td-right">${esc(d.center_distance)}</td>
+                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Maschera','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
+      }
+    },
+    tastatori: {
+      table: 'Tastatore',
+      label: 'Tastatore',
+      fields: [
+        { name: 'uid',      label: 'Codice Univoco *', required: true },
+        { name: 'diameter', label: 'Diametro' },
+        { name: 'plant',    label: 'Stabilimento' },
+        { name: 'notes',    label: 'Note' },
+      ],
+      renderRow: function(d) {
+        return `<td class="td-primary">${esc(d.uid)}</td>
+                <td>${esc(d.diameter)}</td>
+                <td>${stabBadge(d.plant)}</td>
+                <td class="td-muted">${esc(d.notes)}</td>
+                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Tastatore','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
+      }
+    },
+    teste: {
+      table: 'Testa',
+      label: 'Testa',
+      fields: [
+        { name: 'uid',   label: 'Codice Univoco *', required: true },
+        { name: 'model', label: 'Modello' },
+        { name: 'plant', label: 'Stabilimento' },
+        { name: 'notes', label: 'Note' },
+      ],
+      renderRow: function(d) {
+        return `<td class="td-primary">${esc(d.uid)}</td>
+                <td>${esc(d.model)}</td>
+                <td>${stabBadge(d.plant)}</td>
+                <td class="td-muted">${esc(d.notes)}</td>
+                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Testa','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
+      }
+    },
+  };
+
+  let activeKey = 'generatori';
+
+  function esc(val) {
+    if (val == null) return '—';
+    return String(val).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  const STAB_COLORS = {{ plant_colors_json|safe }};
+
+  function stabBadge(name) {
+    if (!name) return '—';
+    const c = STAB_COLORS[name];
+    const style = c ? ` style="--stab-c:${c}"` : '';
+    return `<span class="stab-badge"${style}>${esc(name)}</span>`;
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.stab-plant-cell[data-stab]').forEach(function(td) {
+      var name = td.dataset.stab;
+      if (name) td.innerHTML = stabBadge(name);
+    });
+  });
+
+  function showInv(key) {
+    activeKey = key;
+    INV_KEYS.forEach(function(k) {
+      var section = document.getElementById('inv-' + k);
+      var btn     = document.getElementById('btn-' + k);
+      var active  = (k === key);
+      section.style.display = active ? '' : 'none';
+      btn.classList.toggle('active', active);
+    });
+    var searchEl = document.getElementById('inv-search');
+    searchEl.value = '';
+    filterTable('tbl-' + key, '');
+  }
+
+  function toggleAddDropdown(event) {
+    event.stopPropagation();
+    var dd = document.getElementById('add-dropdown');
+    dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+  }
+
+  function closeAddDropdown() {
+    document.getElementById('add-dropdown').style.display = 'none';
+  }
+
+  function openManualAddModal() {
+    closeAddDropdown();
+    var cfg = INV_CONFIG[activeKey];
+    document.getElementById('add-modal-title').textContent = 'Aggiungi ' + cfg.label;
+    var fieldsEl = document.getElementById('add-fields');
+    fieldsEl.innerHTML = cfg.fields.map(function(f) {
+      var control;
+      if (f.name === 'plant') {
+        control = '<select id="field-plant" name="plant">' +
+                  '<option value="">Seleziona</option>' + STAB_OPTIONS +
+                  '</select>';
+      } else {
+        control = '<input id="field-' + f.name + '" name="' + f.name + '" type="text"' +
+                  (f.required ? ' required' : '') + '>';
+      }
+      return '<div class="inv-field"><label for="field-' + f.name + '">' + f.label + '</label>' + control + '</div>';
+    }).join('');
+    document.getElementById('add-error').style.display = 'none';
+    document.getElementById('add-modal-overlay').style.display = 'flex';
+    var firstInput = fieldsEl.querySelector('input, select');
+    firstInput && firstInput.focus();
+  }
+
+  function closeAddModal() {
+    document.getElementById('add-modal-overlay').style.display = 'none';
+    document.getElementById('add-form').reset();
+  }
+
+  function submitAdd(event) {
+    event.preventDefault();
+    var cfg = INV_CONFIG[activeKey];
+    var data = {};
+    cfg.fields.forEach(function(f) {
+      var val = document.getElementById('field-' + f.name).value.trim();
+      data[f.name] = val || null;
+    });
+
+    var submitBtn = document.getElementById('add-submit-btn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Salvataggio…';
+
+    fetch('/api/inventario/' + cfg.table + '/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    .then(function(r) { return r.json().then(function(body) { return { ok: r.ok, body: body }; }); })
+    .then(function(res) {
+      if (!res.ok || !res.body.ok) {
+        showAddError(res.body.error || 'Errore sconosciuto.');
+      } else {
+        appendRow(activeKey, data);
+        closeAddModal();
+      }
+    })
+    .catch(function() { showAddError('Errore di rete.'); })
+    .finally(function() {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Aggiungi';
+    });
+  }
+
+  function showAddError(msg) {
+    var el = document.getElementById('add-error');
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function appendRow(key, data) {
+    var cfg = INV_CONFIG[key];
+    var tblId = 'tbl-' + key;
+    var tbl = document.getElementById(tblId);
+
+    if (!tbl) {
+      var section = document.getElementById('inv-' + key);
+      section.innerHTML = '<div class="data-table-wrap"><table id="' + tblId + '" class="data-table"><tbody></tbody></table></div>';
+      tbl = document.getElementById(tblId);
+    }
+
+    var tr = document.createElement('tr');
+    tr.setAttribute('data-uid', data.uid || '');
+    cfg.fields.forEach(function(f) {
+      if (f.name !== 'uid') {
+        tr.setAttribute('data-' + f.name.replace(/_/g, '-'), data[f.name] || '');
+      }
+    });
+    tr.classList.add('row--new');
+    tr.innerHTML = cfg.renderRow(data);
+    tbl.querySelector('tbody').appendChild(tr);
+
+    var empty = document.getElementById('empty-' + key);
+    if (empty) empty.style.display = 'none';
+    filterTable(tblId, document.getElementById('inv-search').value);
+  }
+
+  function deleteRow(table, uid, btn) {
+    btn.disabled = true;
+    fetch('/api/inventario/' + table + '/' + encodeURIComponent(uid) + '/', {
+      method: 'DELETE',
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(body) {
+      if (body.ok) {
+        var tr = btn.closest('tr');
+        tr.remove();
+      } else {
+        alert('Errore: ' + (body.error || 'impossibile eliminare.'));
+        btn.disabled = false;
+      }
+    })
+    .catch(function() {
+      alert('Errore di rete.');
+      btn.disabled = false;
+    });
+  }
+
+  function filterTable(tableId, term) {
+    var table = document.getElementById(tableId);
+    if (!table) return;
+    var q = (term !== undefined ? term : document.getElementById('inv-search').value).trim().toLowerCase();
+    table.querySelectorAll('tbody tr').forEach(function(row) {
+      row.style.display = !q || row.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  }
+
+  function filterActiveTable() {
+    filterTable('tbl-' + activeKey);
+  }
+
+  document.addEventListener('click', function(e) {
+    var dd = document.getElementById('add-dropdown');
+    if (dd && dd.style.display !== 'none' && !dd.contains(e.target) && e.target.id !== 'btn-add') {
+      closeAddDropdown();
+    }
+  }, true);
+
+  document.getElementById('import-modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeImportModal();
+  });
+
+  document.getElementById('add-modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeAddModal();
+  });
+
+  document.getElementById('det-modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeDetailModal();
+  });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { closeAddDropdown(); closeImportModal(); closeAddModal(); closeDetailModal(); }
+  });
+
+  // ── Detail / Edit Modal ────────────────────────────────────────────────────
+  var detState = null;
+
+  function toCamelCase(s) {
+    return s.replace(/_([a-z])/g, function(_, c) { return c.toUpperCase(); });
+  }
+
+  function openDetailModal(tr, cfg) {
+    var d = {};
+    cfg.fields.forEach(function(f) {
+      d[f.name] = tr.getAttribute('data-' + f.name.replace(/_/g, '-')) || '';
+    });
+    detState = { tr: tr, cfg: cfg, originalData: d };
+    document.getElementById('det-title').textContent = cfg.label + ': ' + (d.uid || '—');
+    renderViewMode();
+    document.getElementById('det-view-btns').style.display = 'flex';
+    document.getElementById('det-edit-btns').style.display = 'none';
+    document.getElementById('det-error').style.display = 'none';
+    document.getElementById('det-modal-overlay').style.display = 'flex';
+  }
+
+  function closeDetailModal() {
+    document.getElementById('det-modal-overlay').style.display = 'none';
+    detState = null;
+  }
+
+  function renderViewMode() {
+    var body = document.getElementById('det-body');
+    body.className = 'det-grid';
+    body.innerHTML = detState.cfg.fields.map(function(f) {
+      var label = f.label.replace(' *', '');
+      var val = detState.originalData[f.name] || '—';
+      return '<div class="det-field">' +
+             '<span class="det-label">' + label + '</span>' +
+             '<span class="det-value">' + esc(val) + '</span>' +
+             '</div>';
+    }).join('');
+  }
+
+  function enterEditMode() {
+    if (!detState) return;
+    var d = detState.originalData;
+    var body = document.getElementById('det-body');
+    body.className = 'det-grid';
+    body.innerHTML = detState.cfg.fields.map(function(f) {
+      var label = f.label.replace(' *', '');
+      var val = d[f.name] || '';
+      var control;
+      if (f.name === 'plant') {
+        control = '<select class="det-input" id="det-field-plant" name="plant">' +
+                  '<option value="">—</option>' + STAB_OPTIONS + '</select>';
+      } else {
+        control = '<input class="det-input" id="det-field-' + f.name + '" type="text" value="' + esc(val) + '">';
+      }
+      return '<div class="det-field"><span class="det-label">' + label + '</span>' + control + '</div>';
+    }).join('');
+    var plantSel = document.getElementById('det-field-plant');
+    if (plantSel) plantSel.value = d.plant || '';
+    document.getElementById('det-view-btns').style.display = 'none';
+    document.getElementById('det-edit-btns').style.display = 'flex';
+    document.getElementById('det-error').style.display = 'none';
+  }
+
+  function cancelEdit() {
+    renderViewMode();
+    document.getElementById('det-view-btns').style.display = 'flex';
+    document.getElementById('det-edit-btns').style.display = 'none';
+    document.getElementById('det-error').style.display = 'none';
+  }
+
+  function saveEdit() {
+    if (!detState) return;
+    var cfg = detState.cfg;
+    var originalUid = detState.originalData.uid;
+    var newData = {};
+    cfg.fields.forEach(function(f) {
+      var el = document.getElementById('det-field-' + f.name);
+      if (el) newData[f.name] = el.value.trim() || null;
+    });
+
+    var saveBtn = document.getElementById('det-save-btn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Salvataggio…';
+
+    fetch('/api/inventario/' + cfg.table + '/' + encodeURIComponent(originalUid) + '/', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newData),
+    })
+    .then(function(r) { return r.json().then(function(b) { return { ok: r.ok, body: b }; }); })
+    .then(function(res) {
+      if (!res.ok || !res.body.ok) {
+        showDetError(res.body.error || 'Errore sconosciuto.');
+      } else {
+        var tr = detState.tr;
+        tr.innerHTML = cfg.renderRow(newData);
+        tr.setAttribute('data-uid', newData.uid || '');
+        cfg.fields.forEach(function(f) {
+          if (f.name !== 'uid') {
+            tr.setAttribute('data-' + f.name.replace(/_/g, '-'), newData[f.name] || '');
+          }
+        });
+        closeDetailModal();
+      }
+    })
+    .catch(function() { showDetError('Errore di rete.'); })
+    .finally(function() {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Salva';
+    });
+  }
+
+  function showDetError(msg) {
+    var el = document.getElementById('det-error');
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  // ── Excel Import Modal ────────────────────────────────────────────────────
+  var importFile = null;
+
+  function openImportModal() {
+    closeAddDropdown();
+    importFile = null;
+    document.getElementById('import-fname').textContent = '';
+    document.getElementById('import-drop-zone').classList.remove('has-file', 'is-drag');
+    document.getElementById('import-file-input').value = '';
+    document.getElementById('import-result').style.display = 'none';
+    document.getElementById('import-result').innerHTML = '';
+    document.getElementById('import-btn').disabled = false;
+    document.getElementById('import-btn').textContent = 'Importa';
+    document.getElementById('import-modal-overlay').style.display = 'flex';
+  }
+
+  function closeImportModal() {
+    document.getElementById('import-modal-overlay').style.display = 'none';
+    importFile = null;
+  }
+
+  function importHandleSelect(input) {
+    if (input.files && input.files[0]) {
+      importFile = input.files[0];
+      document.getElementById('import-fname').textContent = importFile.name;
+      document.getElementById('import-drop-zone').classList.add('has-file');
+    }
+  }
+
+  function importHandleDrop(ev) {
+    ev.preventDefault();
+    document.getElementById('import-drop-zone').classList.remove('is-drag');
+    var f = ev.dataTransfer.files && ev.dataTransfer.files[0];
+    if (f && f.name.toLowerCase().endsWith('.xlsx')) {
+      importFile = f;
+      document.getElementById('import-file-input').value = '';
+      document.getElementById('import-fname').textContent = f.name;
+    }
+  }
+
+  function submitImport() {
+    if (!importFile) {
+      showImportResult({ type: 'error', msg: 'Seleziona un file .xlsx da importare.' });
+      return;
+    }
+    var btn = document.getElementById('import-btn');
+    btn.disabled = true;
+    btn.textContent = 'Importazione…';
+    var fd = new FormData();
+    fd.append('file', importFile);
+    fetch('/api/inventario/import-excel/', { method: 'POST', body: fd })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.ok) {
+          showImportResult({ type: 'error', msg: data.error || 'Errore sconosciuto.' });
+          btn.disabled = false;
+          btn.textContent = 'Importa';
+        } else {
+          closeImportModal();
+          showImportBanner(data);
+          if (data.imported > 0) setTimeout(function() { location.reload(); }, 2000);
+        }
+      })
+      .catch(function() {
+        showImportResult({ type: 'error', msg: 'Errore di rete.' });
+        btn.disabled = false;
+        btn.textContent = 'Importa';
+      });
+  }
+
+  var _importBannerTimer = null;
+
+  function showImportBanner(data) {
+    var banner = document.getElementById('import-success-banner');
+    if (_importBannerTimer) clearTimeout(_importBannerTimer);
+
+    var categoryLabels = {
+      'Generatore': 'Generatori', 'Testa': 'Teste',
+      'Mandrino': 'Mandrini', 'Tastatore': 'Tastatori', 'Maschera': 'Maschere'
+    };
+    var details = data.details || {};
+    var parts = Object.keys(details).map(function(k) {
+      return details[k] + ' ' + (categoryLabels[k] || k);
+    });
+
+    var msg = '✓ Importate ' + data.imported + ' risorse';
+    if (parts.length) msg += ': ' + parts.join(', ');
+    if (data.skipped) msg += ' · ' + data.skipped + ' duplicate ignorate';
+    msg += '.';
+
+    banner.textContent = msg;
+    // ri-triggera l'animazione
+    banner.style.display = 'none';
+    banner.offsetHeight; // reflow
+    banner.style.display = '';
+    _importBannerTimer = setTimeout(function() {
+      banner.style.display = 'none';
+    }, 5000);
+  }
+
+  function showImportResult(res) {
+    var el = document.getElementById('import-result');
+    var html = '';
+    if (res.type === 'error') {
+      html = '<div class="modal-error" style="display:block;">' + esc(res.msg) + '</div>';
+    } else {
+      html = '<div style="color:var(--color-success,#16a34a);font-size:0.85rem;padding:0.5rem 0;">' + esc(res.msg) + '</div>';
+      if (res.errors && res.errors.length) {
+        html += '<details style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-subtle);">' +
+                '<summary style="cursor:pointer;">Avvisi (' + res.errors.length + ')</summary><ul style="margin:.5rem 0 0 1rem;">' +
+                res.errors.map(function(e) { return '<li>' + esc(e) + '</li>'; }).join('') +
+                '</ul></details>';
+      }
+    }
+    el.innerHTML = html;
+    el.style.display = 'block';
+  }
+
+  // Event delegation: open detail modal on row click
+  document.addEventListener('click', function(e) {
+    if (e.target.closest('button')) return;
+    var tr = e.target.closest('.data-table tbody tr');
+    if (!tr) return;
+    var tblEl = tr.closest('.data-table');
+    if (!tblEl) return;
+    var key = tblEl.id.replace('tbl-', '');
+    var cfg = INV_CONFIG[key];
+    if (!cfg) return;
+    openDetailModal(tr, cfg);
+  });
+</script>
+<style>
+.add-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 0.6rem 1rem;
+  background: none;
+  border: none;
+  text-align: left;
+  font-size: 0.9rem;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.add-dropdown-item:hover {
+  background: var(--surface-raised, hsl(0,0%,20%));
+}
+.add-dropdown-item + .add-dropdown-item {
+  border-top: 1px solid var(--border);
+}
+</style>
+{% endblock %}

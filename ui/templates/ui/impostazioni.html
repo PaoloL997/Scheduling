@@ -1,0 +1,803 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Impostazioni — Programmazione Produzione{% endblock %}
+
+{% block content %}
+<div class="settings-page">
+    <h1>Impostazioni</h1>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- Stabilimenti                                                       -->
+    <!-- ---------------------------------------------------------------- -->
+    <section class="settings-section" id="section-stabilimenti">
+        <div class="settings-section-header">
+            <h2>Stabilimenti</h2>
+            <button class="btn btn-primary" onclick="openModal('stabilimento', null)">Aggiungi</button>
+        </div>
+        <table class="settings-table" id="table-stabilimenti">
+            <thead>
+                <tr>
+                    <th>Nome</th>
+                    <th>Colore</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="tbody-stabilimenti">
+                {% for s in stabilimenti %}
+                <tr data-id="{{ s.id }}">
+                    <td><span class="stab-badge" style="--stab-c:{{ s.colore }}">{{ s.nome }}</span></td>
+                    <td>
+                        <span class="color-swatch" style="background:{{ s.colore }};"></span>
+                        {{ s.colore }}
+                    </td>
+                    <td class="actions">
+                        <button class="btn btn-ghost" title="Modifica" onclick="openModal('stabilimento', {{ s.id }})">Modifica</button>
+                        <button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete('stabilimento', {{ s.id }}, '{{ s.nome|escapejs }}')">Elimina</button>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr class="empty-row" id="empty-stabilimenti">
+                    <td colspan="3">Nessuno stabilimento configurato.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- Responsabili                                                       -->
+    <!-- ---------------------------------------------------------------- -->
+    <section class="settings-section" id="section-responsabili">
+        <div class="settings-section-header">
+            <h2>Responsabili</h2>
+            <button class="btn btn-primary" onclick="openModal('responsabile', null)">Aggiungi</button>
+        </div>
+        <table class="settings-table" id="table-responsabili">
+            <thead>
+                <tr>
+                    <th>Nome</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="tbody-responsabili">
+                {% for r in responsabili %}
+                <tr data-id="{{ r.id }}">
+                    <td>{{ r.nome }}</td>
+                    <td class="actions">
+                        <button class="btn btn-ghost" title="Modifica" onclick="openModal('responsabile', {{ r.id }})">Modifica</button>
+                        <button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete('responsabile', {{ r.id }}, '{{ r.nome|escapejs }}')">Elimina</button>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr class="empty-row" id="empty-responsabili">
+                    <td colspan="2">Nessun responsabile configurato.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- Configurazione Teste                                               -->
+    <!-- ---------------------------------------------------------------- -->
+    <section class="settings-section" id="section-config-testa">
+        <div class="settings-section-header">
+            <h2>Configurazione modelli testa</h2>
+            <button class="btn btn-primary" onclick="openModal('config-testa', null)">Aggiungi</button>
+        </div>
+        <table class="settings-table" id="table-config-testa">
+            <thead>
+                <tr>
+                    <th>Modello testa</th>
+                    <th>Generatori compatibili</th>
+                    <th style="text-align:center;">Min. mandrini</th>
+                    <th style="text-align:center;">Min. tastatori</th>
+                    <th style="text-align:center;">Min. maschere</th>
+                    <th style="text-align:center;">Min. generatori</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="tbody-config-testa">
+                {% for item in configurazioni_teste %}
+                <tr data-id="{{ item.cfg.id }}" data-modello="{{ item.cfg.modello_testa|escapejs }}">
+                    <td style="font-weight:600;">{{ item.cfg.modello_testa }}</td>
+                    <td>
+                        <div class="chips-wrap" id="chips-{{ item.cfg.id }}">
+                            {% for gen in item.aggiunti %}
+                            <button class="chip chip--added"
+                                    data-gen-id="{{ gen.id }}"
+                                    data-modello="{{ gen.modello_generatore|escapejs }}"
+                                    data-cfg-id="{{ item.cfg.id }}"
+                                    title="Clicca per rimuovere"
+                                    onclick="removeGeneratore({{ gen.id }}, {{ item.cfg.id }})">{{ gen.modello_generatore }} ✕</button>
+                            {% endfor %}
+                            {% for mod in item.disponibili %}
+                            <button class="chip chip--available"
+                                    data-modello="{{ mod|escapejs }}"
+                                    data-cfg-id="{{ item.cfg.id }}"
+                                    title="Clicca per aggiungere"
+                                    onclick="addGeneratore('{{ mod|escapejs }}', {{ item.cfg.id }})">+ {{ mod }}</button>
+                            {% endfor %}
+                            {% if not item.aggiunti and not item.disponibili %}
+                            <span class="chips-empty">Nessun generatore disponibile</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                    <td style="text-align:center;" id="min-mandrini-{{ item.cfg.id }}">{{ item.cfg.min_mandrini }}</td>
+                    <td style="text-align:center;" id="min-tastatori-{{ item.cfg.id }}">{{ item.cfg.min_tastatori }}</td>
+                    <td style="text-align:center;" id="min-maschere-{{ item.cfg.id }}">{{ item.cfg.min_maschere }}</td>
+                    <td style="text-align:center;" id="min-generatori-{{ item.cfg.id }}">{{ item.cfg.min_generatori }}</td>
+                    <td class="actions">
+                        <button class="btn btn-ghost" title="Modifica risorse minime" onclick="openEditTesta({{ item.cfg.id }})">Modifica</button>
+                        <button class="btn btn-danger-ghost" title="Elimina" onclick="deleteConfigTesta({{ item.cfg.id }}, '{{ item.cfg.modello_testa|escapejs }}')">Elimina</button>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr class="empty-row" id="empty-config-testa">
+                    <td colspan="7">Nessuna configurazione definita.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</div>
+
+<!-- ------------------------------------------------------------------ -->
+<!-- Modal: Config Testa (crea / modifica)                              -->
+<!-- ------------------------------------------------------------------ -->
+<div class="modal-overlay" id="modal-config-testa-overlay">
+    <div class="modal">
+        <h3 id="modal-config-testa-title">Aggiungi configurazione testa</h3>
+
+        <!-- Add mode: select from TestaItem models -->
+        <div class="form-group" id="ct-modello-group">
+            <label for="ct-modello">Modello testa</label>
+            <select id="ct-modello">
+                <option value="">— seleziona modello —</option>
+            </select>
+        </div>
+        <!-- Edit mode: read-only label -->
+        <p id="ct-modello-label" style="display:none; font-size:.9rem; color:var(--text-subtle); margin-bottom:1rem;"></p>
+
+        <div style="display:flex;gap:12px;">
+            <div class="form-group" style="flex:1;">
+                <label for="ct-mandrini">Min. mandrini</label>
+                <input type="number" id="ct-mandrini" value="1" min="0" step="1">
+            </div>
+            <div class="form-group" style="flex:1;">
+                <label for="ct-tastatori">Min. tastatori</label>
+                <input type="number" id="ct-tastatori" value="1" min="0" step="1">
+            </div>
+            <div class="form-group" style="flex:1;">
+                <label for="ct-maschere">Min. maschere</label>
+                <input type="number" id="ct-maschere" value="1" min="0" step="1">
+            </div>
+            <div class="form-group" style="flex:1;">
+                <label for="ct-generatori">Min. generatori</label>
+                <input type="number" id="ct-generatori" value="1" min="0" step="1">
+            </div>
+        </div>
+        <div class="modal-error" id="ct-error"></div>
+        <div class="modal-actions">
+            <button class="btn btn-cancel" onclick="closeModal('config-testa')">Annulla</button>
+            <button class="btn btn-primary" id="ct-save-btn" onclick="saveConfigTesta()">Salva</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.chips-wrap { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.chip {
+    border-radius:6px; padding:3px 9px; font-size:.8rem; cursor:pointer;
+    transition:border-color .15s, color .15s, background .15s;
+    white-space:nowrap;
+}
+.chip--added {
+    background:rgba(74,144,226,.12); border:1px solid #4a90e2; color:#4a90e2;
+}
+.chip--added:hover {
+    background:rgba(231,76,60,.10); border-color:#e74c3c; color:#e74c3c;
+}
+.chip--available {
+    background:transparent; border:1px dashed #444; color:#666;
+}
+.chip--available:hover { border-color:#4a90e2; color:#4a90e2; background:rgba(74,144,226,.06); }
+.chips-empty { color:#555; font-size:.82rem; font-style:italic; }
+</style>
+<div class="modal-overlay" id="modal-stabilimento-overlay">
+    <div class="modal">
+        <h3 id="modal-stabilimento-title">Aggiungi stabilimento</h3>
+        <div class="form-group">
+            <label for="stab-nome">Nome</label>
+            <input type="text" id="stab-nome" placeholder="es. Stabilimento Nord" autocomplete="off">
+        </div>
+        <div class="form-group">
+            <label for="stab-colore">Colore</label>
+            <input type="color" id="stab-colore" value="#6366f1">
+        </div>
+        <div class="modal-error" id="stab-error"></div>
+        <div class="modal-actions">
+            <button class="btn btn-cancel" onclick="closeModal('stabilimento')">Annulla</button>
+            <button class="btn btn-primary" id="stab-save-btn" onclick="saveStabilimento()">Salva</button>
+        </div>
+    </div>
+</div>
+
+<!-- ------------------------------------------------------------------ -->
+<!-- Modal: Responsabile                                                   -->
+<!-- ------------------------------------------------------------------ -->
+<div class="modal-overlay" id="modal-responsabile-overlay">
+    <div class="modal">
+        <h3 id="modal-responsabile-title">Aggiungi responsabile</h3>
+        <div class="form-group">
+            <label for="resp-nome">Nome</label>
+            <input type="text" id="resp-nome" placeholder="es. Mario Rossi" autocomplete="off">
+        </div>
+        <div class="modal-error" id="resp-error"></div>
+        <div class="modal-actions">
+            <button class="btn btn-cancel" onclick="closeModal('responsabile')">Annulla</button>
+            <button class="btn btn-primary" id="resp-save-btn" onclick="saveResponsabile()">Salva</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    /* ------------------------------------------------------------------ */
+    /* State                                                                */
+    /* ------------------------------------------------------------------ */
+    let editingStabilimentoId = null;
+    let editingResponsabileId = null;
+
+    /* In-memory cache built from server-rendered HTML on page load       */
+    const stabCache = {};
+    const respCache = {};
+
+    document.querySelectorAll("#tbody-stabilimenti tr[data-id]").forEach(function (tr) {
+        const id = parseInt(tr.dataset.id, 10);
+        const cells = tr.querySelectorAll("td");
+        stabCache[id] = {
+            nome: cells[0].textContent.trim(),
+            colore: cells[1].querySelector(".color-swatch").style.backgroundColor,
+        };
+    });
+
+    document.querySelectorAll("#tbody-responsabili tr[data-id]").forEach(function (tr) {
+        const id = parseInt(tr.dataset.id, 10);
+        respCache[id] = { nome: tr.querySelector("td").textContent.trim() };
+    });
+
+    /* ------------------------------------------------------------------ */
+    /* Helpers                                                              */
+    /* ------------------------------------------------------------------ */
+    function rgbToHex(rgb) {
+        /* Converts "rgb(r, g, b)" from browser to "#rrggbb" */
+        const m = rgb.match(/(\d+),\s*(\d+),\s*(\d+)/);
+        if (!m) return rgb;
+        return "#" + [m[1], m[2], m[3]].map(function (n) {
+            return parseInt(n, 10).toString(16).padStart(2, "0");
+        }).join("");
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Modal open / close                                                   */
+    /* ------------------------------------------------------------------ */
+    window.openModal = function (type, id) {
+        if (type === "stabilimento") {
+            editingStabilimentoId = id;
+            const overlay = document.getElementById("modal-stabilimento-overlay");
+            const title   = document.getElementById("modal-stabilimento-title");
+            document.getElementById("stab-error").textContent = "";
+
+            if (id !== null && stabCache[id]) {
+                title.textContent = "Modifica stabilimento";
+                document.getElementById("stab-nome").value   = stabCache[id].nome;
+                document.getElementById("stab-colore").value = rgbToHex(stabCache[id].colore);
+            } else {
+                title.textContent = "Aggiungi stabilimento";
+                document.getElementById("stab-nome").value   = "";
+                document.getElementById("stab-colore").value = "#6366f1";
+            }
+            overlay.classList.add("is-open");
+            document.getElementById("stab-nome").focus();
+
+        } else {
+            editingResponsabileId = id;
+            const overlay = document.getElementById("modal-responsabile-overlay");
+            const title   = document.getElementById("modal-responsabile-title");
+            document.getElementById("resp-error").textContent = "";
+
+            if (id !== null && respCache[id]) {
+                title.textContent = "Modifica responsabile";
+                document.getElementById("resp-nome").value = respCache[id].nome;
+            } else {
+                title.textContent = "Aggiungi responsabile";
+                document.getElementById("resp-nome").value = "";
+            }
+            overlay.classList.add("is-open");
+            document.getElementById("resp-nome").focus();
+        }
+    };
+
+    window.closeModal = function (type) {
+        document.getElementById("modal-" + type + "-overlay").classList.remove("is-open");
+    };
+
+    /* Close on overlay click */
+    ["stabilimento", "responsabile"].forEach(function (type) {
+        document.getElementById("modal-" + type + "-overlay").addEventListener("click", function (e) {
+            if (e.target === this) closeModal(type);
+        });
+    });
+
+    /* Close on Escape */
+    document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") {
+            closeModal("stabilimento");
+            closeModal("responsabile");
+        }
+    });
+
+    /* ------------------------------------------------------------------ */
+    /* DOM helpers                                                          */
+    /* ------------------------------------------------------------------ */
+    function removeEmptyRow(tbodyId) {
+        const row = document.querySelector("#" + tbodyId + " .empty-row");
+        if (row) row.remove();
+    }
+
+    function maybeAddEmptyRow(tbodyId, colspan, message) {
+        const tbody = document.getElementById(tbodyId);
+        if (!tbody.querySelector("tr[data-id]")) {
+            const tr = document.createElement("tr");
+            tr.className = "empty-row";
+            tr.innerHTML = '<td colspan="' + colspan + '">' + message + "</td>";
+            tbody.appendChild(tr);
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Stabilimenti                                                         */
+    /* ------------------------------------------------------------------ */
+    window.saveStabilimento = function () {
+        const nome   = document.getElementById("stab-nome").value.trim();
+        const colore = document.getElementById("stab-colore").value.trim();
+        const errEl  = document.getElementById("stab-error");
+        errEl.textContent = "";
+
+        if (!nome) { errEl.textContent = "Il nome è obbligatorio."; return; }
+
+        const isNew = editingStabilimentoId === null;
+        const url   = isNew
+            ? "{% url 'api_stabilimenti_create' %}"
+            : "{% url 'api_stabilimenti_detail' pk=0 %}".replace("/0/", "/" + editingStabilimentoId + "/");
+        const method = isNew ? "POST" : "PUT";
+
+        fetch(url, {
+            method: method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nome: nome, colore: colore }),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data.ok) { errEl.textContent = data.error; return; }
+
+            stabCache[data.id] = { nome: data.nome, colore: data.colore };
+
+            const tbody = document.getElementById("tbody-stabilimenti");
+            removeEmptyRow("tbody-stabilimenti");
+
+            let tr = tbody.querySelector('tr[data-id="' + data.id + '"]');
+            if (!tr) {
+                tr = document.createElement("tr");
+                tr.dataset.id = data.id;
+                tbody.appendChild(tr);
+            }
+            tr.innerHTML =
+                '<td>' + escHtml(data.nome) + '</td>' +
+                '<td><span class="color-swatch" style="background:' + escHtml(data.colore) + ';"></span>' + escHtml(data.colore) + '</td>' +
+                '<td class="actions">' +
+                  '<button class="btn btn-ghost" title="Modifica" onclick="openModal(\'stabilimento\',' + data.id + ')">Modifica</button>' +
+                  '<button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete(\'stabilimento\',' + data.id + ',\'' + escJs(data.nome) + '\')">Elimina</button>' +
+                '</td>';
+
+            closeModal("stabilimento");
+        })
+        .catch(function () { errEl.textContent = "Errore di rete. Riprova."; });
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Responsabili                                                         */
+    /* ------------------------------------------------------------------ */
+    window.saveResponsabile = function () {
+        const nome  = document.getElementById("resp-nome").value.trim();
+        const errEl = document.getElementById("resp-error");
+        errEl.textContent = "";
+
+        if (!nome) { errEl.textContent = "Il nome è obbligatorio."; return; }
+
+        const isNew = editingResponsabileId === null;
+        const url   = isNew
+            ? "{% url 'api_responsabili_create' %}"
+            : "{% url 'api_responsabili_detail' pk=0 %}".replace("/0/", "/" + editingResponsabileId + "/");
+        const method = isNew ? "POST" : "PUT";
+
+        fetch(url, {
+            method: method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nome: nome }),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data.ok) { errEl.textContent = data.error; return; }
+
+            respCache[data.id] = { nome: data.nome };
+
+            const tbody = document.getElementById("tbody-responsabili");
+            removeEmptyRow("tbody-responsabili");
+
+            let tr = tbody.querySelector('tr[data-id="' + data.id + '"]');
+            if (!tr) {
+                tr = document.createElement("tr");
+                tr.dataset.id = data.id;
+                tbody.appendChild(tr);
+            }
+            tr.innerHTML =
+                '<td>' + escHtml(data.nome) + '</td>' +
+                '<td class="actions">' +
+                  '<button class="btn btn-ghost" title="Modifica" onclick="openModal(\'responsabile\',' + data.id + ')">Modifica</button>' +
+                  '<button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete(\'responsabile\',' + data.id + ',\'' + escJs(data.nome) + '\')">Elimina</button>' +
+                '</td>';
+
+            closeModal("responsabile");
+        })
+        .catch(function () { errEl.textContent = "Errore di rete. Riprova."; });
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Delete                                                               */
+    /* ------------------------------------------------------------------ */
+    window.confirmDelete = function (type, id, nome) {
+        if (!confirm('Eliminare "' + nome + '"?')) return;
+
+        const url = type === "stabilimento"
+            ? "{% url 'api_stabilimenti_detail' pk=0 %}".replace("/0/", "/" + id + "/")
+            : "{% url 'api_responsabili_detail' pk=0 %}".replace("/0/", "/" + id + "/");
+
+        fetch(url, { method: "DELETE" })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data.ok) { alert(data.error); return; }
+
+            const tbodyId = type === "stabilimento" ? "tbody-stabilimenti" : "tbody-responsabili";
+            const tbody   = document.getElementById(tbodyId);
+            const tr      = tbody.querySelector('tr[data-id="' + id + '"]');
+            if (tr) tr.remove();
+
+            if (type === "stabilimento") {
+                delete stabCache[id];
+                maybeAddEmptyRow("tbody-stabilimenti", 3, "Nessuno stabilimento configurato.");
+            } else {
+                delete respCache[id];
+                maybeAddEmptyRow("tbody-responsabili", 2, "Nessun responsabile configurato.");
+            }
+        })
+        .catch(function () { alert("Errore di rete. Riprova."); });
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Enter key submits modal                                              */
+    /* ------------------------------------------------------------------ */
+    document.getElementById("stab-nome").addEventListener("keydown", function (e) {
+        if (e.key === "Enter") saveStabilimento();
+    });
+    document.getElementById("resp-nome").addEventListener("keydown", function (e) {
+        if (e.key === "Enter") saveResponsabile();
+    });
+
+    /* ------------------------------------------------------------------ */
+    /* Escape helpers                                                        */
+    /* ------------------------------------------------------------------ */
+    function escHtml(s) {
+        return String(s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+    function escJs(s) {
+        return String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Configurazione Testa — constants from server                         */
+    /* ------------------------------------------------------------------ */
+    const CT_TESTA_MODELS = {{ all_testa_models_json|safe }};
+    const CT_GEN_MODELS   = {{ all_gen_models_json|safe }};
+
+    /* ------------------------------------------------------------------ */
+    /* Configurazione Testa — state                                         */
+    /* ------------------------------------------------------------------ */
+    let editingConfigTestaId = null;
+
+    const genState = {};
+    document.querySelectorAll("#tbody-config-testa tr[data-id]").forEach(function (tr) {
+        const cfgId = parseInt(tr.dataset.id, 10);
+        genState[cfgId] = { aggiunti: [], disponibili: [] };
+        tr.querySelectorAll(".chip--added").forEach(function (btn) {
+            genState[cfgId].aggiunti.push({
+                id: parseInt(btn.dataset.genId, 10),
+                modello: btn.dataset.modello,
+            });
+        });
+        tr.querySelectorAll(".chip--available").forEach(function (btn) {
+            genState[cfgId].disponibili.push(btn.dataset.modello);
+        });
+    });
+
+    /* ------------------------------------------------------------------ */
+    /* Chips rendering                                                      */
+    /* ------------------------------------------------------------------ */
+    function rebuildChips(cfgId) {
+        const wrap = document.getElementById("chips-" + cfgId);
+        if (!wrap) return;
+        const st = genState[cfgId];
+        let html = "";
+        (st.aggiunti || []).forEach(function (g) {
+            html +=
+                '<button class="chip chip--added"' +
+                ' data-gen-id="' + g.id + '"' +
+                ' data-modello="' + escHtml(g.modello) + '"' +
+                ' data-cfg-id="' + cfgId + '"' +
+                ' title="Clicca per rimuovere"' +
+                ' onclick="removeGeneratore(' + g.id + ',' + cfgId + ')">' +
+                escHtml(g.modello) + ' ✕</button>';
+        });
+        (st.disponibili || []).forEach(function (m) {
+            html +=
+                '<button class="chip chip--available"' +
+                ' data-modello="' + escHtml(m) + '"' +
+                ' data-cfg-id="' + cfgId + '"' +
+                ' title="Clicca per aggiungere"' +
+                ' onclick="addGeneratore(\'' + escJs(m) + '\',' + cfgId + ')">+ ' +
+                escHtml(m) + '</button>';
+        });
+        if (!st.aggiunti.length && !st.disponibili.length) {
+            html = '<span class="chips-empty">Nessun generatore nell\'inventario</span>';
+        }
+        wrap.innerHTML = html;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Generatori add / remove                                              */
+    /* ------------------------------------------------------------------ */
+    window.addGeneratore = function (modello, cfgId) {
+        const url = "{% url 'api_gen_compatibile_create' config_pk=0 %}".replace("/0/generatori/", "/" + cfgId + "/generatori/");
+        fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ modello_generatore: modello }),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data.ok) { alert(data.error); return; }
+            const st = genState[cfgId];
+            st.aggiunti.push({ id: data.id, modello: data.modello_generatore });
+            st.disponibili = st.disponibili.filter(function (m) { return m !== data.modello_generatore; });
+            rebuildChips(cfgId);
+        })
+        .catch(function () { alert("Errore di rete. Riprova."); });
+    };
+
+    window.removeGeneratore = function (genId, cfgId) {
+        const url = "{% url 'api_gen_compatibile_detail' pk=0 %}".replace("/0/", "/" + genId + "/");
+        fetch(url, { method: "DELETE" })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data.ok) { alert(data.error); return; }
+            const st = genState[cfgId];
+            const removed = st.aggiunti.find(function (g) { return g.id === genId; });
+            if (removed) {
+                st.disponibili.push(removed.modello);
+                st.disponibili.sort();
+            }
+            st.aggiunti = st.aggiunti.filter(function (g) { return g.id !== genId; });
+            rebuildChips(cfgId);
+        })
+        .catch(function () { alert("Errore di rete. Riprova."); });
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Configurazione Testa modal helpers                                   */
+    /* ------------------------------------------------------------------ */
+    function openConfigTestaModal(mode, id) {
+        const overlay   = document.getElementById("modal-config-testa-overlay");
+        const title     = document.getElementById("modal-config-testa-title");
+        const modGrp    = document.getElementById("ct-modello-group");
+        const modSel    = document.getElementById("ct-modello");
+        const modLabel  = document.getElementById("ct-modello-label");
+        const errEl     = document.getElementById("ct-error");
+
+        errEl.textContent = "";
+
+        if (mode === "add") {
+            editingConfigTestaId = null;
+            title.textContent = "Aggiungi configurazione testa";
+
+            modSel.innerHTML = '<option value="">— seleziona modello —</option>';
+            const usedModels = new Set(
+                Array.from(document.querySelectorAll("#tbody-config-testa tr[data-id]"))
+                    .map(function (tr) { return tr.dataset.modello; })
+            );
+            CT_TESTA_MODELS.forEach(function (m) {
+                if (!usedModels.has(m)) {
+                    const opt = document.createElement("option");
+                    opt.value = m;
+                    opt.textContent = m;
+                    modSel.appendChild(opt);
+                }
+            });
+            if (modSel.options.length === 1) {
+                const opt = document.createElement("option");
+                opt.value = "";
+                opt.textContent = "Nessun modello disponibile nell'inventario";
+                opt.disabled = true;
+                modSel.appendChild(opt);
+            }
+
+            modGrp.style.display = "";
+            modLabel.style.display = "none";
+            document.getElementById("ct-mandrini").value = "1";
+            document.getElementById("ct-tastatori").value = "1";
+            document.getElementById("ct-maschere").value = "1";
+            document.getElementById("ct-generatori").value = "1";
+
+        } else {
+            editingConfigTestaId = id;
+            const tr = document.querySelector('#tbody-config-testa tr[data-id="' + id + '"]');
+            const modello = tr ? tr.dataset.modello : "";
+            title.textContent = "Modifica — " + modello;
+
+            modGrp.style.display = "none";
+            modLabel.textContent = "Modello: " + modello;
+            modLabel.style.display = "block";
+
+            document.getElementById("ct-mandrini").value =
+                document.getElementById("min-mandrini-" + id).textContent.trim();
+            document.getElementById("ct-tastatori").value =
+                document.getElementById("min-tastatori-" + id).textContent.trim();
+            document.getElementById("ct-maschere").value =
+                document.getElementById("min-maschere-" + id).textContent.trim();
+            document.getElementById("ct-generatori").value =
+                document.getElementById("min-generatori-" + id).textContent.trim();
+        }
+
+        overlay.classList.add("is-open");
+        (mode === "add" ? modSel : document.getElementById("ct-mandrini")).focus();
+    }
+
+    /* Hook 'config-testa' into the shared openModal */
+    const _origOpenModal = window.openModal;
+    window.openModal = function (type, id) {
+        if (type !== "config-testa") { _origOpenModal(type, id); return; }
+        openConfigTestaModal("add", null);
+    };
+
+    window.openEditTesta = function (id) {
+        openConfigTestaModal("edit", id);
+    };
+
+    document.getElementById("modal-config-testa-overlay").addEventListener("click", function (e) {
+        if (e.target === this) closeModal("config-testa");
+    });
+    document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") closeModal("config-testa");
+    });
+
+    /* ------------------------------------------------------------------ */
+    /* Configurazione Testa save                                            */
+    /* ------------------------------------------------------------------ */
+    window.saveConfigTesta = function () {
+        const modSel    = document.getElementById("ct-modello");
+        const modello   = editingConfigTestaId === null ? modSel.value.trim() : "";
+        const mandrini  = parseInt(document.getElementById("ct-mandrini").value, 10) || 0;
+        const tastatori = parseInt(document.getElementById("ct-tastatori").value, 10) || 0;
+        const maschere  = parseInt(document.getElementById("ct-maschere").value, 10) || 0;
+        const generatori = parseInt(document.getElementById("ct-generatori").value, 10) || 0;
+        const errEl     = document.getElementById("ct-error");
+        errEl.textContent = "";
+
+        if (editingConfigTestaId === null && !modello) {
+            errEl.textContent = "Seleziona un modello testa.";
+            return;
+        }
+
+        const isNew  = editingConfigTestaId === null;
+        const url    = isNew
+            ? "{% url 'api_config_testa_create' %}"
+            : "{% url 'api_config_testa_detail' pk=0 %}".replace("/0/", "/" + editingConfigTestaId + "/");
+        const method = isNew ? "POST" : "PUT";
+        const body   = isNew
+            ? { modello_testa: modello, min_mandrini: mandrini, min_tastatori: tastatori, min_maschere: maschere, min_generatori: generatori }
+            : { min_mandrini: mandrini, min_tastatori: tastatori, min_maschere: maschere, min_generatori: generatori };
+
+        fetch(url, {
+            method: method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data.ok) { errEl.textContent = data.error; return; }
+
+            const tbody = document.getElementById("tbody-config-testa");
+            removeEmptyRow("tbody-config-testa");
+
+            if (isNew) {
+                genState[data.id] = {
+                    aggiunti: [],
+                    disponibili: CT_GEN_MODELS.slice(),
+                };
+                const tr = document.createElement("tr");
+                tr.dataset.id = data.id;
+                tr.dataset.modello = data.modello_testa;
+                tr.innerHTML =
+                    '<td style="font-weight:600;">' + escHtml(data.modello_testa) + '</td>' +
+                    '<td><div class="chips-wrap" id="chips-' + data.id + '"></div></td>' +
+                    '<td style="text-align:center;" id="min-mandrini-' + data.id + '">' + data.min_mandrini + '</td>' +
+                    '<td style="text-align:center;" id="min-tastatori-' + data.id + '">' + data.min_tastatori + '</td>' +
+                    '<td style="text-align:center;" id="min-maschere-' + data.id + '">' + data.min_maschere + '</td>' +
+                    '<td style="text-align:center;" id="min-generatori-' + data.id + '">' + data.min_generatori + '</td>' +
+                    '<td class="actions">' +
+                      '<button class="btn btn-ghost" onclick="openEditTesta(' + data.id + ')">Modifica</button>' +
+                      '<button class="btn btn-danger-ghost" onclick="deleteConfigTesta(' + data.id + ',\'' + escJs(data.modello_testa) + '\')">Elimina</button>' +
+                    '</td>';
+                tbody.appendChild(tr);
+                rebuildChips(data.id);
+            } else {
+                document.getElementById("min-mandrini-" + data.id).textContent = data.min_mandrini;
+                document.getElementById("min-tastatori-" + data.id).textContent = data.min_tastatori;
+                document.getElementById("min-maschere-" + data.id).textContent = data.min_maschere;
+                document.getElementById("min-generatori-" + data.id).textContent = data.min_generatori;
+            }
+
+            closeModal("config-testa");
+        })
+        .catch(function () { errEl.textContent = "Errore di rete. Riprova."; });
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Configurazione Testa delete                                          */
+    /* ------------------------------------------------------------------ */
+    window.deleteConfigTesta = function (id, modello) {
+        if (!confirm('Eliminare la configurazione "' + modello + '"?')) return;
+        const url = "{% url 'api_config_testa_detail' pk=0 %}".replace("/0/", "/" + id + "/");
+        fetch(url, { method: "DELETE" })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data.ok) { alert(data.error); return; }
+            const tr = document.querySelector('#tbody-config-testa tr[data-id="' + id + '"]');
+            if (tr) tr.remove();
+            delete genState[id];
+            maybeAddEmptyRow("tbody-config-testa", 6, "Nessuna configurazione definita.");
+        })
+        .catch(function () { alert("Errore di rete. Riprova."); });
+    };
+
+    document.getElementById("ct-mandrini").addEventListener("keydown", function (e) {
+        if (e.key === "Enter") saveConfigTesta();
+    });
+    document.getElementById("ct-tastatori").addEventListener("keydown", function (e) {
+        if (e.key === "Enter") saveConfigTesta();
+    });
+    document.getElementById("ct-maschere").addEventListener("keydown", function (e) {
+        if (e.key === "Enter") saveConfigTesta();
+    });
+    document.getElementById("ct-generatori").addEventListener("keydown", function (e) {
+        if (e.key === "Enter") saveConfigTesta();
+    });
+
+})();
+</script>
+{% endblock %}

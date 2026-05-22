@@ -1,0 +1,365 @@
+"""Write-back service: apply MppSyncQueue entries to the open MS Project COM session.
+
+Called by :mod:`ui.services.project_session` when the last authenticated user
+logs out.  All pending queue entries are processed in creation order, then
+deleted.  Any individual entry that fails is logged but does not prevent the
+remaining entries from being processed.
+
+Job-related operations (``add_job``, ``update_job``, ``delete_job``) are skipped
+here because the Excel writeback (Phase D) performs a full overwrite of the jobs
+sheet directly from the current :class:`~ui.models.Job` table, making per-change
+queuing unnecessary.
+"""
+
+import json
+import logging
+from datetime import date
+
+from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
+
+logger = logging.getLogger(__name__)
+
+_JOB_OPS = frozenset({"add_job", "update_job", "delete_job"})
+
+
+def write_pending_changes(project_wrapper) -> None:
+    """Apply all pending :class:`~ui.models.MppSyncQueue` entries to the project.
+
+    Processes queue entries in ``created_at`` order (oldest first).  Each
+    entry is deleted from the database immediately after being successfully
+    applied.  Entries that raise exceptions are logged and skipped so the
+    remaining queue can still be flushed.
+
+    After a task is added, the corresponding :class:`~ui.models.Attivita`
+    record is marked ``synced_to_mpp=True`` to remove it from the live merge
+    on the pianificazione page.
+
+    Job operations (``add_job``, ``update_job``, ``delete_job``) are consumed
+    here without applying changes to the ``.mpp`` file; the Excel file is
+    updated separately via the full-overwrite export in Phase D.
+
+    Args:
+        project_wrapper: An open :class:`~src.data.project.Project` instance
+            that wraps the COM session.  Must not be closed before this
+            function returns.
+    """
+    from ui.models import MppSyncQueue
+
+    entries = list(MppSyncQueue.objects.order_by("created_at"))
+    if not entries:
+        logger.info("MppSyncQueue vuota, nessuna modifica da scrivere.")
+        return
+
+    logger.info("Scrittura di %d voci su .mpp...", len(entries))
+    total = len(entries)
+    with logging_redirect_tqdm():
+        with tqdm(
+            entries, desc="Scrittura .mpp", unit="op", ncols=72, leave=True
+        ) as pbar:
+            for entry in pbar:
+                try:
+                    payload = json.loads(entry.payload_json)
+                    op = entry.operation
+                    pbar.set_postfix_str(op, refresh=False)
+                    if op == "add_task":
+                        _apply_add_task(project_wrapper, payload)
+                    elif op == "update_task":
+                        _apply_update_task(project_wrapper, payload)
+                    elif op == "delete_task":
+                        _apply_delete_task(project_wrapper, payload)
+                    elif op == "add_resource":
+                        _apply_add_resource(project_wrapper, payload)
+                    elif op == "update_resource":
+                        _apply_update_resource(project_wrapper, payload)
+                    elif op == "delete_resource":
+                        _apply_delete_resource(project_wrapper, payload)
+                    elif op in _JOB_OPS:
+                        pass  # consumato silenziosamente, xlsx usa full-overwrite
+                    else:
+                        logger.warning("Operazione sconosciuta nella coda: %s", op)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(
+                        "Errore applicando MppSyncQueue entry %s (%s): %s",
+                        entry.pk,
+                        entry.operation,
+                        exc,
+                    )
+                finally:
+                    entry.delete()
+
+    logger.info("Scrittura .mpp completata (%d voci).", total)
+
+
+# ---------------------------------------------------------------------------
+# Name helpers
+# ---------------------------------------------------------------------------
+
+
+def _task_mpp_name(commessa: str, item: int, activity: str) -> str:
+    """Build the canonical MS Project task name using underscore separators.
+
+    The canonical format is ``{commessa}_{item:02d}_{activity}`` when an
+    activity is present, or ``{commessa}_{item:02d}`` otherwise.
+
+    Args:
+        commessa: The job identifier (e.g. ``"25033"``).
+        item: The numeric item index.
+        activity: The activity label, or an empty string.
+
+    Returns:
+        str: The canonical task name.
+    """
+    if activity:
+        return f"{commessa}_{int(item):02d}_{activity}"
+    return f"{commessa}_{int(item):02d}"
+
+
+def _find_mpp_task(project_wrapper, commessa: str, item: int, activity: str):
+    """Locate a COM task object, trying canonical (``_``) and legacy (``-``) formats.
+
+    MS Project files created before the underscore-separator convention used
+    hyphens.  This function tries the current canonical format first, then
+    falls back to the legacy format so that old files remain writable.
+
+    Args:
+        project_wrapper: Open :class:`~src.data.project.Project` instance.
+        commessa: The job identifier.
+        item: The numeric item index.
+        activity: The activity label, or an empty string.
+
+    Returns:
+        tuple[object, str]: The COM task object and the name that matched.
+
+    Raises:
+        ValueError: If the task is not found under either name format.
+    """
+    name_new = _task_mpp_name(commessa, item, activity)
+    com_task = project_wrapper._find_task_or_none(name_new)
+    if com_task is not None:
+        return com_task, name_new
+
+    sep_legacy = "-"
+    name_legacy = (
+        f"{commessa}{sep_legacy}{int(item):02d}{sep_legacy}{activity}"
+        if activity
+        else f"{commessa}{sep_legacy}{int(item):02d}"
+    )
+    com_task = project_wrapper._find_task_or_none(name_legacy)
+    if com_task is not None:
+        return com_task, name_legacy
+
+    raise ValueError(
+        f"Task '{name_new}' (o '{name_legacy}') non trovato nel file .mpp."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task apply handlers
+# ---------------------------------------------------------------------------
+
+
+def _apply_add_task(project_wrapper, payload: dict) -> None:
+    """Add a new task to the MS Project file from an ``add_task`` queue entry.
+
+    Args:
+        project_wrapper: Open Project COM wrapper.
+        payload: Decoded JSON dict with task fields.
+    """
+    import importlib
+
+    src_models = importlib.import_module("src.data.models")
+    Task = src_models.Task
+
+    commessa = payload["commessa"]
+    item = payload["item"]
+    activity = payload.get("activity", "")
+    name = _task_mpp_name(commessa, item, activity)
+
+    start = (
+        date.fromisoformat(payload["data_inizio"])
+        if payload.get("data_inizio")
+        else None
+    )
+    end = date.fromisoformat(payload["data_fine"]) if payload.get("data_fine") else None
+
+    task = Task(
+        name=name,
+        start=start,
+        end=end,
+        plant=payload.get("stabilimento") or None,
+        owner=payload.get("responsabile") or None,
+        resources=payload.get("resources") or [],
+        predecessors=None,
+        actual_start=None,
+        actual_end=None,
+    )
+    project_wrapper.add_task(task)
+    logger.debug("Task aggiunto al .mpp: %s", name)
+
+    attivita_id = payload.get("attivita_id")
+    if attivita_id:
+        from ui.models import Attivita
+
+        Attivita.objects.filter(pk=attivita_id).update(synced_to_mpp=True)
+
+
+def _apply_update_task(project_wrapper, payload: dict) -> None:
+    """Update an existing task in the MS Project file from an ``update_task`` queue entry.
+
+    Finds the task by trying the canonical ``_``-separated name first, then the
+    legacy ``-``-separated name.  If the task was stored under the legacy format
+    it is also renamed to the canonical format as a side effect.
+
+    Args:
+        project_wrapper: Open Project COM wrapper.
+        payload: Decoded JSON dict with keys ``commessa``, ``item``, ``activity``
+            and optional ``start``, ``finish``, ``actual_start``, ``actual_finish``,
+            ``plant``, ``responsible``.
+    """
+    commessa = payload["commessa"]
+    item = payload["item"]
+    activity = payload.get("activity", "")
+
+    start = date.fromisoformat(payload["start"]) if payload.get("start") else None
+    finish = date.fromisoformat(payload["finish"]) if payload.get("finish") else None
+    actual_start = (
+        date.fromisoformat(payload["actual_start"])
+        if payload.get("actual_start")
+        else None
+    )
+    actual_finish = (
+        date.fromisoformat(payload["actual_finish"])
+        if payload.get("actual_finish")
+        else None
+    )
+    plant = payload.get("plant")
+    owner = payload.get("responsible")
+
+    _, current_name = _find_mpp_task(project_wrapper, commessa, item, activity)
+    canonical_name = _task_mpp_name(commessa, item, activity)
+    rename_to = canonical_name if current_name != canonical_name else None
+
+    project_wrapper.update_task(
+        current_name,
+        new_name=rename_to,
+        start=start,
+        end=finish,
+        actual_start=actual_start,
+        actual_end=actual_finish,
+        plant=plant,
+        owner=owner,
+    )
+    logger.debug("Task aggiornato nel .mpp: %s → %s", current_name, canonical_name)
+
+
+def _apply_delete_task(project_wrapper, payload: dict) -> None:
+    """Delete an existing task from the MS Project file from a ``delete_task`` queue entry.
+
+    Finds the task by trying the canonical ``_``-separated name first, then the
+    legacy ``-``-separated name.
+
+    Args:
+        project_wrapper: Open Project COM wrapper.
+        payload: Decoded JSON dict with keys ``commessa``, ``item``, ``activity``.
+    """
+    commessa = payload["commessa"]
+    item = payload["item"]
+    activity = payload.get("activity", "")
+
+    _, current_name = _find_mpp_task(project_wrapper, commessa, item, activity)
+    project_wrapper.delete_task(current_name)
+    logger.debug("Task eliminato dal .mpp: %s", current_name)
+
+
+def _apply_add_resource(project_wrapper, payload: dict) -> None:
+    """Add a new resource to the MS Project file from an ``add_resource`` queue entry.
+
+    Skips the entry if the resource is already present in the ``.mpp`` file
+    (idempotent, prevents duplicates when the same uid is enqueued more than once).
+
+    Legacy bulk-import marker entries (``{"bulk_import": True, ...}``) are consumed
+    without writing anything — they remain only for backward compatibility with
+    queue entries created before individual enqueuing was introduced.
+
+    Args:
+        project_wrapper: Open Project COM wrapper.
+        payload: Decoded JSON dict with resource fields, or a bulk-import marker.
+    """
+    if payload.get("bulk_import"):
+        logger.info(
+            "Bulk-import marker (%d risorse) consumato — nessuna azione richiesta.",
+            payload.get("count", 0),
+        )
+        return
+
+    import importlib
+
+    src_models = importlib.import_module("src.data.models")
+    Resource = src_models.Resource
+
+    uid = payload["uid"]
+
+    if project_wrapper._find_resource_or_none(uid) is not None:
+        logger.debug("Risorsa '%s' già presente nel .mpp, skip.", uid)
+        return
+
+    resource = Resource(
+        name=uid,
+        category=payload.get("table") or "",
+        measure=payload.get("measure") or "",
+        plant=payload.get("plant") or None,
+        notes=payload.get("notes") or None,
+    )
+    project_wrapper.add_resource(resource)
+
+
+def _apply_update_resource(project_wrapper, payload: dict) -> None:
+    """Update an existing resource in the MS Project file from an ``update_resource`` queue entry.
+
+    Applies a partial update: only fields present in the payload overwrite the
+    current values in the ``.mpp`` file.  If the ``uid`` has changed (rename),
+    ``new_name`` is passed to the COM wrapper so the resource name is updated as well.
+
+    If the resource is not found in the ``.mpp`` (e.g. it was never written there),
+    the entry is skipped with a warning rather than raising an exception.
+
+    Args:
+        project_wrapper: Open Project COM wrapper.
+        payload: Decoded JSON dict with keys ``original_uid``, ``uid``, ``table``,
+            ``measure``, ``plant``, ``notes``.
+    """
+    original_uid = payload["original_uid"]
+    new_uid = payload.get("uid") or original_uid
+    rename_to = new_uid if new_uid != original_uid else None
+
+    try:
+        project_wrapper.update_resource(
+            original_uid,
+            new_name=rename_to,
+            measure=payload.get("measure"),
+            plant=payload.get("plant"),
+            notes=payload.get("notes"),
+            category=payload.get("table"),
+        )
+        logger.debug("Risorsa aggiornata nel .mpp: %s → %s", original_uid, new_uid)
+    except ValueError:
+        logger.warning(
+            "Risorsa '%s' non trovata nel .mpp per aggiornamento, skip.",
+            original_uid,
+        )
+
+
+def _apply_delete_resource(project_wrapper, payload: dict) -> None:
+    """Delete a resource from the MS Project file from a ``delete_resource`` queue entry.
+
+    Args:
+        project_wrapper: Open Project COM wrapper.
+        payload: Decoded JSON dict with ``uid`` key.
+    """
+    uid = payload["uid"]
+    try:
+        project_wrapper.delete_resource(uid)
+        logger.debug("Risorsa eliminata dal .mpp: %s", uid)
+    except ValueError:
+        logger.warning("Risorsa '%s' non trovata nel .mpp, skip.", uid)

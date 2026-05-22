@@ -1,0 +1,1796 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Pianificazione{% endblock %}
+
+{% block content %}
+<main style="padding: 2rem 1rem;">
+  <div style="max-width: 1600px; margin: 0 auto;">
+
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+      <div id="view-toggle" class="toggle-group" role="group">
+        <button id="btn-attivita" onclick="showView('attivita')" class="toggle-btn active">Attività</button>
+        <button id="btn-commesse" onclick="showView('commesse')" class="toggle-btn">Commesse</button>
+      </div>
+
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <input id="pian-search" class="tbl-search-input" style="width:14rem;" placeholder="Cerca…" oninput="filterActiveTable()">
+        <button onclick="openAddModal()" class="btn btn-primary">
+          Aggiungi
+        </button>
+      </div>
+    </div>
+
+    <div id="table-attivita">
+      {% if tasks %}
+      <div class="data-table-wrap">
+        <table id="tbl-attivita" class="data-table">
+          <thead>
+            <tr>
+              <th>Commessa</th>
+              <th>Item</th>
+              <th>Attività</th>
+              <th>Inizio</th>
+              <th>Fine</th>
+              <th>Inizio eff.</th>
+              <th>Fine eff.</th>
+              <th>Stabilimento</th>
+              <th>Responsabile</th>
+              <th>Risorse</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for task in tasks %}
+            <tr data-source="{{ task.source }}" data-orm-id="{{ task.orm_id|default:'' }}"
+                data-warning-count="{{ task.warning_count|default:0 }}"
+                data-note-count="{{ task.note_count|default:0 }}"
+                data-commessa="{{ task.commessa }}"
+                data-item="{{ task.item|default:'' }}"
+                data-activity="{{ task.activity|default:'' }}"
+                data-start="{{ task.start|default:'' }}"
+                data-finish="{{ task.finish|default:'' }}"
+                data-actual-start="{{ task.actual_start|default:'' }}"
+                data-actual-finish="{{ task.actual_finish|default:'' }}"
+                data-plant="{{ task.plant|default:'' }}"
+                data-responsible="{{ task.responsible|default:'' }}"
+                data-resources="{{ task.resources|default:'' }}">
+              <td data-col="commessa" class="td-primary">{{ task.commessa }}{% if task.warning_count and task.warning_count > 0 %}<span class="warn-badge" title="{{ task.warning_count }} problema/i aperto/i">&#9888; {{ task.warning_count }}</span>{% endif %}</td>
+              <td data-col="item" class="td-muted">{{ task.item|default:"—" }}</td>
+              <td data-col="activity">{{ task.activity|default:"—" }}</td>
+              <td data-col="start" class="td-nowrap">{{ task.start|default:"—" }}</td>
+              <td data-col="finish" class="td-nowrap">{{ task.finish|default:"—" }}</td>
+              <td data-col="actual-start" class="td-nowrap">{{ task.actual_start|default:"—" }}</td>
+              <td data-col="actual-finish" class="td-nowrap">{{ task.actual_finish|default:"—" }}</td>
+              <td data-col="plant" class="td-muted stab-plant-cell" data-stab="{{ task.plant|default:'' }}">{{ task.plant|default:"—" }}</td>
+              <td data-col="responsible" class="td-muted">{{ task.responsible|default:"—" }}</td>
+              <td data-col="resources" class="td-muted">{{ task.resources|default:"—" }}</td>
+              <td data-col="note" class="td-muted">{% if task.orm_id %}{% if task.warning_count and task.warning_count > 0 %}<button class="btn-risolvi" onclick="event.stopPropagation();openNotesModal('{{ task.orm_id }}')">Risolvi</button>{% elif task.note_count and task.note_count > 0 %}<button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('{{ task.orm_id }}')">Note</button>{% else %}—{% endif %}{% else %}—{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p style="text-align: center; color: var(--text-subtle); margin-top: 4rem; font-size: 0.9rem;">
+        Nessuna attività disponibile. Attendi il completamento del caricamento del database.
+      </p>
+      {% endif %}
+    </div>
+
+    <div id="table-commesse" style="display: none;">
+      {% if jobs %}
+      <div class="data-table-wrap">
+        <table id="tbl-commesse" class="data-table">
+          <thead>
+            <tr>
+              <th>Commessa</th>
+              <th class="td-right">Costo totale (€)</th>
+              <th class="td-right">Penale (%)</th>
+              <th>Consegna</th>
+              <th class="td-right">N. item</th>
+              <th class="td-right">N. attività</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for job in jobs %}
+            <tr data-commessa="{{ job.commessa }}"
+                data-total-cost="{{ job.total_cost|default:'' }}"
+                data-penalty="{{ job.penalty|default:'' }}"
+                data-delivery-date="{{ job.delivery_date|default:'' }}"
+                data-n-items="{{ job.n_items }}"
+                data-n-activities="{{ job.n_activities }}">
+              <td data-col="commessa" class="td-primary">{{ job.commessa }}</td>
+              <td data-col="total-cost" class="td-right">{{ job.total_cost|default:"—" }}</td>
+              <td data-col="penalty" class="td-right">{{ job.penalty|default:"—" }}</td>
+              <td data-col="delivery-date" class="td-nowrap">{{ job.delivery_date|default:"—" }}</td>
+              <td data-col="n-items" class="td-right td-muted">{{ job.n_items }}</td>
+              <td data-col="n-activities" class="td-right td-muted">{{ job.n_activities }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p style="text-align: center; color: var(--text-subtle); margin-top: 4rem; font-size: 0.9rem;">
+        Nessuna commessa disponibile. Attendi il completamento del caricamento del database.
+      </p>
+      {% endif %}
+    </div>
+
+  </div>
+</main>
+
+<!-- Stili wizard ─────────────────────────────────────────────────────────── -->
+
+<!-- Modal overlay -->
+<div id="add-modal-overlay" onclick="closeAddModal()"></div>
+
+<!-- Modal container -->
+<div id="add-modal" style="display:none;">
+
+  <!-- Sticky header: title row + step indicator -->
+  <div class="wiz-header">
+    <div class="wiz-header-top">
+      <h2 id="wiz-title">Carica WPS</h2>
+      <button onclick="closeAddModal()" class="btn-icon" aria-label="Chiudi">&#x2715;</button>
+    </div>
+
+    <!-- Step indicator dots -->
+    <div class="wiz-steps-row">
+      <div class="sdot active" id="sdot-1">1</div>
+      <div class="sline" id="sline-1"></div>
+      <div class="sdot" id="sdot-2">2</div>
+      <div class="sline" id="sline-2"></div>
+      <div class="sdot" id="sdot-3">3</div>
+      <div class="sline" id="sline-3"></div>
+      <div class="sdot" id="sdot-4">4</div>
+      <div class="sline" id="sline-4"></div>
+      <div class="sdot" id="sdot-5">5</div>
+    </div>
+    <!-- Step labels -->
+    <div class="wiz-labels-row">
+      <span class="wlabel active" id="slbl-1">WPS</span>
+      <span class="wiz-label-gap"></span>
+      <span class="wlabel" id="slbl-2">Info</span>
+      <span class="wiz-label-gap"></span>
+      <span class="wlabel" id="slbl-3">Date</span>
+      <span class="wiz-label-gap"></span>
+      <span class="wlabel" id="slbl-4">Risorse</span>
+      <span class="wiz-label-gap"></span>
+      <span class="wlabel" id="slbl-5">Riepilogo</span>
+    </div>
+  </div>
+
+  <!-- Scrollable body -->
+  <div class="wiz-body">
+
+  <!-- ── STEP 1: Carica WPS ────────────────────────────────────────────── -->
+  <div id="wiz-step-1">
+    <p class="wiz-subtitle">Carica il file WPS (PDF) per auto-compilare i dati tramite analisi Gemini.</p>
+
+    <div id="s1-drop-zone">
+      <label id="s1-wps-label" for="s1-file-input" class="drop-zone"
+        ondragover="event.preventDefault();this.classList.add('is-drag');"
+        ondragleave="this.classList.remove('is-drag');"
+        ondrop="s1HandleDrop(event);">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <span class="drop-zone-label">Trascina il PDF oppure <span class="drop-zone-link">sfoglia</span></span>
+        <span id="s1-fname" class="drop-zone-fname"></span>
+        <span class="drop-zone-hint">Formato: <code>Modello_Commessa[_Item][_Attività].pdf</code></span>
+      </label>
+      <input id="s1-file-input" type="file" accept=".pdf" style="display:none;" onchange="s1HandleSelect(this);">
+    </div>
+
+    <div id="s1-spinner" style="display:none;" class="wiz-spinner-wrap">
+      <div class="spinner"></div>
+      <p class="wiz-subtitle" style="margin:.75rem 0 0;">Analisi Gemini in corso…</p>
+    </div>
+
+    <!-- Data panel — shown after WPS analysis or manual entry -->
+    <div id="s1-data-panel" style="display:none;">
+      <div id="s1-autofill-notice" style="display:none;" class="s1-autofill-notice">
+        <span>✦</span> Dati compilati automaticamente dalla WPS — verifica e modifica se necessario
+      </div>
+      <!-- Editable fields -->
+      <div class="wiz-grid-2" style="margin-top:.75rem;">
+        <div class="wiz-field">
+          <label>Modello testa</label>
+          <input id="s1-testa" type="text" placeholder="es. HT200">
+        </div>
+        <div class="wiz-field">
+          <label>Commessa <span class="req">*</span></label>
+          <input id="s1-commessa" type="text" placeholder="es. AB123" oninput="_s1CommessaChange(this.value)">
+        </div>
+        <div class="wiz-field">
+          <label>Item</label>
+          <input id="s1-item" type="number" min="1" placeholder="1" value="1">
+        </div>
+        <div class="wiz-field">
+          <label>Attività <span class="opt">(opz.)</span></label>
+          <input id="s1-attivita" type="text" placeholder="es. Qualifica">
+        </div>
+      </div>
+      <!-- Misure bore -->
+      <div class="wiz-meas-section">
+        <div class="wiz-meas-title">Misure (mm)</div>
+        <div class="wiz-grid-4">
+          <div class="wiz-field">
+            <label>Ø min</label>
+            <input id="s1-bore-min" type="number" step="0.001" placeholder="—">
+          </div>
+          <div class="wiz-field">
+            <label>Ø puntuale</label>
+            <input id="s1-bore-mid" type="number" step="0.001" placeholder="—">
+          </div>
+          <div class="wiz-field">
+            <label>Ø max</label>
+            <input id="s1-bore-max" type="number" step="0.001" placeholder="—">
+          </div>
+          <div class="wiz-field">
+            <label>Passo</label>
+            <input id="s1-passo" type="number" step="0.001" placeholder="—">
+          </div>
+        </div>
+      </div>
+      <!-- Panel commessa: appare se la commessa non è in archivio -->
+      <div id="s1-commessa-panel" style="display:none;"></div>
+    </div>
+
+    <div id="s1-error" class="wiz-error" style="display:none;"></div>
+    <div class="wiz-footer">
+      <button class="wiz-btn-back" onclick="step1Skip()">Inserimento manuale</button>
+      <button id="s1-next-btn" class="wiz-btn-next" style="display:none;" onclick="step1Next()">Avanti</button>
+    </div>
+  </div>
+
+  <!-- ── STEP 2: Info attività ─────────────────────────────────────────── -->
+  <div id="wiz-step-2" style="display:none;">
+    <p class="wiz-subtitle">Inserisci le informazioni dell'attività.</p>
+    <div class="wiz-grid-2">
+
+      <div class="wiz-field">
+        <label>Stabilimento <span class="req">*</span></label>
+        <select id="s3-stabilimento">
+          <option value="">Seleziona</option>
+          {% for s in stabilimenti %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+        </select>
+      </div>
+
+      <div class="wiz-field">
+        <label>Responsabile <span class="req">*</span></label>
+        <select id="s3-responsabile">
+          <option value="">Seleziona</option>
+          {% for r in responsabili %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+        </select>
+      </div>
+
+    </div>
+    <div id="s3-error" class="wiz-error" style="display:none;"></div>
+    <div class="wiz-footer">
+      <button class="wiz-btn-back" onclick="wizGoTo(1)">Indietro</button>
+      <button class="wiz-btn-next" onclick="step3Next()">Avanti</button>
+    </div>
+  </div>
+
+  <!-- ── STEP 3: Pianificazione / Date ─────────────────────────────────── -->
+  <div id="wiz-step-3" style="display:none;">
+    <div class="s4-cal-wrap">
+      <div class="s4-cal-nav">
+        <button type="button" class="s4-nav-btn" onclick="s4Prev()">&#8249;</button>
+        <span class="s4-period" id="s4-period">—</span>
+        <button type="button" class="s4-nav-btn" onclick="s4Next()">&#8250;</button>
+      </div>
+      <div class="s4-months-grid" id="s4-months"></div>
+      <div class="s4-range-label" id="s4-range-lbl">Clicca un giorno per impostare l'inizio del periodo</div>
+    </div>
+
+    <div id="s4-error" class="wiz-error" style="display:none;margin-top:.75rem;"></div>
+    <div class="wiz-footer">
+      <button class="wiz-btn-back" onclick="wizGoTo(2)">Indietro</button>
+      <button class="wiz-btn-next" onclick="step4Next()">Avanti</button>
+    </div>
+  </div>
+
+  <!-- ── STEP 4: Risorse ───────────────────────────────────────────────── -->
+  <div id="wiz-step-4" style="display:none;">
+    <p class="wiz-subtitle">Seleziona le risorse da assegnare.</p>
+
+    <!-- Recap misure + modello testa (populated by JS) -->
+    <div id="s5-recap" class="s5-recap-banner" style="display:none;"></div>
+
+    <div id="s5-loader" class="wiz-spinner-wrap">
+      <div class="spinner"></div>
+      <p class="wiz-subtitle" style="margin:.5rem 0 0;">Caricamento risorse disponibili…</p>
+    </div>
+
+    <div id="s5-content" style="display:none;">
+      <div class="rs-card">
+
+        <div class="rs-row">
+          <div class="rs-row-label"><span class="rs-row-name">Testa</span></div>
+          <div class="rs-row-body">
+            <div class="ms-wrap" id="wrap-teste">
+              <button type="button" class="ms-trigger" onclick="toggleMs('wrap-teste')">
+                <span class="ms-trigger-text" id="lbl-teste">Nessuna selezionata</span>
+                <span class="ms-arrow">▼</span>
+              </button>
+              <div class="ms-dropdown">
+                <div class="ms-search-wrap">
+                  <input type="text" class="ms-search" placeholder="Cerca testa…" oninput="filterMs('wrap-teste',this.value)">
+                </div>
+                <div id="items-teste"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rs-row">
+          <div class="rs-row-label"><span class="rs-row-name">Mandrini</span></div>
+          <div class="rs-row-body">
+            <div class="ms-wrap" id="wrap-mandrini">
+              <button type="button" class="ms-trigger" onclick="toggleMs('wrap-mandrini')">
+                <span class="ms-trigger-text" id="lbl-mandrini">Nessuno selezionato</span>
+                <span class="ms-arrow">▼</span>
+              </button>
+              <div class="ms-dropdown">
+                <div class="ms-search-wrap">
+                  <input type="text" class="ms-search" placeholder="Cerca mandrino…" oninput="filterMs('wrap-mandrini',this.value)">
+                </div>
+                <div id="items-mandrini"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rs-row">
+          <div class="rs-row-label"><span class="rs-row-name">Tastatori</span></div>
+          <div class="rs-row-body">
+            <div class="ms-wrap" id="wrap-tastatori">
+              <button type="button" class="ms-trigger" onclick="toggleMs('wrap-tastatori')">
+                <span class="ms-trigger-text" id="lbl-tastatori">Nessuno selezionato</span>
+                <span class="ms-arrow">▼</span>
+              </button>
+              <div class="ms-dropdown">
+                <div class="ms-search-wrap">
+                  <input type="text" class="ms-search" placeholder="Cerca tastatore…" oninput="filterMs('wrap-tastatori',this.value)">
+                </div>
+                <div id="items-tastatori"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rs-row">
+          <div class="rs-row-label"><span class="rs-row-name">Maschere</span></div>
+          <div class="rs-row-body">
+            <div class="ms-wrap" id="wrap-maschere">
+              <button type="button" class="ms-trigger" onclick="toggleMs('wrap-maschere')">
+                <span class="ms-trigger-text" id="lbl-maschere">Nessuna selezionata</span>
+                <span class="ms-arrow">▼</span>
+              </button>
+              <div class="ms-dropdown">
+                <div class="ms-search-wrap">
+                  <input type="text" class="ms-search" placeholder="Cerca maschera…" oninput="filterMs('wrap-maschere',this.value)">
+                </div>
+                <div id="items-maschere"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rs-row">
+          <div class="rs-row-label"><span class="rs-row-name">Generatori</span></div>
+          <div class="rs-row-body">
+            <div class="ms-wrap" id="wrap-generatori">
+              <button type="button" class="ms-trigger" onclick="toggleMs('wrap-generatori')">
+                <span class="ms-trigger-text" id="lbl-generatori">Nessuno selezionato</span>
+                <span class="ms-arrow">▼</span>
+              </button>
+              <div class="ms-dropdown">
+                <div class="ms-search-wrap">
+                  <input type="text" class="ms-search" placeholder="Cerca generatore…" oninput="filterMs('wrap-generatori',this.value)">
+                </div>
+                <div id="items-generatori"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div id="s5-error" class="wiz-error" style="display:none;margin-top:.75rem;"></div>
+    <div class="wiz-footer">
+      <button class="wiz-btn-back" onclick="wizGoTo(3)">Indietro</button>
+      <button id="s5-next-btn" class="wiz-btn-next" onclick="step5Next()">Avanti</button>
+    </div>
+  </div>
+
+  <!-- ── STEP 5: Riepilogo ──────────────────────────────────────────── -->
+  <div id="wiz-step-5" style="display:none;">
+    <p class="wiz-subtitle">Verifica i dettagli e conferma l'aggiunta.</p>
+
+    <div id="s6-recap-grid" class="s6-recap-grid"></div>
+
+    <div id="s6-problems-wrap" style="display:none; margin-top:1.25rem;">
+      <div class="s6-warn-header">
+        <span class="s6-warn-icon">&#9888;</span>
+        <span class="s6-warn-title">Sono presenti i seguenti problemi — vuoi procedere comunque?</span>
+      </div>
+      <ul id="s6-problems-list" class="s6-problems-list"></ul>
+    </div>
+
+    <div id="s6-ok-notice" style="display:none;" class="s6-ok-notice">
+      &#10003; Nessun problema rilevato.
+    </div>
+
+    <div id="s6-error" class="wiz-error" style="display:none;margin-top:.75rem;"></div>
+    <div class="wiz-footer">
+      <button class="wiz-btn-back" onclick="wizGoTo(4)">Indietro</button>
+      <button id="s6-save-btn" class="wiz-btn-next" onclick="step6Save()">Salva</button>
+    </div>
+  </div>
+  </div><!-- /wiz-body -->
+
+</div><!-- /add-modal -->
+
+<!-- Success toast -->
+<div id="wiz-toast" style="display:none;"></div>
+
+<!-- Notes modal — read-only view of all problems/notes for an activity -->
+<div id="notes-modal-overlay" onclick="_notesOverlayClick(event)"
+     style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:2500; align-items:center; justify-content:center;">
+  <div class="notes-modal-inner">
+    <div class="notes-modal-header">
+      <h3 class="notes-modal-title" id="notes-modal-title">Note attività</h3>
+      <button class="btn-icon" onclick="closeNotesModal()" aria-label="Chiudi">&#x2715;</button>
+    </div>
+    <div class="notes-modal-body" id="notes-modal-body"></div>
+    <div class="notes-modal-footer">
+      <button class="btn btn-ghost" onclick="closeNotesModal()">Chiudi</button>
+    </div>
+  </div>
+</div>
+
+<!-- Risolvi-problema mini-modal -->
+<div id="risolvi-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:3000; align-items:center; justify-content:center;">
+  <div id="risolvi-inner" style="background:var(--surface); border:1px solid var(--border); border-radius:.75rem; padding:1.5rem; width:min(460px,90vw); display:flex; flex-direction:column; gap:1rem;">
+    <h3 style="margin:0; font-size:1rem; font-weight:600;">Risolvi problema</h3>
+    <p id="risolvi-desc" style="margin:0; font-size:.85rem; color:var(--text-muted);"></p>
+    <div class="wiz-field">
+      <label>Note di risoluzione <span class="opt">(opz.)</span></label>
+      <textarea id="risolvi-notes" rows="3" style="width:100%; resize:vertical;" placeholder="Descrivi come hai risolto il problema…"></textarea>
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:.5rem;">
+      <button class="btn btn-ghost" onclick="closeRisolviModal()">Annulla</button>
+      <button id="risolvi-confirm-btn" class="btn btn-primary" onclick="confirmRisolvi()">Conferma</button>
+    </div>
+  </div>
+</div>
+
+<!-- Detail / Edit modal -->
+<div class="det-overlay" id="det-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="det-title">
+  <div class="det-modal">
+    <div class="det-header">
+      <h2 id="det-title"></h2>
+      <button class="btn-icon" onclick="closeDetailModal()" aria-label="Chiudi">&#x2715;</button>
+    </div>
+    <div class="det-body-wrap">
+      <div id="det-body" class="det-grid"></div>
+      <div id="det-error" class="det-error" style="display:none;"></div>
+    </div>
+    <div class="det-footer">
+      <div id="det-view-btns">
+        <button class="btn btn-danger-ghost" onclick="deleteEntity()">Elimina</button>
+        <button class="btn btn-primary" onclick="enterEditMode()">Modifica</button>
+      </div>
+      <div id="det-edit-btns" style="display:none; gap:0.5rem;">
+        <button class="btn btn-ghost" onclick="cancelEdit()">Annulla</button>
+        <button id="det-save-btn" class="btn btn-primary" onclick="saveEdit()">Salva</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Wizard state ──────────────────────────────────────────────────────────────
+const WIZ = {
+  stabilimento:'', responsabile:'', costo:'', penale:'',
+  tmpPath:'', wpsName:'',
+  parsed:{}, gemini:{}, bore:{},
+  modello_testa:'', commessa:'', item:1, attivita:'',
+  dataInizio:'', dataFine:'',
+  newJob: null,
+  risorse:{ teste:[], mandrini:[], tastatori:[], maschere:[], generatori:[] }
+};
+
+const _WIZ_TITLES = ['','WPS','Info attività','Pianificazione','Risorse','Riepilogo'];
+
+// ── Open / Close ──────────────────────────────────────────────────────────────
+function openAddModal() {
+  Object.assign(WIZ, {
+    stabilimento:'', responsabile:'',
+    tmpPath:'', wpsName:'', parsed:{}, gemini:{}, bore:{},
+    modello_testa:'', commessa:'', item:1, attivita:'',
+    dataInizio:'', dataFine:'',
+    newJob: null,
+    risorse:{ teste:[], mandrini:[], tastatori:[], maschere:[], generatori:[] }
+  });
+  document.getElementById('add-modal-overlay').style.display = 'flex';
+  document.getElementById('add-modal').style.display = 'flex';
+  document.querySelector('.wiz-body').scrollTop = 0;
+  // Reset step-1 UI
+  document.getElementById('s1-drop-zone').style.display = '';
+  document.getElementById('s1-spinner').style.display = 'none';
+  document.getElementById('s1-data-panel').style.display = 'none';
+  document.getElementById('s1-autofill-notice').style.display = 'none';
+  document.getElementById('s1-commessa-panel').style.display = 'none';
+  document.getElementById('s1-commessa-panel').innerHTML = '';
+  document.getElementById('s1-fname').textContent = '';
+  document.getElementById('s1-file-input').value = '';
+  document.getElementById('s1-error').style.display = 'none';
+  document.getElementById('s1-next-btn').style.display = 'none';
+  ['s1-testa','s1-commessa','s1-item','s1-attivita','s1-bore-min','s1-bore-mid','s1-bore-max','s1-passo'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.value = id === 's1-item' ? '1' : ''; el.style.background = ''; el.style.borderColor = ''; }
+  });
+  // Reset step-2 UI
+  const stabSel = document.getElementById('s3-stabilimento');
+  const respSel = document.getElementById('s3-responsabile');
+  if (stabSel) { stabSel.selectedIndex = 0; stabSel.style.borderColor = ''; }
+  if (respSel) { respSel.selectedIndex = 0; respSel.style.borderColor = ''; }
+  document.getElementById('s3-error').style.display = 'none';
+  // Reset step-5 save button (left disabled after a successful save)
+  const saveBtn = document.getElementById('s6-save-btn');
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salva'; }
+  document.getElementById('s6-error').style.display = 'none';
+  wizGoTo(1);
+  document.addEventListener('keydown', _wizEsc);
+}
+
+function closeAddModal() {
+  document.getElementById('add-modal-overlay').style.display = 'none';
+  document.getElementById('add-modal').style.display = 'none';
+  document.removeEventListener('keydown', _wizEsc);
+}
+
+function _wizEsc(e) { if (e.key === 'Escape') { closeAddModal(); closeDetailModal(); closeNotesModal(); } }
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+function wizGoTo(n) {
+  for (let i = 1; i <= 5; i++) {
+    const s = document.getElementById('wiz-step-' + i);
+    if (s) s.style.display = (i === n) ? '' : 'none';
+    const d = document.getElementById('sdot-' + i);
+    if (d) d.className = 'sdot' + (i < n ? ' done' : i === n ? ' active' : '');
+    if (i < 5) {
+      const l = document.getElementById('sline-' + i);
+      if (l) l.className = 'sline' + (i < n ? ' done' : '');
+    }
+    const lb = document.getElementById('slbl-' + i);
+    if (lb) lb.className = 'wlabel' + (i < n ? ' done' : i === n ? ' active' : '');
+  }
+  document.getElementById('wiz-title').textContent = _WIZ_TITLES[n] || '';
+  document.querySelector('.wiz-body').scrollTop = 0;
+  if (n === 3) s4Init();
+}
+
+// ── Step 1: WPS upload + commessa check ───────────────────────────────────────
+function s1HandleSelect(input) {
+  if (input.files && input.files[0]) _s1Upload(input.files[0]);
+}
+
+function s1HandleDrop(ev) {
+  ev.preventDefault();
+  document.getElementById('s1-wps-label').classList.remove('is-drag');
+  const f = ev.dataTransfer.files[0];
+  if (f) _s1Upload(f);
+}
+
+async function _s1Upload(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    _s1ShowError('Solo file PDF sono supportati.');
+    return;
+  }
+  document.getElementById('s1-fname').textContent = file.name;
+  document.getElementById('s1-drop-zone').style.display = 'none';
+  document.getElementById('s1-spinner').style.display = '';
+  document.getElementById('s1-error').style.display = 'none';
+  document.getElementById('s1-commessa-panel').style.display = 'none';
+  document.getElementById('s1-next-btn').style.display = 'none';
+  const fd = new FormData();
+  fd.append('wps_file', file);
+  try {
+    const resp = await fetch('/api/attivita/analizza/', { method: 'POST', body: fd });
+    const data = await resp.json();
+    document.getElementById('s1-spinner').style.display = 'none';
+    if (data.ok) {
+      WIZ.tmpPath = data.tmp_path || '';
+      WIZ.wpsName = data.wps_name || file.name;
+      WIZ.parsed  = data.parsed  || {};
+      WIZ.gemini  = data.gemini  || {};
+      WIZ.bore    = data.bore    || {};
+      _s1ShowDataPanel(true);
+      await _s1CheckCommessa(WIZ.parsed.commessa || '');
+      document.getElementById('s1-next-btn').style.display = '';
+    } else {
+      document.getElementById('s1-drop-zone').style.display = '';
+      _s1ShowError(data.error || "Errore durante l'analisi.");
+    }
+  } catch (_) {
+    document.getElementById('s1-spinner').style.display = 'none';
+    document.getElementById('s1-drop-zone').style.display = '';
+    _s1ShowError('Errore di rete. Controlla la connessione.');
+  }
+}
+
+async function _s1CheckCommessa(commessa) {
+  const panel = document.getElementById('s1-commessa-panel');
+  if (!commessa) {
+    panel.style.display = 'none';
+    WIZ.newJob = null;
+    return;
+  }
+  panel.style.display = '';
+  panel.innerHTML = '<p class="wiz-subtitle" style="margin:.5rem 0;">Verifica commessa in corso…</p>';
+  try {
+    const resp = await fetch(`/api/jobs/check/?commessa=${encodeURIComponent(commessa)}`);
+    const data = await resp.json();
+    if (data.exists) {
+      WIZ.newJob = null;
+      panel.style.display = 'none';
+      panel.innerHTML = '';
+    } else {
+      WIZ.newJob = { commessa, total_cost: '', penalty: '', delivery_date: '' };
+      panel.innerHTML = `
+        <div class="s1-commessa-new">
+          <p class="s1-commessa-badge s1-commessa-warn">Commessa <strong>${commessa}</strong> non ancora in archivio — compila i dati (opzionale)</p>
+          <div class="wiz-grid-3" style="margin-top:.75rem;">
+            <div class="wiz-field">
+              <label>Costo totale (€) <span class="opt">(opz.)</span></label>
+              <input id="s1-job-cost" type="number" min="0" step="0.01" placeholder="es. 50000"
+                oninput="WIZ.newJob.total_cost=this.value">
+            </div>
+            <div class="wiz-field">
+              <label>Penale (%) <span class="opt">(opz.)</span></label>
+              <input id="s1-job-penalty" type="number" min="0" max="100" step="0.01" placeholder="es. 10"
+                oninput="WIZ.newJob.penalty=this.value">
+            </div>
+            <div class="wiz-field">
+              <label>Data consegna <span class="opt">(opz.)</span></label>
+              <input id="s1-job-deadline" type="date"
+                oninput="WIZ.newJob.delivery_date=this.value">
+            </div>
+          </div>
+        </div>`;
+    }
+  } catch (_) {
+    WIZ.newJob = null;
+    panel.innerHTML = `<p class="s1-commessa-badge s1-commessa-warn">Impossibile verificare la commessa. Procedi comunque.</p>`;
+  }
+}
+
+async function _s1CommessaChange(val) {
+  const commessa = val.trim();
+  if (!commessa) {
+    const panel = document.getElementById('s1-commessa-panel');
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+    WIZ.newJob = null;
+    return;
+  }
+  await _s1CheckCommessa(commessa);
+}
+
+function _s1ShowError(msg) {
+  const el = document.getElementById('s1-error');
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+function step1Skip() {
+  WIZ.tmpPath = ''; WIZ.wpsName = ''; WIZ.parsed = {}; WIZ.gemini = {}; WIZ.bore = {};
+  WIZ.newJob = null;
+  document.getElementById('s1-drop-zone').style.display = 'none';
+  _s1ShowDataPanel(false);
+  document.getElementById('s1-next-btn').style.display = '';
+}
+
+function step1Next() {
+  const commessa = document.getElementById('s1-commessa').value.trim();
+  const errEl = document.getElementById('s1-error');
+  if (!commessa) {
+    errEl.textContent = 'La commessa è obbligatoria.';
+    errEl.style.display = '';
+    document.getElementById('s1-commessa').style.borderColor = '#ef4444';
+    return;
+  }
+  errEl.style.display = 'none';
+  document.getElementById('s1-commessa').style.borderColor = '';
+  WIZ.modello_testa = document.getElementById('s1-testa').value.trim();
+  WIZ.commessa      = commessa;
+  WIZ.item          = parseInt(document.getElementById('s1-item').value) || 1;
+  WIZ.attivita      = document.getElementById('s1-attivita').value.trim();
+  const _n = v => { const f = parseFloat(v); return isNaN(f) ? null : f; };
+  WIZ.bore = Object.assign(WIZ.bore || {}, {
+    min:        _n(document.getElementById('s1-bore-min').value),
+    mid:        _n(document.getElementById('s1-bore-mid').value),
+    max:        _n(document.getElementById('s1-bore-max').value),
+    tube_pitch: _n(document.getElementById('s1-passo').value),
+  });
+  wizGoTo(2);
+}
+
+function _s1ShowDataPanel(autofill) {
+  const panel = document.getElementById('s1-data-panel');
+  panel.style.display = '';
+  const notice = document.getElementById('s1-autofill-notice');
+  notice.style.display = autofill ? '' : 'none';
+  if (autofill) {
+    const p = WIZ.parsed;
+    const b = WIZ.bore;
+    const setF = (id, val, highlight) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.value = (val != null && val !== '') ? String(val) : '';
+      if (el.value && highlight) { el.style.background = 'hsl(142 25% 12%)'; el.style.borderColor = 'hsl(142 50% 32%)'; }
+      else { el.style.background = ''; el.style.borderColor = ''; }
+    };
+    setF('s1-testa',    p.modello_testa,   true);
+    setF('s1-commessa', p.commessa,         true);
+    setF('s1-item',     p.item != null ? p.item : 1, false);
+    setF('s1-attivita', p.attivita,         true);
+    setF('s1-bore-min', b.min,              true);
+    setF('s1-bore-mid', b.mid,              true);
+    setF('s1-bore-max', b.max,              true);
+    setF('s1-passo',    b.tube_pitch,       true);
+  }
+}
+
+// ── Step 2: Info attività ─────────────────────────────────────────────────────
+function step3Next() {
+  const stab = document.getElementById('s3-stabilimento').value.trim();
+  const resp = document.getElementById('s3-responsabile').value.trim();
+  const errEl = document.getElementById('s3-error');
+  if (!stab || !resp) {
+    errEl.textContent = 'Stabilimento e Responsabile sono obbligatori.';
+    errEl.style.display = '';
+    if (!stab) document.getElementById('s3-stabilimento').style.borderColor = '#ef4444';
+    if (!resp) document.getElementById('s3-responsabile').style.borderColor = '#ef4444';
+    return;
+  }
+  errEl.style.display = 'none';
+  document.getElementById('s3-stabilimento').style.borderColor = '';
+  document.getElementById('s3-responsabile').style.borderColor = '';
+  WIZ.stabilimento = stab;
+  WIZ.responsabile = resp;
+  wizGoTo(3);
+}
+
+// ── Step 4: Interactive Two-Month Calendar ───────────────────────────────────
+const S4 = {
+  viewYear:  new Date().getFullYear(),
+  viewMonth: new Date().getMonth(),
+  rangeStart: null, rangeEnd: null,
+  cache: {}, maxLoad: 10,
+};
+const _S4_MONTHS = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
+                    'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+const _S4_DOW = ['Lu','Ma','Me','Gi','Ve','Sa','Do'];
+
+function s4Init() {
+  const t = new Date();
+  S4.viewYear = t.getFullYear(); S4.viewMonth = t.getMonth();
+  S4.rangeStart = null; S4.rangeEnd = null;
+  s4Render(); s4FetchVisible();
+}
+function s4Prev() {
+  S4.viewMonth--;
+  if (S4.viewMonth < 0) { S4.viewMonth = 11; S4.viewYear--; }
+  s4Render(); s4FetchVisible();
+}
+function s4Next() {
+  S4.viewMonth++;
+  if (S4.viewMonth > 11) { S4.viewMonth = 0; S4.viewYear++; }
+  s4Render(); s4FetchVisible();
+}
+function _s4Second() {
+  return S4.viewMonth === 11
+    ? { year: S4.viewYear + 1, month: 0 }
+    : { year: S4.viewYear,     month: S4.viewMonth + 1 };
+}
+function s4Render() {
+  const m2 = _s4Second();
+  const ep = document.getElementById('s4-period');
+  if (ep) ep.textContent = `${_S4_MONTHS[S4.viewMonth]} – ${_S4_MONTHS[m2.month]} ${m2.year}`;
+  const grid = document.getElementById('s4-months');
+  if (!grid) return;
+  grid.innerHTML = '';
+  grid.appendChild(_s4BuildMonth(S4.viewYear, S4.viewMonth));
+  grid.appendChild(_s4BuildMonth(m2.year, m2.month));
+  _s4UpdateRangeLabel();
+}
+function _s4BuildMonth(year, month) {
+  const key    = `${year}-${String(month+1).padStart(2,'0')}`;
+  const cached = S4.cache[key];
+  const counts = cached ? cached.counts : {};
+  const loaded = !!(cached && cached.loaded);
+  const wrap   = document.createElement('div');
+  const title  = document.createElement('div');
+  title.className = 's4-month-name';
+  title.textContent = `${_S4_MONTHS[month]} ${year}`;
+  wrap.appendChild(title);
+  const cgrid = document.createElement('div');
+  cgrid.className = 's4-cal-grid';
+  _S4_DOW.forEach(d => {
+    const h = document.createElement('div');
+    h.className = 's4-cal-dow'; h.textContent = d;
+    cgrid.appendChild(h);
+  });
+  const dow = (new Date(year, month, 1).getDay() + 6) % 7;
+  for (let i = 0; i < dow; i++) {
+    const e = document.createElement('div'); e.className = 's4-cal-day empty'; cgrid.appendChild(e);
+  }
+  const days = new Date(year, month + 1, 0).getDate();
+  for (let d = 1; d <= days; d++) {
+    const iso  = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const n    = counts[iso] || 0;
+    const cell = document.createElement('div');
+    cell.className = 's4-cal-day'; cell.textContent = d; cell.dataset.date = iso;
+    if (loaded) {
+      cell.classList.add('loaded');
+      if (n > 0) {
+        cell.classList.add('has-count');
+        const t = Math.min(n / S4.maxLoad, 1);
+        cell.style.backgroundColor = `hsl(${Math.round(120*(1-t))},${Math.round(45+t*20)}%,${Math.round(18+t*12)}%)`;
+      }
+    }
+    const rs = S4.rangeStart, re = S4.rangeEnd;
+    if (rs) {
+      if      (iso === rs && re)          cell.classList.add('range-start');
+      else if (iso === re)                cell.classList.add('range-end');
+      else if (!re && iso === rs)         cell.classList.add('range-start');
+      else if (re && iso > rs && iso < re) cell.classList.add('in-range');
+    }
+    cell.title = iso + (n ? ` — ${n} attività` : '');
+    cell.addEventListener('click', () => {
+      if (!S4.rangeStart || (S4.rangeStart && S4.rangeEnd)) {
+        S4.rangeStart = iso; S4.rangeEnd = null;
+      } else {
+        if (iso >= S4.rangeStart) { S4.rangeEnd = iso; }
+        else { S4.rangeStart = iso; S4.rangeEnd = null; }
+      }
+      s4Render();
+    });
+    cgrid.appendChild(cell);
+  }
+  wrap.appendChild(cgrid);
+  return wrap;
+}
+function _s4UpdateRangeLabel() {
+  const el = document.getElementById('s4-range-lbl');
+  if (!el) return;
+  if (!S4.rangeStart) {
+    el.innerHTML = "Clicca un giorno per impostare l'inizio del periodo";
+  } else if (!S4.rangeEnd) {
+    el.innerHTML = `Inizio: <strong>${S4.rangeStart}</strong> — clicca per impostare la fine`;
+  } else {
+    const days = Math.round((new Date(S4.rangeEnd) - new Date(S4.rangeStart)) / 86400000) + 1;
+    el.innerHTML = `<strong>${S4.rangeStart}</strong> → <strong>${S4.rangeEnd}</strong> &nbsp;(${days} giorn${days===1?'o':'i'})`;
+  }
+}
+async function s4FetchVisible() {
+  const m2 = _s4Second();
+  const pairs = [[S4.viewYear, S4.viewMonth], [m2.year, m2.month]];
+  const missing = pairs.filter(([y,m]) => !(S4.cache[`${y}-${String(m+1).padStart(2,'0')}`] || {}).loaded);
+  if (!missing.length) return;
+  const from  = `${S4.viewYear}-${String(S4.viewMonth+1).padStart(2,'0')}-01`;
+  const lastD = new Date(m2.year, m2.month+1, 0).getDate();
+  const to    = `${m2.year}-${String(m2.month+1).padStart(2,'0')}-${String(lastD).padStart(2,'0')}`;
+  try {
+    const r = await fetch(`/api/attivita/heatmap/?start=${from}&end=${to}`);
+    const data = await r.json();
+    const cnts = data.counts || {};
+    S4.maxLoad = data.max_load || S4.maxLoad;
+    pairs.forEach(([y,m]) => {
+      const k = `${y}-${String(m+1).padStart(2,'0')}`;
+      S4.cache[k] = { counts: {}, loaded: true };
+      Object.entries(cnts).forEach(([iso,v]) => { if (iso.startsWith(k)) S4.cache[k].counts[iso] = v; });
+    });
+  } catch(_) {
+    pairs.forEach(([y,m]) => {
+      const k = `${y}-${String(m+1).padStart(2,'0')}`;
+      if (!S4.cache[k]) S4.cache[k] = { counts: {}, loaded: true };
+    });
+  }
+  s4Render();
+}
+function step4Next() {
+  const errEl = document.getElementById('s4-error');
+  if (!S4.rangeStart || !S4.rangeEnd) {
+    errEl.textContent = 'Seleziona un periodo (clicca inizio poi fine) dal calendario.';
+    errEl.style.display = ''; return;
+  }
+  errEl.style.display = 'none';
+  WIZ.dataInizio = S4.rangeStart;
+  WIZ.dataFine   = S4.rangeEnd;
+  wizGoTo(4);
+  _s5LoadRisorse();
+}
+
+// ── Step 5 ────────────────────────────────────────────────────────────────────
+const _S5_DATA = {};
+
+async function _s5LoadRisorse() {
+  document.getElementById('s5-loader').style.display = '';
+  document.getElementById('s5-content').style.display = 'none';
+  document.getElementById('s5-error').style.display = 'none';
+
+  // Populate recap banner — table-grid layout
+  const recap = document.getElementById('s5-recap');
+  if (recap) {
+    const cells = [];
+    if (WIZ.modello_testa)
+      cells.push({ lbl: 'Modello testa', val: WIZ.modello_testa, accent: true });
+    const b = WIZ.bore || {};
+    if (b.min  != null && b.min  !== '') cells.push({ lbl: 'Ø min',   val: `${b.min} mm` });
+    if (b.mid  != null && b.mid  !== '') cells.push({ lbl: 'Ø punt.', val: `${b.mid} mm` });
+    if (b.max  != null && b.max  !== '') cells.push({ lbl: 'Ø max',   val: `${b.max} mm` });
+    if (b.tube_pitch != null && b.tube_pitch !== '') cells.push({ lbl: 'Passo', val: `${b.tube_pitch} mm` });
+    if (cells.length) {
+      recap.innerHTML = cells.map(c =>
+        `<div class="s5-recap-cell${c.accent ? ' s5-recap-cell--accent' : ''}">
+           <div class="s5-recap-lbl">${c.lbl}</div>
+           <div class="s5-recap-val">${c.val}</div>
+         </div>`
+      ).join('');
+      recap.style.display = '';
+    } else {
+      recap.style.display = 'none';
+    }
+  }
+
+  const params = new URLSearchParams({
+    stabilimento:  WIZ.stabilimento,
+    data_inizio:   WIZ.dataInizio,
+    data_fine:     WIZ.dataFine,
+    bore_min:      WIZ.bore.min      ?? '',
+    bore_max:      WIZ.bore.max      ?? '',
+    bore_mid:      WIZ.bore.mid      ?? '',
+    tube_pitch:    WIZ.bore.tube_pitch ?? '',
+    modello_testa: WIZ.modello_testa,
+  });
+  try {
+    const resp = await fetch(`/api/attivita/risorse/?${params}`);
+    const data = await resp.json();
+    if (data.ok) {
+      WIZ.risorse.teste      = [...(data.pre_testa      || [])];
+      WIZ.risorse.mandrini   = [...(data.pre_mandrini   || [])];
+      WIZ.risorse.tastatori  = [...(data.pre_tastatori  || [])];
+      WIZ.risorse.maschere   = [...(data.pre_maschere   || [])];
+      WIZ.risorse.generatori = [...(data.pre_generatori || [])];
+      // Build UID→plant map for Riepilogo problem detection
+      window._S5_INVENTORY_MAP = {};
+      ['teste','mandrini','tastatori','maschere','generatori'].forEach(cat => {
+        (data[cat] || []).forEach(r => {
+          const uid = r.uid || r.id || String(r);
+          const plant = r.stab_esterno || r.plant || '';
+          if (uid) window._S5_INVENTORY_MAP[uid] = plant;
+        });
+      });
+      _s5RenderCat('teste',      data.teste,      data.pre_testa);
+      _s5RenderCat('mandrini',   data.mandrini,   data.pre_mandrini);
+      _s5RenderCat('tastatori',  data.tastatori,  data.pre_tastatori);
+      _s5RenderCat('maschere',   data.maschere,   data.pre_maschere);
+      _s5RenderCat('generatori', data.generatori, data.pre_generatori);
+    } else {
+      _s5ShowError(data.error || 'Errore nel caricamento risorse.');
+    }
+  } catch (_) {
+    _s5ShowError('Errore di rete nel caricamento risorse.');
+  }
+  document.getElementById('s5-loader').style.display = 'none';
+  document.getElementById('s5-content').style.display = '';
+}
+
+function _s5RenderCat(key, items, preSelected) {
+  _S5_DATA[key] = items || [];
+  const pre = new Set(preSelected || []);
+  WIZ.risorse[key] = [...pre];
+  _s5RefreshItems(key, '');
+  _s5UpdateLabel(key);
+}
+
+function _s5RefreshItems(key, query) {
+  const container = document.getElementById('items-' + key);
+  if (!container) return;
+  const items = _S5_DATA[key] || [];
+  const q = query.toLowerCase();
+  const filtered = q
+    ? items.filter(r => {
+        const uid  = (r.uid || r.id || '').toLowerCase();
+        const desc = (r.model || r.diameter || r.pitch || r.description || '').toLowerCase();
+        const notes = (r.notes || '').toLowerCase();
+        return uid.includes(q) || desc.includes(q) || notes.includes(q);
+      })
+    : items;
+  if (!filtered.length) {
+    container.innerHTML = '<div class="ms-empty">Nessun risultato</div>';
+    return;
+  }
+  const sel = new Set(WIZ.risorse[key] || []);
+  container.innerHTML = filtered.map(r => {
+    const uid = r.uid || r.id || String(r);
+
+    // Type-specific measure — inline chip
+    let measureHtml = '';
+    if ((key === 'teste' || key === 'generatori') && r.model)
+      measureHtml = `<span class="ms-item-sep">·</span><span class="ms-item-measure">${r.model}</span>`;
+    else if ((key === 'mandrini' || key === 'tastatori') && r.diameter)
+      measureHtml = `<span class="ms-item-sep">·</span><span class="ms-item-measure">Ø ${r.diameter} mm</span>`;
+    else if (key === 'maschere' && r.pitch)
+      measureHtml = `<span class="ms-item-sep">·</span><span class="ms-item-measure">Passo ${r.pitch} mm</span>`;
+
+    // Plant badge — amber-bordered if external, colour-coded by plant
+    let plantHtml = '';
+    if (r.stab_esterno)
+      plantHtml = stabBadge(r.stab_esterno, 'stab-badge--ext');
+    else if (r.plant)
+      plantHtml = stabBadge(r.plant);
+
+    // Notes — type-specific labels with units
+    let notesHtml = '';
+    if (key === 'mandrini' && r.notes)
+      notesHtml = `<span class="ms-item-notes" title="Max Ø ${r.notes} mm">Max Ø ${r.notes} mm</span>`;
+    else if (key === 'maschere' && r.center_distance)
+      notesHtml = `<span class="ms-item-notes" title="Interasse: ${r.center_distance} mm">Interasse: ${r.center_distance} mm</span>`;
+    else if (r.notes)
+      notesHtml = `<span class="ms-item-notes" title="${r.notes}">${r.notes}</span>`;
+
+    return `<label class="ms-item">
+      <input type="checkbox" value="${uid}" ${sel.has(uid)?'checked':''}
+        onchange="s5Toggle('${key}','${uid}',this.checked)">
+      <span class="ms-item-id">${uid}</span>${measureHtml}${plantHtml}${notesHtml}
+    </label>`;
+  }).join('');
+}
+
+function filterMs(wrapId, query) {
+  _s5RefreshItems(wrapId.replace('wrap-', ''), query);
+}
+
+function _s5UpdateLabel(key) {
+  const lbl = document.getElementById('lbl-' + key);
+  if (!lbl) return;
+  const sel = WIZ.risorse[key] || [];
+  const empty = { teste:'Nessuna selezionata', mandrini:'Nessuno selezionato',
+                  tastatori:'Nessuno selezionato', maschere:'Nessuna selezionata',
+                  generatori:'Nessuno selezionato' };
+  if (!sel.length) {
+    lbl.textContent = empty[key] || 'Nessuno selezionato';
+    lbl.style.color = '';
+  } else {
+    lbl.textContent = sel.join(', ');
+    lbl.style.color = 'var(--text)';
+  }
+}
+
+function toggleMs(wrapId) {
+  const wrap    = document.getElementById(wrapId);
+  const wasOpen = wrap.classList.contains('is-open');
+  // chiude tutti prima
+  document.querySelectorAll('#add-modal .ms-wrap').forEach(w => {
+    w.classList.remove('is-open');
+    const t = w.querySelector('.ms-trigger');
+    if (t) t.classList.remove('open');
+  });
+  if (!wasOpen) {
+    wrap.classList.add('is-open');
+    const trigger  = wrap.querySelector('.ms-trigger');
+    if (trigger) trigger.classList.add('open');
+    // Posiziona il dropdown come overlay fixed sopra il modal
+    const dropdown = wrap.querySelector('.ms-dropdown');
+    if (dropdown && trigger) {
+      const rect = trigger.getBoundingClientRect();
+      const vpH  = window.innerHeight;
+      const spaceBelow = vpH - rect.bottom;
+      dropdown.style.width = rect.width + 'px';
+      dropdown.style.left  = rect.left  + 'px';
+      // apre in basso se c'è spazio, altrimenti in alto
+      if (spaceBelow >= 160 || spaceBelow >= rect.top) {
+        dropdown.style.top    = rect.bottom + 4 + 'px';
+        dropdown.style.bottom = '';
+      } else {
+        dropdown.style.bottom = (vpH - rect.top + 4) + 'px';
+        dropdown.style.top    = '';
+      }
+    }
+    const s = wrap.querySelector('.ms-search');
+    if (s) setTimeout(() => s.focus(), 50);
+  }
+}
+
+function s5Toggle(cat, uid, checked) {
+  const arr = WIZ.risorse[cat];
+  if (checked) { if (!arr.includes(uid)) arr.push(uid); }
+  else { const i = arr.indexOf(uid); if (i !== -1) arr.splice(i, 1); }
+  _s5UpdateLabel(cat);
+}
+
+function _s5ShowError(msg) {
+  const el = document.getElementById('s5-error');
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+async function step5Save() {
+  // This function is kept for compatibility but redirects to step6Save
+  step5Next();
+}
+
+function step5Next() {
+  // Validate step 4 is filled (risorse step)
+  wizGoTo(5);
+  _s6BuildRiepilogo();
+}
+
+function _s6BuildRiepilogo() {
+  // ── Recap grid ──────────────────────────────────────────────────────────
+  const r = WIZ;
+  const fmt = v => v ? esc(String(v)) : '<span style="color:var(--text-subtle)">—</span>';
+  const allResArr = Object.entries(r.risorse)
+    .filter(([,v]) => v && v.length)
+    .map(([k,v]) => `<b>${k}</b>: ${v.map(esc).join(', ')}`);
+
+  const grid = document.getElementById('s6-recap-grid');
+  grid.innerHTML = `
+    <div class="s6-recap-item"><span class="s6-recap-label">Commessa</span><span class="s6-recap-value">${fmt(r.commessa)}</span></div>
+    <div class="s6-recap-item"><span class="s6-recap-label">Item</span><span class="s6-recap-value">${fmt(r.item)}</span></div>
+    <div class="s6-recap-item full-width"><span class="s6-recap-label">Attività</span><span class="s6-recap-value">${fmt(r.attivita)}</span></div>
+    <div class="s6-recap-item"><span class="s6-recap-label">Stabilimento</span><span class="s6-recap-value">${r.stabilimento ? stabBadge(r.stabilimento) : '—'}</span></div>
+    <div class="s6-recap-item"><span class="s6-recap-label">Responsabile</span><span class="s6-recap-value">${fmt(r.responsabile)}</span></div>
+    <div class="s6-recap-item"><span class="s6-recap-label">Inizio</span><span class="s6-recap-value">${fmt(r.dataInizio)}</span></div>
+    <div class="s6-recap-item"><span class="s6-recap-label">Fine</span><span class="s6-recap-value">${fmt(r.dataFine)}</span></div>
+    <div class="s6-recap-item"><span class="s6-recap-label">Modello testa</span><span class="s6-recap-value">${fmt(r.modello_testa)}</span></div>
+    ${allResArr.length ? `<div class="s6-recap-item full-width"><span class="s6-recap-label">Risorse selezionate</span><span class="s6-recap-value" style="font-size:.8rem">${allResArr.join('<br>')}</span></div>` : ''}
+  `;
+
+  // ── Problem detection ────────────────────────────────────────────────────
+  const problems = [];
+  const stab = r.stabilimento;
+  const cats = {
+    teste: 'testa', mandrini: 'mandrino', tastatori: 'tastatore',
+    maschere: 'maschera', generatori: 'generatore'
+  };
+
+  // Access the inventory data stored on _S5_DATA (populated during step 4 load)
+  const inventoryMap = window._S5_INVENTORY_MAP || {};
+
+  Object.entries(cats).forEach(([plural, label]) => {
+    const selected = r.risorse[plural] || [];
+    if (!selected.length) {
+      problems.push(`<b>${label}</b>: nessuna risorsa selezionata — da recuperare / acquistare / affittare`);
+    } else {
+      selected.forEach(uid => {
+        const plant = inventoryMap[uid];
+        if (plant && plant !== stab) {
+          problems.push(`<b>${label}</b> <i>${esc(uid)}</i>: appartiene a <b>${esc(plant)}</b> — richiede spostamento verso ${esc(stab || '?')}`);
+        }
+      });
+    }
+  });
+
+  const wrap = document.getElementById('s6-problems-wrap');
+  const ok   = document.getElementById('s6-ok-notice');
+  const list = document.getElementById('s6-problems-list');
+
+  if (problems.length) {
+    list.innerHTML = problems.map(p => `<li>${p}</li>`).join('');
+    wrap.style.display = '';
+    ok.style.display = 'none';
+  } else {
+    wrap.style.display = 'none';
+    ok.style.display = '';
+  }
+  document.getElementById('s6-error').style.display = 'none';
+}
+
+async function step6Save() {
+  const btn = document.getElementById('s6-save-btn');
+  document.getElementById('s6-error').style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Salvataggio…';
+  const payload = {
+    stabilimento:  WIZ.stabilimento,
+    responsabile:  WIZ.responsabile,
+    tmp_path:      WIZ.tmpPath,
+    modello_testa: WIZ.modello_testa,
+    commessa:      WIZ.commessa,
+    item:          WIZ.item,
+    attivita:      WIZ.attivita,
+    data_inizio:   WIZ.dataInizio,
+    data_fine:     WIZ.dataFine,
+    bore:          WIZ.bore,
+    risorse:       WIZ.risorse,
+    new_job:       WIZ.newJob,
+  };
+  try {
+    const resp = await fetch('/api/attivita/salva/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      closeAddModal();
+      _wizToast(`✓ Attività ${WIZ.commessa}-${String(WIZ.item).padStart(2,'0')} aggiunta con successo.`);
+      _wizAppendRow(data.id || '', data.warning_count || 0, data.note_count || 0);
+    } else {
+      const errEl = document.getElementById('s6-error');
+      errEl.textContent = data.error || 'Errore nel salvataggio.';
+      errEl.style.display = '';
+      btn.disabled = false;
+      btn.textContent = 'Salva';
+    }
+  } catch (_) {
+    const errEl = document.getElementById('s6-error');
+    errEl.textContent = 'Errore di rete.';
+    errEl.style.display = '';
+    btn.disabled = false;
+    btn.textContent = 'Salva';
+  }
+}
+
+function _s5ShowError(msg) {
+  const el = document.getElementById('s5-error');
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function _wizToast(msg) {
+  const t = document.getElementById('wiz-toast');
+  t.textContent = msg;
+  t.style.display = '';
+  setTimeout(() => { t.style.display = 'none'; }, 5000);
+}
+
+function _wizAppendRow(ormId, warningCount, noteCount) {
+  const tbody = document.querySelector('#table-attivita .data-table tbody');
+  if (!tbody) return;
+  const r = WIZ;
+  const fmt = v => v || '—';
+  const allRes = Object.values(r.risorse).flat().join(', ');
+  const wc = warningCount || 0;
+  const nc = noteCount || 0;
+  const tr = document.createElement('tr');
+  tr.classList.add('row--new');
+  tr.dataset.source       = 'attivita';
+  tr.dataset.ormId        = ormId || '';
+  tr.dataset.warningCount = wc;
+  tr.dataset.noteCount    = nc;
+  tr.dataset.commessa     = r.commessa;
+  tr.dataset.item         = r.item;
+  tr.dataset.activity     = r.attivita;
+  tr.dataset.start        = r.dataInizio;
+  tr.dataset.finish       = r.dataFine;
+  tr.dataset.actualStart  = '';
+  tr.dataset.actualFinish = '';
+  tr.dataset.plant        = r.stabilimento;
+  tr.dataset.responsible  = r.responsabile;
+  tr.dataset.resources    = allRes;
+  const warnBadge = wc > 0 ? ` <span class="warn-badge" title="${wc} problema/i aperto/i">&#9888; ${wc}</span>` : '';
+  const noteBtn   = ormId && wc > 0
+    ? `<button class="btn-risolvi" onclick="event.stopPropagation();openNotesModal('${ormId}')">Risolvi</button>`
+    : ormId && nc > 0
+    ? `<button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('${ormId}')">Note</button>`
+    : '—';
+  tr.innerHTML = `
+    <td class="td-primary" data-col="commessa">${fmt(r.commessa)}${warnBadge}</td>
+    <td class="td-muted" data-col="item">${fmt(r.item)}</td>
+    <td data-col="activity">${fmt(r.attivita)}</td>
+    <td class="td-nowrap" data-col="start">${fmt(r.dataInizio)}</td>
+    <td class="td-nowrap" data-col="finish">${fmt(r.dataFine)}</td>
+    <td class="td-nowrap" data-col="actual-start">—</td>
+    <td class="td-nowrap" data-col="actual-finish">—</td>
+    <td data-col="plant">${stabBadge(r.stabilimento)}</td>
+    <td class="td-muted" data-col="responsible">${fmt(r.responsabile)}</td>
+    <td class="td-muted" data-col="resources">${allRes || '—'}</td>
+    <td class="td-muted" data-col="note">${noteBtn}</td>`;
+  tbody.prepend(tr);
+  filterTable('tbl-attivita', document.getElementById('pian-search').value);
+}
+
+function showView(view) {
+  document.getElementById('table-attivita').style.display = view === 'attivita' ? '' : 'none';
+  document.getElementById('table-commesse').style.display = view === 'commesse' ? '' : 'none';
+  document.getElementById('btn-attivita').classList.toggle('active', view === 'attivita');
+  document.getElementById('btn-commesse').classList.toggle('active', view === 'commesse');
+  document.getElementById('pian-search').value = '';
+  filterTable(view === 'attivita' ? 'tbl-attivita' : 'tbl-commesse', '');
+}
+
+// ── Table search ──────────────────────────────────────────────────────────────
+function filterTable(tableId, term) {
+  var table = document.getElementById(tableId);
+  if (!table) return;
+  var q = term.trim().toLowerCase();
+  table.querySelectorAll('tbody tr').forEach(function(row) {
+    row.style.display = !q || row.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+function filterActiveTable() {
+  var term = document.getElementById('pian-search').value;
+  var activeTable = document.getElementById('table-attivita').style.display !== 'none'
+    ? 'tbl-attivita' : 'tbl-commesse';
+  filterTable(activeTable, term);
+}
+
+// Close ms-wrap dropdowns when clicking outside
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.ms-wrap')) {
+    document.querySelectorAll('#add-modal .ms-wrap.is-open').forEach(w => {
+      w.classList.remove('is-open');
+      const t = w.querySelector('.ms-trigger');
+      if (t) t.classList.remove('open');
+    });
+  }
+});
+
+// Chiude i dropdown se il corpo del wizard viene scrollato
+document.addEventListener('DOMContentLoaded', function() {
+  const wizBody = document.querySelector('.wiz-body');
+  if (wizBody) {
+    wizBody.addEventListener('scroll', function() {
+      document.querySelectorAll('#add-modal .ms-wrap.is-open').forEach(w => {
+        w.classList.remove('is-open');
+        const t = w.querySelector('.ms-trigger');
+        if (t) t.classList.remove('open');
+      });
+    }, { passive: true });
+  }
+});
+
+// ── Detail / Edit modal ───────────────────────────────────────────────────────
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+const PIAN_STAB_OPTIONS = {{ stabilimenti_json|safe }};
+const STAB_COLORS = {{ plant_colors_json|safe }};
+
+function stabBadge(name, extraClass) {
+  if (!name) return '—';
+  const c = STAB_COLORS[name];
+  const style = c ? ` style="--stab-c:${c}"` : '';
+  const cls = extraClass ? ` ${extraClass}` : '';
+  return `<span class="stab-badge${cls}"${style}>${esc(name)}</span>`;
+}
+
+// Post-process server-rendered plant cells in the activity table
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.stab-plant-cell[data-stab]').forEach(td => {
+    const name = td.dataset.stab;
+    if (name) td.innerHTML = stabBadge(name);
+  });
+
+  // Auto-open notes modal when arriving from Gantt warning badge click
+  const focusId = new URLSearchParams(window.location.search).get('focus');
+  if (focusId) {
+    history.replaceState({}, '', window.location.pathname);
+    openNotesModal(parseInt(focusId, 10));
+  }
+});
+
+const TASK_FIELDS = [
+  { label:'Commessa',      key:'commessa',     readonly:true  },
+  { label:'Item',          key:'item',         readonly:true  },
+  { label:'Attività',      key:'activity',     readonly:true  },
+  { label:'Inizio',        key:'start',        readonly:false, isDate:true },
+  { label:'Fine',          key:'finish',       readonly:false, isDate:true },
+  { label:'Inizio effett.',key:'actualStart',  readonly:false, isDate:true },
+  { label:'Fine effett.',  key:'actualFinish', readonly:false, isDate:true },
+  { label:'Stabilimento',  key:'plant',        readonly:false, isPlant:true },
+  { label:'Responsabile',  key:'responsible',  readonly:false, ormReadonly:true },
+  { label:'Risorse',       key:'resources',    readonly:false, ormReadonly:true },
+];
+
+const JOB_FIELDS = [
+  { label:'Commessa',       key:'commessa',     readonly:true  },
+  { label:'Costo totale',   key:'totalCost',    readonly:false },
+  { label:'Penale',         key:'penalty',      readonly:false },
+  { label:'Data consegna',  key:'deliveryDate', readonly:false },
+  { label:'N. item',        key:'nItems',       readonly:true  },
+  { label:'N. attività',    key:'nActivities',  readonly:true  },
+];
+
+let _detState = null;  // { tr, entityType, originalData }
+
+function openDetailModal(tr, entityType) {
+  const ds = tr.dataset;
+  let data, fields, title;
+  if (entityType === 'task') {
+    data = {
+      commessa:     ds.commessa     || '',
+      item:         ds.item         || '',
+      activity:     ds.activity     || '',
+      start:        ds.start        || '',
+      finish:       ds.finish       || '',
+      actualStart:  ds.actualStart  || '',
+      actualFinish: ds.actualFinish || '',
+      plant:        ds.plant        || '',
+      responsible:  ds.responsible  || '',
+      resources:    ds.resources    || '',
+      source:       ds.source       || 'tasks',
+      ormId:        ds.ormId        || '',
+    };
+    fields = TASK_FIELDS;
+    title  = `Attività: ${data.commessa} – ${data.item}`;
+  } else {
+    data = {
+      commessa:     ds.commessa     || '',
+      totalCost:    ds.totalCost    || '',
+      penalty:      ds.penalty      || '',
+      deliveryDate: ds.deliveryDate || '',
+      nItems:       ds.nItems       || '',
+      nActivities:  ds.nActivities  || '',
+    };
+    fields = JOB_FIELDS;
+    title  = `Commessa: ${data.commessa}`;
+  }
+  _detState = { tr, entityType, originalData: { ...data }, fields };
+  document.getElementById('det-title').textContent = title;
+  document.getElementById('det-error').style.display = 'none';
+  _renderPianViewMode(data, fields);
+  document.getElementById('det-view-btns').style.display = '';
+  document.getElementById('det-edit-btns').style.display = 'none';
+  const ov = document.getElementById('det-modal-overlay');
+  ov.classList.add('is-open');
+  ov.style.display = 'flex';
+}
+
+function closeDetailModal() {
+  const ov = document.getElementById('det-modal-overlay');
+  ov.classList.remove('is-open');
+  ov.style.display = 'none';
+  _detState = null;
+}
+
+function _renderPianViewMode(data, fields) {
+  const body = document.getElementById('det-body');
+  body.className = 'det-grid';
+  body.innerHTML = fields.map(f => {
+    const rawVal = data[f.key];
+    const displayVal = f.isPlant ? stabBadge(rawVal) : (esc(rawVal) || '—');
+    return `<div class="det-field">
+       <span class="det-label">${esc(f.label)}</span>
+       <span class="det-value">${displayVal}</span>
+     </div>`;
+  }).join('');
+}
+
+function enterEditMode() {
+  if (!_detState) return;
+  const { originalData, fields, entityType } = _detState;
+  const isOrm = entityType === 'task' && originalData.source === 'attivita';
+  const body = document.getElementById('det-body');
+  body.className = 'det-grid';
+  body.innerHTML = fields.map(f => {
+    const v = esc(originalData[f.key] ?? '');
+    const isReadonly = f.readonly || (isOrm && f.ormReadonly);
+    if (isReadonly) {
+      return `<div class="det-field">
+                <span class="det-label">${esc(f.label)}</span>
+                <span class="det-value">${v || '—'}</span>
+              </div>`;
+    }
+    if (f.isPlant) {
+      const opts = PIAN_STAB_OPTIONS.map(s =>
+        `<option value="${esc(s)}"${s === originalData[f.key] ? ' selected' : ''}>${esc(s)}</option>`
+      ).join('');
+      return `<div class="det-field">
+                <span class="det-label">${esc(f.label)}</span>
+                <select class="det-input" name="${f.key}">${opts}</select>
+              </div>`;
+    }
+    const inputType = f.isDate ? 'date' : 'text';
+    return `<div class="det-field">
+              <span class="det-label">${esc(f.label)}</span>
+              <input class="det-input" type="${inputType}" name="${f.key}" value="${v}">
+            </div>`;
+  }).join('');
+  document.getElementById('det-view-btns').style.display = 'none';
+  document.getElementById('det-edit-btns').style.display = 'flex';
+}
+
+function cancelEdit() {
+  if (!_detState) return;
+  _renderPianViewMode(_detState.originalData, _detState.fields);
+  document.getElementById('det-view-btns').style.display = '';
+  document.getElementById('det-edit-btns').style.display = 'none';
+  document.getElementById('det-error').style.display = 'none';
+}
+
+async function saveEdit() {
+  if (!_detState) return;
+  const { tr, entityType, originalData, fields } = _detState;
+  const errEl  = document.getElementById('det-error');
+  const saveBtn = document.getElementById('det-save-btn');
+  errEl.style.display = 'none';
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Salvataggio…';
+
+  const body = document.getElementById('det-body');
+  const newData = { ...originalData };
+  body.querySelectorAll('.det-input').forEach(el => { newData[el.name] = el.value; });
+
+  let url, payload;
+  if (entityType === 'task') {
+    url = '/api/tasks/update/';
+    payload = {
+      source:       originalData.source,
+      orm_id:       originalData.ormId,
+      commessa:     originalData.commessa,
+      item:         originalData.item,
+      activity:     originalData.activity,
+      start:        newData.start,
+      finish:       newData.finish,
+      actual_start: newData.actualStart,
+      actual_finish:newData.actualFinish,
+      plant:        newData.plant,
+      responsible:  newData.responsible,
+      resources:    newData.resources,
+    };
+  } else {
+    url = '/api/jobs/update/';
+    payload = {
+      commessa:      originalData.commessa,
+      total_cost:    newData.totalCost,
+      penalty:       newData.penalty,
+      delivery_date: newData.deliveryDate,
+    };
+  }
+
+  try {
+    const resp = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCsrfToken() },
+      body: JSON.stringify(payload),
+    });
+    const json = await resp.json();
+    if (!resp.ok) {
+      _showPianDetError(json.error || `Errore ${resp.status}`);
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Salva';
+      return;
+    }
+    // Update row data-* attributes
+    const colMap = { commessa:'commessa', item:'item', activity:'activity', start:'start',
+      finish:'finish', actualStart:'actualStart', actualFinish:'actualFinish',
+      plant:'plant', responsible:'responsible', resources:'resources',
+      totalCost:'totalCost', penalty:'penalty', deliveryDate:'deliveryDate',
+      nItems:'nItems', nActivities:'nActivities' };
+    fields.forEach(f => {
+      const dsKey = f.key.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+      if (dsKey in tr.dataset) tr.dataset[dsKey] = newData[f.key];
+      const tdKey = f.key.replace(/([A-Z])/g, c => '-' + c.toLowerCase());
+      const td = tr.querySelector(`td[data-col="${tdKey}"]`);
+      if (td) td.textContent = newData[f.key] || '—';
+    });
+    _detState.originalData = { ...newData };
+    _renderPianViewMode(newData, fields);
+    document.getElementById('det-view-btns').style.display = '';
+    document.getElementById('det-edit-btns').style.display = 'none';
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Salva';
+  } catch (_) {
+    _showPianDetError('Errore di rete.');
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Salva';
+  }
+}
+
+function _showPianDetError(msg) {
+  const el = document.getElementById('det-error');
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+function _getCsrfToken() {
+  const m = document.cookie.match(/csrftoken=([^;]+)/);
+  return m ? m[1] : '';
+}
+
+// Event delegation: row click → open detail modal
+document.addEventListener('click', function(e) {
+  if (e.target.closest('#det-modal-overlay')) return;
+  if (e.target.closest('#add-modal-overlay')) return;
+  const tr = e.target.closest('#tbl-attivita tbody tr, #tbl-commesse tbody tr');
+  if (!tr) return;
+  if (e.target.closest('button')) return;
+  const inAttivita = !!tr.closest('#tbl-attivita');
+  openDetailModal(tr, inAttivita ? 'task' : 'job');
+});
+
+// Click on overlay backdrop → close detail modal
+document.getElementById('det-modal-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeDetailModal();
+});
+
+async function deleteEntity() {
+  if (!_detState) return;
+  const { tr, entityType, originalData } = _detState;
+  const label = entityType === 'task'
+    ? `l'attività "${originalData.activity}" della commessa ${originalData.commessa}`
+    : `la commessa ${originalData.commessa} e tutte le sue attività`;
+  if (!confirm(`Eliminare ${label}?\nQuesta operazione non può essere annullata.`)) return;
+
+  const url = entityType === 'task' ? '/api/tasks/delete/' : '/api/jobs/delete/';
+  const body = entityType === 'task'
+    ? { source: originalData.source, commessa: originalData.commessa, item: originalData.item, activity: originalData.activity, orm_id: originalData.ormId }
+    : { commessa: originalData.commessa };
+
+  try {
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCsrfToken() },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    if (!json.ok) { _showPianDetError(json.error || 'Errore durante l\'eliminazione.'); return; }
+    tr.remove();
+    closeDetailModal();
+  } catch (err) {
+    _showPianDetError('Errore di rete.');
+  }
+}
+
+// ── Problemi ──────────────────────────────────────────────────────────────────
+let _risolviState   = null;  // { problemaId, tr }
+let _notesModalOrmId = null;
+let _notesModalTr    = null;
+
+// ── Notes modal (read-only list of all problems/notes) ────────────────────
+const _PROB_LABEL = { testa:'Testa', mandrino:'Mandrino', tastatore:'Tastatore', maschera:'Maschera', generatore:'Generatore' };
+
+async function openNotesModal(ormId) {
+  _notesModalOrmId = ormId;
+  _notesModalTr = document.querySelector(`tr[data-orm-id="${ormId}"]`);
+  const body = document.getElementById('notes-modal-body');
+  body.innerHTML = '<div style="padding:.5rem 0; color:var(--text-muted); font-size:.85rem;">Caricamento…</div>';
+  const ov = document.getElementById('notes-modal-overlay');
+  ov.style.display = 'flex';
+  try {
+    const resp = await fetch(`/api/attivita/${ormId}/problemi/`);
+    if (!resp.ok) { body.innerHTML = '<div class="det-error">Errore nel caricamento delle note.</div>'; return; }
+    const data = await resp.json();
+    const problemi = data.problemi || [];
+    if (!problemi.length) {
+      body.innerHTML = '<div style="color:var(--text-subtle);font-size:.875rem;">Nessun problema registrato per questa attività.</div>';
+      return;
+    }
+    body.innerHTML = '<div class="prob-list">' + problemi.map(p => {
+      const label  = _PROB_LABEL[p.risorsa_tipo] || p.risorsa_tipo;
+      const uid    = p.risorsa_uid ? ` ${esc(p.risorsa_uid)}` : '';
+      const from   = esc(p.stabilimento_origine || '?');
+      const to     = esc(p.stabilimento_attivita || '?');
+      const action = p.tipo === 'acquisto'
+        ? 'Da acquistare / noleggiare'
+        : `Spostamento richiesto da ${from} a ${to}`;
+      const isOpen = !p.risolto;
+      const risolviDesc = (label + uid + ' — ' + action).replace(/'/g, "\\'");
+      const resolutionHtml = (!isOpen && p.note_risoluzione)
+        ? `<span class="prob-list-item-resolution" title="${esc(p.note_risoluzione)}">✓ ${esc(p.note_risoluzione)}</span>`
+        : '';
+      return `<div class="prob-list-item ${isOpen ? 'prob-list-item--open' : 'prob-list-item--resolved'}">
+        <div class="prob-list-item-header">
+          <span class="prob-list-item-label">${isOpen ? '⚠' : '✓'} ${esc(label)}${esc(uid)}</span>
+          <span class="prob-list-item-action">${action}</span>
+          ${isOpen ? `<button class="btn-risolvi" onclick="openRisolviModal(${p.id}, '${risolviDesc}')">Risolvi</button>` : resolutionHtml}
+        </div>
+      </div>`;
+    }).join('') + '</div>';
+  } catch (e) {
+    body.innerHTML = '<div class="det-error">Errore di rete.</div>';
+  }
+}
+
+function closeNotesModal() {
+  document.getElementById('notes-modal-overlay').style.display = 'none';
+  _notesModalOrmId = null;
+  _notesModalTr = null;
+}
+
+function _notesOverlayClick(e) {
+  if (e.target === document.getElementById('notes-modal-overlay')) closeNotesModal();
+}
+
+function _updateNavBadge(delta) {
+  const badge = document.getElementById('nav-warn-badge');
+  if (!badge) return;
+  const current = parseInt(badge.textContent.replace(/\D/g, ''), 10) || 0;
+  const next = current + delta;
+  if (next <= 0) {
+    badge.remove();
+  } else {
+    badge.textContent = `⚠ ${next}`;
+  }
+}
+
+function openRisolviModal(problemaId, desc) {
+  const activeTr = (_detState ? _detState.tr : null) || _notesModalTr;
+  if (!activeTr) return;
+  _risolviState = { problemaId, tr: activeTr };
+  document.getElementById('risolvi-desc').textContent = desc;
+  document.getElementById('risolvi-notes').value = '';
+  const ov = document.getElementById('risolvi-overlay');
+  ov.style.display = 'flex';
+}
+
+function closeRisolviModal() {
+  document.getElementById('risolvi-overlay').style.display = 'none';
+  _risolviState = null;
+}
+
+async function confirmRisolvi() {
+  if (!_risolviState) return;
+  const { problemaId, tr } = _risolviState;
+  const notes = document.getElementById('risolvi-notes').value.trim();
+  const btn = document.getElementById('risolvi-confirm-btn');
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`/api/attivita/problemi/${problemaId}/risolvi/`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCsrfToken() },
+      body: JSON.stringify({ note: notes }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      closeRisolviModal();
+      // Update row warning/note counts
+      const wc = data.warning_count ?? 0;
+      const nc = data.note_count ?? 0;
+      tr.dataset.warningCount = wc;
+      tr.dataset.noteCount = nc;
+      const commTd = tr.querySelector('td[data-col="commessa"]');
+      if (commTd) {
+        commTd.querySelectorAll('.warn-badge').forEach(b => b.remove());
+        if (wc > 0) {
+          const badge = document.createElement('span');
+          badge.className = 'warn-badge';
+          badge.title = `${wc} problema/i aperto/i`;
+          badge.innerHTML = `&#9888; ${wc}`;
+          commTd.appendChild(badge);
+        }
+      }
+      // Update Note column cell
+      const noteTd = tr.querySelector('td[data-col="note"]');
+      if (noteTd) {
+        const ormId = tr.dataset.ormId;
+        if (ormId && wc > 0) {
+          noteTd.innerHTML = `<button class="btn-risolvi" onclick="event.stopPropagation();openNotesModal('${ormId}')">Risolvi</button>`;
+        } else if (ormId && nc > 0) {
+          noteTd.innerHTML = `<button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('${ormId}')">Note</button>`;
+        } else {
+          noteTd.innerHTML = '—';
+        }
+      }
+      // Update navbar badge (decrement by 1)
+      _updateNavBadge(-1);
+      // Reload notes modal if still open
+      const notesOv = document.getElementById('notes-modal-overlay');
+      if (notesOv.style.display === 'flex' && _notesModalOrmId) {
+        openNotesModal(_notesModalOrmId);
+      }
+    }
+  } catch (e) { console.error('confirmRisolvi error:', e); }
+  btn.disabled = false;
+}
+
+</script>
+{% endblock %}

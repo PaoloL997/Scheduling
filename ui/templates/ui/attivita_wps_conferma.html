@@ -1,0 +1,164 @@
+{% extends "ui/base.html" %}
+{% block title %}Aggiungi attività — Step 3: Conferma dati{% endblock %}
+
+{% block content %}
+<main style="padding: 2rem 1rem;">
+  <div style="max-width: 720px; margin: 0 auto;">
+
+    <!-- Wizard step indicator -->
+    <div class="step-indicator">
+      <div class="step-dot">
+        <div class="step-dot-circle step-done">✓</div>
+        <span class="step-dot-label step-done">Info base</span>
+      </div>
+      <div class="step-line step-done"></div>
+      <div class="step-dot">
+        <div class="step-dot-circle step-done">✓</div>
+        <span class="step-dot-label step-done">Carica WPS</span>
+      </div>
+      <div class="step-line step-done"></div>
+      <div class="step-dot">
+        <div class="step-dot-circle step-active">3</div>
+        <span class="step-dot-label step-active">Conferma</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step-dot">
+        <div class="step-dot-circle">4</div>
+        <span class="step-dot-label">Pianificazione</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step-dot">
+        <div class="step-dot-circle">5</div>
+        <span class="step-dot-label">Risorse</span>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; align-items:start;">
+
+      <!-- Left: editable form -->
+      <div class="form-card">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+          <h2 class="card-subtitle" style="margin:0;">Dati attività</h2>
+          <span style="font-size:0.75rem; color:var(--text-subtle); font-style:italic;">{{ wps_name }}</span>
+        </div>
+
+        <div class="autofill-notice">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          I campi in verde sono stati compilati automaticamente da Gemini
+        </div>
+
+        {% if confirm_form.non_field_errors %}
+        <div class="alert alert-error">
+          {% for err in confirm_form.non_field_errors %}{{ err }}<br>{% endfor %}
+        </div>
+        {% endif %}
+
+        <form method="post" action="{% url 'attivita_conferma' %}" novalidate>
+          {% csrf_token %}
+
+          <!-- Modello testa -->
+          <div class="form-group">
+            <label>Modello testa <span class="required">*</span> <span class="autofill">AI</span></label>
+            <input type="text" name="modello_testa" value="{{ confirm_form.modello_testa.value|default:'' }}" autocomplete="off" required
+              class="form-input{% if confirm_form.modello_testa.errors %} is-error{% else %} is-autofill{% endif %}">
+            {% if confirm_form.modello_testa.errors %}<p class="form-error">{{ confirm_form.modello_testa.errors.0 }}</p>{% endif %}
+          </div>
+
+          <!-- Commessa -->
+          <div class="form-group">
+            <label>Commessa <span class="required">*</span> <span class="autofill">AI</span></label>
+            <input type="text" name="commessa" value="{{ confirm_form.commessa.value|default:'' }}" autocomplete="off" required
+              class="form-input{% if confirm_form.commessa.errors %} is-error{% else %} is-autofill{% endif %}">
+            {% if confirm_form.commessa.errors %}<p class="form-error">{{ confirm_form.commessa.errors.0 }}</p>{% endif %}
+          </div>
+
+          <!-- Item + Attività row -->
+          <div style="display:grid; grid-template-columns:1fr 2fr; gap:0.75rem; margin-bottom:1rem;">
+            <div class="form-group" style="margin:0;">
+              <label>N° item <span class="required">*</span> <span class="autofill">AI</span></label>
+              <input type="number" name="item" value="{{ confirm_form.item.value|default:1 }}" min="1" required
+                class="form-input{% if confirm_form.item.errors %} is-error{% else %} is-autofill{% endif %}">
+              {% if confirm_form.item.errors %}<p class="form-error">{{ confirm_form.item.errors.0 }}</p>{% endif %}
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label>Attività <span class="autofill">AI</span></label>
+              <input type="text" name="attivita" value="{{ confirm_form.attivita.value|default:'' }}" autocomplete="off"
+                class="form-input{% if confirm_form.attivita.errors %} is-error{% else %} is-autofill{% endif %}">
+              {% if confirm_form.attivita.errors %}<p class="form-error">{{ confirm_form.attivita.errors.0 }}</p>{% endif %}
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:1.5rem;">
+            <a href="{% url 'attivita_wps' %}" class="btn btn-ghost">← Indietro</a>
+            <button type="submit" class="btn btn-primary">Conferma →</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Right: Gemini bore analysis -->
+      <div style="display:flex; flex-direction:column; gap:1rem;">
+
+        <!-- Bore card -->
+        <div class="form-card">
+          <h3 style="font-size:0.875rem; font-weight:600; margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--text-muted);"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Analisi Gemini
+          </h3>
+
+          {% if gemini.error %}
+          <div class="alert alert-error">{{ gemini.error }}</div>
+          {% else %}
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.625rem; margin-bottom:1rem;">
+            <div class="data-cell">
+              <div class="data-cell-label">Diametro esterno</div>
+              <div class="data-cell-value">{{ gemini.diameter|default:"—" }} mm</div>
+            </div>
+            <div class="data-cell">
+              <div class="data-cell-label">Spessore S1</div>
+              <div class="data-cell-value">{{ gemini.s1|default:"—" }} mm</div>
+            </div>
+            {% if gemini.tube_pitch %}
+            <div class="data-cell" style="grid-column:span 2;">
+              <div class="data-cell-label">Passo tubi</div>
+              <div class="data-cell-value">{{ gemini.tube_pitch }} mm</div>
+            </div>
+            {% endif %}
+          </div>
+          {% endif %}
+
+          {% if bore and bore.min is not None %}
+          <div style="border-top:1px solid var(--border); padding-top:1rem;">
+            <div style="font-size:0.75rem; font-weight:600; color:var(--text-muted); margin-bottom:0.625rem;">Finestra bore calcolata</div>
+            <div class="bore-bar">
+              <span class="bore-value">{{ bore.min|floatformat:2 }}</span>
+              <span class="bore-sep">–</span>
+              <span class="bore-value">{{ bore.max|floatformat:2 }}</span>
+              <span class="bore-sep" style="margin-left:0.25rem;">mm (mid: {{ bore.mid|floatformat:2 }})</span>
+            </div>
+            {% if bore.tube_pitch %}
+            <div style="font-size:0.75rem; color:var(--text-muted);">Passo: <strong>{{ bore.tube_pitch|floatformat:2 }} mm</strong></div>
+            {% endif %}
+          </div>
+          {% elif not gemini.error %}
+          <div style="font-size:0.8125rem; color:var(--text-subtle); font-style:italic;">Dati insufficienti per calcolare il bore.</div>
+          {% endif %}
+        </div>
+
+        <!-- Step 1 recap -->
+        <div class="recap-card">
+          <div class="recap-card-title">Riepilogo step 1</div>
+          <div class="recap-grid">
+            <span class="recap-grid-label">Stabilimento</span><span style="font-weight:500;">{{ base.stabilimento }}</span>
+            <span class="recap-grid-label">Responsabile</span><span style="font-weight:500;">{{ base.responsabile }}</span>
+            {% if base.costo %}<span class="recap-grid-label">Costo</span><span style="font-weight:500;">€ {{ base.costo }}</span>{% endif %}
+            {% if base.penale_percentuale %}<span class="recap-grid-label">Penale</span><span style="font-weight:500;">{{ base.penale_percentuale }}%</span>{% endif %}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</main>
+{% endblock %}

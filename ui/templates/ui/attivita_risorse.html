@@ -1,0 +1,215 @@
+﻿{% extends "ui/base.html" %}
+{% block title %}Aggiungi attività — Step 5: Risorse{% endblock %}
+
+{% block content %}
+<main style="padding: 2rem 1rem;">
+  <div style="max-width: 900px; margin: 0 auto;">
+
+    <!-- Wizard step indicator -->
+    <div class="step-indicator">
+      <div class="step-dot">
+        <div class="step-dot-circle step-done">✓</div>
+        <span class="step-dot-label step-done">Info base</span>
+      </div>
+      <div class="step-line step-done"></div>
+      <div class="step-dot">
+        <div class="step-dot-circle step-done">✓</div>
+        <span class="step-dot-label step-done">Carica WPS</span>
+      </div>
+      <div class="step-line step-done"></div>
+      <div class="step-dot">
+        <div class="step-dot-circle step-done">✓</div>
+        <span class="step-dot-label step-done">Conferma</span>
+      </div>
+      <div class="step-line step-done"></div>
+      <div class="step-dot">
+        <div class="step-dot-circle step-done">✓</div>
+        <span class="step-dot-label step-done">Pianificazione</span>
+      </div>
+      <div class="step-line step-done"></div>
+      <div class="step-dot">
+        <div class="step-dot-circle step-active">5</div>
+        <span class="step-dot-label step-active">Risorse</span>
+      </div>
+    </div>
+
+    <!-- Activity summary banner -->
+    <div class="summary-banner">
+      <div class="summary-banner-items">
+        <div>
+          <div class="summary-item-label">Attività</div>
+          <div class="summary-item-value">{{ att.modello_testa }} — {{ att.commessa }}-{{ att.item|stringformat:"02d" }}{% if att.activity %} ({{ att.activity }}){% endif %}</div>
+        </div>
+        <div>
+          <div class="summary-item-label">Stabilimento</div>
+          <div class="summary-item-value">{{ att.stabilimento }}</div>
+        </div>
+        <div>
+          <div class="summary-item-label">Periodo</div>
+          <div class="summary-item-value">{{ att.data_inizio }} → {{ att.data_fine }}</div>
+        </div>
+        {% if att.bore_mid %}
+        <div>
+          <div class="summary-item-label">Bore</div>
+          <div class="summary-item-value">{{ att.bore_min|floatformat:2 }} – {{ att.bore_max|floatformat:2 }} mm</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem;">
+
+        <!-- Teste -->
+        <div class="form-card">
+          <h3>Testa di misura</h3>
+          {% if teste %}
+          <div class="res-list">
+            {% for r in teste %}
+            <label class="res-item-card{% if r.uid in pre_testa %} is-selected{% endif %}">
+              <input type="checkbox" name="teste" value="{{ r.uid }}" {% if r.uid in pre_testa %}checked{% endif %}>
+              <div style="min-width:0; flex:1;">
+                <div style="display:flex; align-items:center; gap:0.375rem;">
+                  {{ r.uid }}
+                  {% if r.stab_esterno %}<span class="badge badge--warning">{{ r.stab_esterno }}</span>{% endif %}
+                </div>
+                {% if r.model %}<div style="font-size:0.75rem; color:var(--text-muted);">{{ r.model }}</div>{% endif %}
+                {% if r.notes %}<div style="font-size:0.7rem; color:var(--text-subtle); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="{{ r.notes }}">{{ r.notes }}</div>{% endif %}
+              </div>
+            </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p style="font-size:0.8125rem; color:var(--text-subtle); font-style:italic;">Nessuna testa disponibile.</p>
+          {% endif %}
+        </div>
+
+        <!-- Mandrini -->
+        <div class="form-card">
+          <h3>Mandrino</h3>
+          {% if mandrini %}
+          <div class="res-list">
+            {% for r in mandrini %}
+            <label class="res-item-card{% if r.uid in pre_mandrini %} is-selected{% endif %}">
+              <input type="checkbox" name="mandrini" value="{{ r.uid }}" {% if r.uid in pre_mandrini %}checked{% endif %}>
+              <div style="min-width:0; flex:1;">
+                <div style="display:flex; align-items:center; gap:0.375rem;">
+                  {{ r.uid }}
+                  {% if r.stab_esterno %}<span class="badge badge--warning">{{ r.stab_esterno }}</span>{% endif %}
+                </div>
+                {% if r.diameter %}<div style="font-size:0.75rem; color:var(--text-muted);">Ø {{ r.diameter }} mm</div>{% endif %}
+                {% if r.notes %}<div style="font-size:0.7rem; color:var(--text-subtle); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="{{ r.notes }}">{{ r.notes }}</div>{% endif %}
+              </div>
+            </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p style="font-size:0.8125rem; color:var(--text-subtle); font-style:italic;">Nessun mandrino disponibile.</p>
+          {% endif %}
+        </div>
+
+        <!-- Tastatori -->
+        <div class="form-card">
+          <h3>Tastatore</h3>
+          {% if tastatori %}
+          <div class="res-list">
+            {% for r in tastatori %}
+            <label class="res-item-card{% if r.uid in pre_tastatori %} is-selected{% endif %}">
+              <input type="checkbox" name="tastatori" value="{{ r.uid }}" {% if r.uid in pre_tastatori %}checked{% endif %}>
+              <div style="min-width:0; flex:1;">
+                <div style="display:flex; align-items:center; gap:0.375rem;">
+                  {{ r.uid }}
+                  {% if r.stab_esterno %}<span class="badge badge--warning">{{ r.stab_esterno }}</span>{% endif %}
+                </div>
+                {% if r.diameter %}<div style="font-size:0.75rem; color:var(--text-muted);">Ø {{ r.diameter }} mm</div>{% endif %}
+                {% if r.notes %}<div style="font-size:0.7rem; color:var(--text-subtle); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="{{ r.notes }}">{{ r.notes }}</div>{% endif %}
+              </div>
+            </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p style="font-size:0.8125rem; color:var(--text-subtle); font-style:italic;">Nessun tastatore disponibile.</p>
+          {% endif %}
+        </div>
+
+        <!-- Maschere -->
+        <div class="form-card">
+          <h3>Maschera</h3>
+          {% if maschere %}
+          <div class="res-list">
+            {% for r in maschere %}
+            <label class="res-item-card{% if r.uid in pre_maschere %} is-selected{% endif %}">
+              <input type="checkbox" name="maschere" value="{{ r.uid }}" {% if r.uid in pre_maschere %}checked{% endif %}>
+              <div style="min-width:0; flex:1;">
+                <div style="display:flex; align-items:center; gap:0.375rem;">
+                  {{ r.uid }}
+                  {% if r.stab_esterno %}<span class="badge badge--warning">{{ r.stab_esterno }}</span>{% endif %}
+                </div>
+                {% if r.pitch %}<div style="font-size:0.75rem; color:var(--text-muted);">Passo {{ r.pitch }} mm</div>{% endif %}
+                {% if r.notes %}<div style="font-size:0.7rem; color:var(--text-subtle); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="{{ r.notes }}">{{ r.notes }}</div>{% endif %}
+              </div>
+            </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p style="font-size:0.8125rem; color:var(--text-subtle); font-style:italic;">Nessuna maschera disponibile.</p>
+          {% endif %}
+        </div>
+
+      </div>
+
+      <!-- Generatori (full width) -->
+      <div class="form-card" style="margin-bottom:1.5rem;">
+        <h3>Generatore</h3>
+        {% if generatori %}
+        <div class="res-list-wrap">
+          {% for r in generatori %}
+          <label class="res-item-card{% if r.uid in pre_generatori %} is-selected{% endif %}">
+            <input type="checkbox" name="generatori" value="{{ r.uid }}" {% if r.uid in pre_generatori %}checked{% endif %}>
+            <div>
+              <div style="display:flex; align-items:center; gap:0.375rem;">
+                {{ r.uid }}
+                {% if r.stab_esterno %}<span class="badge badge--warning">{{ r.stab_esterno }}</span>{% endif %}
+              </div>
+              {% if r.model %}<div style="font-size:0.75rem; color:var(--text-muted);">{{ r.model }}</div>{% endif %}
+            </div>
+          </label>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p style="font-size:0.8125rem; color:var(--text-subtle); font-style:italic;">Nessun generatore disponibile.</p>
+        {% endif %}
+      </div>
+
+      <!-- Legend -->
+      <div style="display:flex; align-items:center; gap:1rem; margin-bottom:1.25rem; font-size:0.75rem; color:var(--text-muted);">
+        <span style="display:inline-flex; align-items:center; gap:0.375rem;">
+          <span class="badge badge--warning">Stabilimento</span>
+          Risorsa da altro stabilimento
+        </span>
+        <span style="display:inline-flex; align-items:center; gap:0.375rem;">
+          <span style="display:inline-block; width:0.75rem; height:0.75rem; border:1px solid var(--text); border-radius:0.1rem; background:var(--surface-2);"></span>
+          Pre-selezionata
+        </span>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <a href="{% url 'attivita_pianificazione' %}" class="wiz-btn-back">← Indietro</a>
+        <button type="submit" class="wiz-btn-next">Aggiungi attività ✓</button>
+      </div>
+    </form>
+
+  </div>
+</main>
+
+<script>
+  /* Toggle is-selected class on resource cards */
+  document.querySelectorAll('.res-item-card input[type=checkbox]').forEach(function(cb) {
+    cb.addEventListener('change', function() {
+      this.closest('label').classList.toggle('is-selected', this.checked);
+    });
+  });
+</script>
+{% endblock %}

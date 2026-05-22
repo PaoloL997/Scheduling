@@ -1,0 +1,28 @@
+[project]
+name = "programmazione-produzione"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Paolo Litta",email = "plitta@brembanarolle.com"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic (>=2.13.4,<3.0.0)",
+    "pywin32 (>=311,<312)",
+    "openpyxl (>=3.1.5,<4.0.0)",
+    "django (>=5.0,<6.0)",
+    "google-genai (>=1.0.0,<2.0.0)",
+    "python-dotenv (>=1.0.0,<2.0.0)",
+    "tqdm (>=4.67.3,<5.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pre-commit (>=4.6.0,<5.0.0)"
+]
