@@ -38,6 +38,9 @@ staticfiles/
 *.swp
 *.swo
 
+# Node (Gantt JS tests)
+node_modules/
+
 # OS
 .DS_Store
 Thumbs.db
