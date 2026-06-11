@@ -34,6 +34,51 @@ def test_precedence_respected():
     assert outcome.activity_starts["a1"] + 2 <= outcome.activity_starts["a2"]
 
 
+def test_explicit_empty_predecessors_allow_parallelism():
+    # With explicit (empty) predecessor lists the activities are independent
+    # and an earliest_start on all of them must not force a chain.
+    es = date(2026, 1, 8)
+    a1 = make_activity(
+        "a1", "j1", 1, duration_days=5, earliest_start=es, predecessors=[]
+    )
+    a2 = make_activity(
+        "a2", "j1", 2, duration_days=5, earliest_start=es, predecessors=[]
+    )
+    a3 = make_activity(
+        "a3", "j1", 3, duration_days=5, earliest_start=es, predecessors=[]
+    )
+    # Due date is one week after the earliest start: only a parallel schedule
+    # avoids the penalty.
+    job = make_job("j1", [a1, a2, a3], due_date=date(2026, 1, 16), penalty_per_week=100)
+    outcome = solve(_problem([job], []))
+    assert outcome.feasible
+    # A sequential chain (15 working days from Jan 8) could never finish by
+    # Jan 16, so zero penalty proves the activities ran in parallel.
+    assert outcome.total_penalty_cents == 0
+
+
+def test_explicit_predecessors_enforced():
+    a1 = make_activity("a1", "j1", 1, duration_days=2, predecessors=[])
+    a2 = make_activity("a2", "j1", 2, duration_days=2, predecessors=[])
+    a3 = make_activity("a3", "j1", 3, duration_days=2, predecessors=["a1", "a2"])
+    outcome = solve(_problem([make_job("j1", [a1, a2, a3], due_date=FAR_DUE)], []))
+    assert outcome.feasible
+    starts = outcome.activity_starts
+    assert starts["a1"] + 2 <= starts["a3"]
+    assert starts["a2"] + 2 <= starts["a3"]
+
+
+def test_penalty_uses_latest_parallel_branch():
+    # Two parallel branches; the longer one determines the completion date.
+    a1 = make_activity("a1", "j1", 1, duration_days=1, predecessors=[])
+    a2 = make_activity("a2", "j1", 2, duration_days=10, predecessors=[])
+    # Due date allows the short branch only: the job is late because of a2.
+    job = make_job("j1", [a1, a2], due_date=date(2026, 1, 2), penalty_per_week=100)
+    outcome = solve(_problem([job], []))
+    assert outcome.feasible
+    assert outcome.total_penalty_cents > 0
+
+
 def test_earliest_start_respected():
     a1 = make_activity("a1", "j1", 1, duration_days=1, earliest_start=date(2026, 1, 8))
     outcome = solve(_problem([make_job("j1", [a1], due_date=FAR_DUE)], []))

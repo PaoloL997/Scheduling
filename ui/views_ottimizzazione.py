@@ -25,7 +25,10 @@ from ui.services.optimization_problem import (
     build_scheduling_problem,
     deadlines_for_jobs,
     filter_job_ids_with_activities,
+    filter_plannable_gantt_tasks,
+    fixed_activities_for_llm,
     hydrate_gantt_tasks_resources,
+    is_attivita_fixed,
     schedule_metrics_from_tasks,
     schedule_result_to_gantt_tasks,
 )
@@ -177,7 +180,9 @@ def _run_optimization(
     colors = _plant_colors()
     attivita = activities_for_job_ids(job_ids)
     attivita_by_id = {a.activity_id: a for a in attivita}
-    tasks_before = activities_to_gantt_tasks(attivita, colors)
+    tasks_before_all = activities_to_gantt_tasks(attivita, colors)
+    tasks_before = filter_plannable_gantt_tasks(tasks_before_all, attivita)
+    fixed_activities = fixed_activities_for_llm(attivita, colors)
     deadlines = deadlines_for_jobs(job_ids)
 
     if not feasibility.feasible:
@@ -186,6 +191,7 @@ def _run_optimization(
             "feasible": False,
             "error": "; ".join(i.detail for i in feasibility.issues),
             "tasks_before": tasks_before,
+            "fixed_activities": fixed_activities,
             "deadlines": deadlines,
         }
 
@@ -196,23 +202,33 @@ def _run_optimization(
             "feasible": False,
             "error": "Il solver non ha trovato una soluzione fattibile.",
             "tasks_before": tasks_before,
+            "fixed_activities": fixed_activities,
             "deadlines": deadlines,
         }
 
-    tasks_after = schedule_result_to_gantt_tasks(
+    tasks_after_all = schedule_result_to_gantt_tasks(
         result,
         attivita_by_id,
         colors,
         attivita=attivita,
     )
-    metrics_before = schedule_metrics_from_tasks(tasks_before, job_ids)
-    metrics_after_from_tasks = schedule_metrics_from_tasks(tasks_after, job_ids)
+    tasks_after = filter_plannable_gantt_tasks(tasks_after_all, attivita)
+    fixed_tasks = activities_to_gantt_tasks(
+        [a for a in attivita if is_attivita_fixed(a)],
+        colors,
+    )
+    metrics_before = schedule_metrics_from_tasks(tasks_before_all, job_ids)
+    metrics_after_from_tasks = schedule_metrics_from_tasks(
+        tasks_after + fixed_tasks,
+        job_ids,
+    )
     return {
         "ok": True,
         "feasible": True,
         "result_payload": {
             "tasks_before": tasks_before,
             "tasks_after": tasks_after,
+            "fixed_activities": fixed_activities,
             "deadlines": deadlines,
             "job_ids": job_ids,
             "metrics_before": metrics_before,

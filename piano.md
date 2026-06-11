@@ -17,8 +17,12 @@ penale totale per ritardo di consegna** (idealmente azzerarla).
 Queste sono le regole confermate con cui costruire il sistema:
 
 1. **Durata attività** = numero di **giorni lavorativi** necessari a completarla.
-2. **Attività di un job in catena lineare**: un'attività può iniziare solo quando la precedente
-   (dello stesso job) è conclusa.
+2. **Precedenze esplicite tra attività dello stesso job**: un'attività può iniziare solo quando
+   tutti i suoi **predecessori** (campo `predecessors`, importato da MS Project) sono conclusi.
+   Attività senza predecessori sono **indipendenti** e possono essere **parallelizzate** se le
+   risorse lo consentono. Quando nessuna attività del job dichiara predecessori espliciti nel
+   modello di ottimizzazione, si ricade nella **catena lineare** per `order` (comportamento legacy
+   usato da mockup e benchmark).
 3. **Penale** = importo per **settimana di ritardo**, **arrotondata per eccesso** (1 giorno di
    ritardo = 1 settimana).
 4. **Calendario lavorativo lun–ven** (sabato e domenica non lavorativi). **Festività ignorate** per ora.
@@ -29,7 +33,8 @@ Queste sono le regole confermate con cui costruire il sistema:
 7. **Matching maschera** = misura (`tube_pitch`) **esatta**.
 8. **Requisiti generati dai dati**: un'attività richiede una risorsa **solo se il relativo attributo
    è specificato** (vedi §5). Le **quantità** richieste sono **definite in input**.
-9. **Consegna del job** = fine dell'**ultima** attività della catena.
+9. **Consegna del job** = fine dell'attività che termina **più tardi** (con rami paralleli non è
+   necessariamente l'ultima della catena).
 
 ---
 
@@ -96,9 +101,10 @@ La presenza di un requisito dipende dagli **attributi specificati** sull'attivit
 
 ## 6. Vincoli del modello
 
-1. **Precedenza in catena (intra-job)**
-   Ogni attività inizia solo dopo la fine della precedente dello stesso job:
-   `fine(attività k) ≤ inizio(attività k+1)`.
+1. **Precedenza intra-job (DAG)**
+   Ogni attività inizia solo dopo la fine di tutti i suoi predecessori:
+   `fine(pred) ≤ inizio(attività)` per ogni arco del grafo di precedenza.
+   Fallback: catena lineare per `order` quando nessun predecessore è dichiarato.
 
 2. **Earliest start (opzionale)**
    `inizio(attività) ≥ earliest_start` quando specificato; altrimenti nessun limite inferiore oltre l'orizzonte.

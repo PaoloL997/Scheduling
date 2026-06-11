@@ -85,6 +85,23 @@ def test_binding_earliest_start_pushes_chain_past_horizon():
     assert any(i.kind == "horizon_too_short" for i in report.issues)
 
 
+def test_parallel_branches_fit_in_shorter_horizon():
+    # Two independent activities (explicit empty predecessors) of 4 days each
+    # fit in a 5-day horizon only if treated as parallelizable.
+    a1 = make_activity("a1", "j1", 1, duration_days=4, predecessors=[])
+    a2 = make_activity("a2", "j1", 2, duration_days=4, predecessors=[])
+    report = check_feasibility(_problem([make_job("j1", [a1, a2])], [], horizon_days=5))
+    assert report.feasible
+
+
+def test_dag_critical_path_exceeds_horizon():
+    a1 = make_activity("a1", "j1", 1, duration_days=4, predecessors=[])
+    a2 = make_activity("a2", "j1", 2, duration_days=4, predecessors=["a1"])
+    report = check_feasibility(_problem([make_job("j1", [a1, a2])], [], horizon_days=5))
+    assert not report.feasible
+    assert any(i.kind == "horizon_too_short" for i in report.issues)
+
+
 def test_late_job_is_not_infeasible():
     # Due date already in the past, but resources exist and horizon fits.
     activity = make_activity("a1", "j1", 1, duration_days=2)

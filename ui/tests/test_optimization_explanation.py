@@ -163,6 +163,31 @@ class OptimizationExplanationFormatTest(TestCase):
         self.assertIn("errore", data["meta"])
         self.assertIn("suggerimento", data["meta"])
 
+    def test_includes_fixed_activities_as_intoccabili(self) -> None:
+        payload = _sample_payload()
+        payload["fixed_activities"] = [
+            {
+                "activity_id": "J1-00-done",
+                "job_id": "J1",
+                "commessa": "J1",
+                "item": "00",
+                "attivita": "done",
+                "stato": "in_corso",
+                "inizio_effettivo": "2026-06-01",
+                "fine_effettiva": None,
+                "inizio_pianificato_db": "2026-06-01",
+                "fine_pianificata_db": "2026-06-05",
+                "risorse": "G500",
+                "nota": "Intoccabile",
+            }
+        ]
+        data = format_optimization_result_for_llm(payload)
+        self.assertEqual(data["attivita_intoccabili"]["conteggio"], 1)
+        self.assertEqual(
+            data["attivita_intoccabili"]["attivita"][0]["activity_id"],
+            "J1-00-done",
+        )
+
     def test_resolve_rejects_inner_result_dict(self) -> None:
         with self.assertRaises(TypeError) as ctx:
             resolve_llm_payload(

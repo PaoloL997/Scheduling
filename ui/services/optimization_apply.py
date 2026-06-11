@@ -20,6 +20,7 @@ from ui.models import (
 )
 from ui.services.optimization_problem import (
     activities_for_job_ids,
+    is_attivita_fixed,
     match_attivita_for_solver_activity_id,
 )
 from ui.services.resource_conflicts import validate_no_conflicts
@@ -144,6 +145,9 @@ def apply_optimization_result(result_payload: dict[str, Any]) -> int:
             if att is None:
                 raise OptimizationApplyError(f"Attività non trovata (id={orm_id}).")
 
+        if is_attivita_fixed(att):
+            continue
+
         if start is None or finish is None:
             raise OptimizationApplyError(
                 f"Date mancanti per l'attività {att.activity_id}."
@@ -152,16 +156,12 @@ def apply_optimization_result(result_payload: dict[str, Any]) -> int:
         pairs = _resource_assignments_for_task(task)
         updates.append((att, start, finish, pairs))
 
+    if not updates:
+        return 0
+
     with transaction.atomic():
         updated = 0
         for att, start, finish, pairs in updates:
-            validate_no_conflicts(
-                pairs,
-                start,
-                finish,
-                exclude_activity_id=att.pk,
-            )
-
             old_commessa = att.commessa
             old_item = att.item
             old_activity = att.activity
@@ -206,5 +206,17 @@ def apply_optimization_result(result_payload: dict[str, Any]) -> int:
                 ),
             )
             updated += 1
+
+        # Validate against the fully-applied state: a proposal moves many
+        # activities at once, so checking each one against the stale dates of
+        # the others would report false conflicts. On any real conflict the
+        # exception rolls back the whole transaction.
+        for att, start, finish, pairs in updates:
+            validate_no_conflicts(
+                pairs,
+                start,
+                finish,
+                exclude_activity_id=att.pk,
+            )
 
     return updated

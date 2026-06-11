@@ -39,6 +39,56 @@ logger = logging.getLogger(__name__)
 _INVENTORY_TABLES = {"Generatore", "Mandrino", "Maschera", "Tastatore", "Testa"}
 
 
+def _parse_job_money(value) -> float | None:
+    """Parse an optional monetary amount (e.g. job ``total_cost``).
+
+    Accepts plain numbers and Italian formatting such as ``200.000`` or
+    ``1.234,56``.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, int | float):
+        amount = float(value)
+        if amount < 0:
+            raise ValueError("negative")
+        return amount
+    text = str(value).strip().replace("\u00a0", "").replace(" ", "")
+    if not text:
+        return None
+    if "," in text:
+        text = text.replace(".", "").replace(",", ".")
+    elif text.count(".") == 1:
+        left, right = text.split(".", 1)
+        if len(right) == 3 and right.isdigit():
+            text = left + right
+    else:
+        text = text.replace(".", "")
+    try:
+        amount = float(text)
+    except ValueError as exc:
+        raise ValueError("invalid") from exc
+    if amount < 0:
+        raise ValueError("negative")
+    return amount
+
+
+def _parse_job_penalty(value) -> float | None:
+    """Parse an optional penalty percentage."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, int | float):
+        penalty = float(value)
+    else:
+        text = str(value).strip().replace(",", ".")
+        try:
+            penalty = float(text)
+        except ValueError as exc:
+            raise ValueError("invalid") from exc
+    if penalty < 0:
+        raise ValueError("negative")
+    return penalty
+
+
 @login_required
 def index(request: HttpRequest):
     """Render the main application page.
@@ -848,14 +898,20 @@ def api_jobs_create(request: HttpRequest) -> JsonResponse:
             status=409,
         )
 
-    penalty_raw = data.get("penalty")
-    if penalty_raw not in (None, ""):
-        try:
-            penalty_val = float(penalty_raw)
-        except (ValueError, TypeError):
-            return JsonResponse(
-                {"ok": False, "error": "Valore penale non valido."}, status=400
-            )
+    try:
+        total_cost = _parse_job_money(data.get("total_cost"))
+    except ValueError:
+        return JsonResponse(
+            {"ok": False, "error": "Costo totale non valido."}, status=400
+        )
+
+    try:
+        penalty_val = _parse_job_penalty(data.get("penalty"))
+    except ValueError:
+        return JsonResponse(
+            {"ok": False, "error": "Valore penale non valido."}, status=400
+        )
+    if penalty_val is not None:
         penale_max = float(AppSettings.load().penale_max)
         if penalty_val > penale_max:
             return JsonResponse(
@@ -866,8 +922,8 @@ def api_jobs_create(request: HttpRequest) -> JsonResponse:
     try:
         job = Job.objects.create(
             commessa=commessa,
-            total_cost=data.get("total_cost") or None,
-            penalty=penalty_raw or None,
+            total_cost=total_cost,
+            penalty=penalty_val,
             delivery_date=data.get("delivery_date") or None,
         )
     except Exception as exc:
@@ -891,6 +947,7 @@ def api_jobs_create(request: HttpRequest) -> JsonResponse:
     )
 
 
+@login_required
 @csrf_exempt
 @require_http_methods(["PUT"])
 def api_jobs_update(request: HttpRequest) -> JsonResponse:
@@ -920,15 +977,20 @@ def api_jobs_update(request: HttpRequest) -> JsonResponse:
             status=400,
         )
 
-    # Validate penalty against the configured maximum.
-    penalty_raw = data.get("penalty")
-    if penalty_raw is not None and penalty_raw != "":
-        try:
-            penalty_val = float(penalty_raw)
-        except (ValueError, TypeError):
-            return JsonResponse(
-                {"ok": False, "error": "Valore penale non valido."}, status=400
-            )
+    try:
+        total_cost = _parse_job_money(data.get("total_cost"))
+    except ValueError:
+        return JsonResponse(
+            {"ok": False, "error": "Costo totale non valido."}, status=400
+        )
+
+    try:
+        penalty_val = _parse_job_penalty(data.get("penalty"))
+    except ValueError:
+        return JsonResponse(
+            {"ok": False, "error": "Valore penale non valido."}, status=400
+        )
+    if penalty_val is not None:
         penale_max = float(AppSettings.load().penale_max)
         if penalty_val > penale_max:
             return JsonResponse(
@@ -939,6 +1001,8 @@ def api_jobs_update(request: HttpRequest) -> JsonResponse:
                 status=400,
             )
 
+    delivery_date = data.get("delivery_date") or None
+
     try:
         qs = (
             Job.objects.filter(commessa=commessa)
@@ -946,13 +1010,20 @@ def api_jobs_update(request: HttpRequest) -> JsonResponse:
             else Job.objects.filter(job_id=job_id)
         )
         updated = qs.update(
-            total_cost=data.get("total_cost") or None,
-            penalty=data.get("penalty") or None,
-            delivery_date=data.get("delivery_date") or None,
+            total_cost=total_cost,
+            penalty=penalty_val,
+            delivery_date=delivery_date,
         )
         if updated == 0:
-            return JsonResponse(
-                {"ok": False, "error": "Commessa non trovata."}, status=404
+            if not commessa:
+                return JsonResponse(
+                    {"ok": False, "error": "Commessa non trovata."}, status=404
+                )
+            Job.objects.create(
+                commessa=commessa,
+                total_cost=total_cost,
+                penalty=penalty_val,
+                delivery_date=delivery_date,
             )
     except Exception as exc:
         logger.error("Errore aggiornamento Job: %s", exc)

@@ -40,6 +40,7 @@ REGOLE:
 - Tabelle in sintassi Markdown standard con riga separatrice |---|---|.
 - Valori numerici e nomi rilevanti in **grassetto**.
 - Non inventare dati assenti dal JSON.
+- Se presente ``attivita_intoccabili``, trattale come vincoli già in corso o conclusi: non dire che devono ancora partire e non includerle nei confronti attuale/proposta.
 """
 
 

@@ -113,6 +113,10 @@ class Activity(BaseModel):
     plant: str  # descriptive only, never a temporal constraint
     duration_days: int  # working days
     earliest_start: date | None = None
+    #: Explicit precedence: ids of same-job activities that must finish first.
+    #: ``None`` means "unspecified" — the job falls back to a linear chain by
+    #: ``order`` (legacy behaviour). An empty list means "no predecessors".
+    predecessors: list[str] | None = None
 
     # Requirement-generating attributes (present only when applicable).
     bore_min: float | None = None
@@ -163,8 +167,26 @@ class Activity(BaseModel):
         return self
 
 
+class ResourceReservation(BaseModel):
+    """A resource blocked by an activity outside the solved job set.
+
+    Activities already started or completed are never part of the model;
+    they only appear here, as immovable bookings on their resources.
+    """
+
+    resource_id: str
+    start_index: int = Field(ge=0)
+    duration_days: int = Field(ge=1)
+    activity_id: str | None = None
+
+
 class Job(BaseModel):
-    """A commission: an ordered chain of one or more activities."""
+    """A commission: one or more activities linked by precedence constraints.
+
+    When no activity declares ``predecessors`` the job behaves as a linear
+    chain ordered by ``Activity.order``; otherwise the explicit precedence
+    graph (a DAG) is used and unrelated activities may run in parallel.
+    """
 
     job_id: str
     due_date: date
@@ -190,6 +212,74 @@ class Job(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def check_predecessors(self):
+        ids = {activity.activity_id for activity in self.activities}
+        for activity in self.activities:
+            for pred_id in activity.predecessors or []:
+                if pred_id == activity.activity_id:
+                    raise ValueError(
+                        f"Activity {activity.activity_id} cannot be its own "
+                        "predecessor."
+                    )
+                if pred_id not in ids:
+                    raise ValueError(
+                        f"Activity {activity.activity_id} references unknown "
+                        f"predecessor {pred_id}."
+                    )
+        # Raises ValueError on a precedence cycle.
+        topological_activities(self)
+        return self
+
+
+def precedence_pairs(job: Job) -> list[tuple[Activity, Activity]]:
+    """Return the (predecessor, successor) pairs of a job.
+
+    Falls back to the legacy linear chain by ``order`` when no activity
+    declares an explicit ``predecessors`` list.
+    """
+    if all(activity.predecessors is None for activity in job.activities):
+        ordered = sorted(job.activities, key=lambda a: a.order)
+        return list(zip(ordered, ordered[1:]))
+
+    by_id = {activity.activity_id: activity for activity in job.activities}
+    pairs: list[tuple[Activity, Activity]] = []
+    for activity in sorted(job.activities, key=lambda a: a.order):
+        for pred_id in activity.predecessors or []:
+            pairs.append((by_id[pred_id], activity))
+    return pairs
+
+
+def topological_activities(job: Job) -> list[Activity]:
+    """Activities in a precedence-respecting order (Kahn's algorithm).
+
+    Ties are broken by ``Activity.order``. Raises ``ValueError`` when the
+    precedence graph contains a cycle.
+    """
+    successors: dict[str, list[Activity]] = {a.activity_id: [] for a in job.activities}
+    in_degree: dict[str, int] = {a.activity_id: 0 for a in job.activities}
+    for prev, curr in precedence_pairs(job):
+        successors[prev.activity_id].append(curr)
+        in_degree[curr.activity_id] += 1
+
+    ready = sorted(
+        (a for a in job.activities if in_degree[a.activity_id] == 0),
+        key=lambda a: a.order,
+    )
+    result: list[Activity] = []
+    while ready:
+        activity = ready.pop(0)
+        result.append(activity)
+        for succ in successors[activity.activity_id]:
+            in_degree[succ.activity_id] -= 1
+            if in_degree[succ.activity_id] == 0:
+                ready.append(succ)
+        ready.sort(key=lambda a: a.order)
+
+    if len(result) != len(job.activities):
+        raise ValueError(f"Job {job.job_id} has a cycle in its activity precedences.")
+    return result
+
 
 class SchedulingProblem(BaseModel):
     """A full problem instance: jobs, resource inventory and planning horizon."""
@@ -199,6 +289,8 @@ class SchedulingProblem(BaseModel):
     horizon_start: date
     #: Horizon length in working days; auto-derived (safe upper bound) when None.
     horizon_days: int | None = None
+    #: Resource intervals blocked by fixed activities of commesse not in ``jobs``.
+    resource_reservations: list[ResourceReservation] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def check_unique_ids(self):
@@ -238,4 +330,5 @@ class SchedulingProblem(BaseModel):
                         latest_earliest,
                         calendar.date_to_working_index(activity.earliest_start),
                     )
-        return latest_earliest + total_duration
+        reserved = sum(r.duration_days for r in self.resource_reservations)
+        return latest_earliest + total_duration + reserved

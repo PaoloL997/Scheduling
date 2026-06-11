@@ -14,9 +14,12 @@ from src.optimization.calendar import WorkingCalendar
 from src.optimization.compatibility import get_compatible_resources
 from src.optimization.data_model import (
     Activity,
+    Job,
     Requirement,
     Resource,
     SchedulingProblem,
+    precedence_pairs,
+    topological_activities,
 )
 from src.optimization.requirements import generate_requirements
 
@@ -68,30 +71,54 @@ def _check_resource_coverage(
             )
 
 
+def earliest_completion_index(
+    job: Job,
+    calendar: WorkingCalendar,
+    *,
+    honor_earliest_start: bool = True,
+) -> int:
+    """Earliest exclusive completion index of a job, ignoring resources.
+
+    Longest path over the job's precedence DAG: each activity starts at the
+    maximum of its predecessors' ends (and optionally its ``earliest_start``
+    lower bound); the job completes at the maximum activity end.
+    """
+    predecessors: dict[str, list[Activity]] = {
+        a.activity_id: [] for a in job.activities
+    }
+    for prev, curr in precedence_pairs(job):
+        predecessors[curr.activity_id].append(prev)
+
+    end: dict[str, int] = {}
+    for activity in topological_activities(job):
+        lower_bound = max(
+            (end[p.activity_id] for p in predecessors[activity.activity_id]),
+            default=0,
+        )
+        if honor_earliest_start and activity.earliest_start is not None:
+            lower_bound = max(
+                lower_bound,
+                calendar.date_to_working_index(activity.earliest_start),
+            )
+        end[activity.activity_id] = lower_bound + activity.duration_days
+    return max(end.values())
+
+
 def _check_horizon(
     problem: SchedulingProblem,
     calendar: WorkingCalendar,
     issues: list[FeasibilityIssue],
 ) -> None:
-    """Each job chain must fit within the horizon after its earliest starts.
+    """Each job must fit within the horizon after its earliest starts.
 
-    Activities of a job are sequential, so the earliest the chain can finish is
-    the running maximum of (earliest_start lower bound, previous end) plus the
-    remaining durations. If that minimum finish exceeds the horizon the instance
-    cannot be scheduled at all.
+    The earliest a job can finish is the longest path through its precedence
+    graph including ``earliest_start`` lower bounds. If that minimum finish
+    exceeds the horizon the instance cannot be scheduled at all.
     """
     horizon = problem.horizon_days
     assert horizon is not None  # set by SchedulingProblem.derive_horizon
     for job in problem.jobs:
-        earliest_end = 0
-        for activity in sorted(job.activities, key=lambda a: a.order):
-            lower_bound = earliest_end
-            if activity.earliest_start is not None:
-                lower_bound = max(
-                    lower_bound,
-                    calendar.date_to_working_index(activity.earliest_start),
-                )
-            earliest_end = lower_bound + activity.duration_days
+        earliest_end = earliest_completion_index(job, calendar)
         if earliest_end > horizon:
             issues.append(
                 FeasibilityIssue(

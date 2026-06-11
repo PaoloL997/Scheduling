@@ -200,7 +200,7 @@
 
         <div class="wiz-field">
           <label>Costo totale (€)</label>
-          <input id="jc-cost" type="number" class="form-input" min="0" step="0.01" placeholder="es. 50000">
+          <input id="jc-cost" type="text" class="form-input" inputmode="decimal" placeholder="es. 200000">
         </div>
 
         <div class="wiz-field" style="grid-column:1/-1;">
@@ -257,7 +257,7 @@
       </div>
       <div class="wiz-field">
         <label>Costo totale (€)</label>
-        <input id="s0-cost" type="number" min="0" step="0.01" placeholder="es. 50000"
+        <input id="s0-cost" type="text" inputmode="decimal" placeholder="es. 200000"
                oninput="if(WIZ.newJob) WIZ.newJob.total_cost = this.value">
       </div>
       <div class="wiz-field">
@@ -2280,11 +2280,11 @@ const TASK_FIELDS = [
 ];
 
 const JOB_FIELDS = [
-  { label:'Commessa',       key:'commessa',     readonly:true  },
-  { label:'Costo totale',   key:'totalCost',    readonly:false },
-  { label:'Penale',         key:'penalty',      readonly:false },
-  { label:'Data consegna',  key:'deliveryDate', readonly:false },
-  { label:'N. attività',    key:'nActivities',  readonly:true  },
+  { label:'Commessa',         key:'commessa',     readonly:true  },
+  { label:'Costo totale (€)', key:'totalCost',    readonly:false, isCurrency:true },
+  { label:'Penale (%)',       key:'penalty',      readonly:false, isPercent:true },
+  { label:'Data consegna',    key:'deliveryDate', readonly:false, isDate:true },
+  { label:'N. attività',      key:'nActivities',  readonly:true  },
 ];
 
 let _detState = null;  // { tr, entityType, originalData }
@@ -2392,6 +2392,18 @@ async function enterEditMode() {
                 <select class="det-input" name="${f.key}">${opts}</select>
               </div>`;
     }
+    if (f.isCurrency) {
+      return `<div class="det-field">
+                <span class="det-label">${esc(f.label)}</span>
+                <input class="det-input" type="text" inputmode="decimal" name="${f.key}" value="${v}" placeholder="es. 200000">
+              </div>`;
+    }
+    if (f.isPercent) {
+      return `<div class="det-field">
+                <span class="det-label">${esc(f.label)}</span>
+                <input class="det-input" type="number" name="${f.key}" value="${v}" min="0" max="${PENALE_MAX}" step="0.01" placeholder="max ${PENALE_MAX}%">
+              </div>`;
+    }
     const inputType = f.isDate ? 'date' : (f.isNumber ? 'number' : 'text');
     const inputAttrs = f.isNumber ? 'min="1" step="1"' : '';
     const editVal = f.isNumber ? (parseInt(v, 10) || v) : v;
@@ -2481,12 +2493,36 @@ async function saveEdit() {
       predecessors:  newData.predecessors ? [newData.predecessors] : [],
     };
   } else {
+    const totalCost = _parseMoneyInput(newData.totalCost);
+    if (Number.isNaN(totalCost)) {
+      _showPianDetError('Il costo totale deve essere un numero positivo (es. 200000).');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Salva';
+      return;
+    }
+    const penaltyRaw = String(newData.penalty ?? '').trim();
+    let penalty = null;
+    if (penaltyRaw) {
+      penalty = Number(penaltyRaw.replace(',', '.'));
+      if (!Number.isFinite(penalty) || penalty < 0) {
+        _showPianDetError('La penale deve essere un numero percentuale valido.');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Salva';
+        return;
+      }
+      if (penalty > PENALE_MAX) {
+        _showPianDetError(`La penale non può superare il ${PENALE_MAX}%.`);
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Salva';
+        return;
+      }
+    }
     url = '/api/jobs/update/';
     payload = {
       commessa:      originalData.commessa,
-      total_cost:    newData.totalCost,
-      penalty:       newData.penalty,
-      delivery_date: newData.deliveryDate,
+      total_cost:    totalCost,
+      penalty:       penalty,
+      delivery_date: newData.deliveryDate || null,
     };
   }
 
@@ -2579,6 +2615,21 @@ function _showPianDetError(msg) {
 function _getCsrfToken() {
   const m = document.cookie.match(/csrftoken=([^;]+)/);
   return m ? m[1] : '';
+}
+
+function _parseMoneyInput(raw) {
+  const text = String(raw ?? '').trim().replace(/\u00a0/g, '').replace(/\s/g, '');
+  if (!text) return null;
+  let normalized = text;
+  if (text.includes(',')) {
+    normalized = text.replace(/\./g, '').replace(',', '.');
+  } else if ((text.match(/\./g) || []).length === 1) {
+    const [left, right] = text.split('.');
+    if (/^\d{3}$/.test(right)) normalized = left + right;
+  }
+  const value = Number(normalized);
+  if (!Number.isFinite(value) || value < 0) return NaN;
+  return value;
 }
 
 // Click on overlay backdrop → close detail modal

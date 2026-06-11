@@ -42,6 +42,26 @@
     };
   }
 
+  const _activeCharts = new Set();
+  let _themeWatcherBound = false;
+  let _lastThemeLight = null;
+
+  function bindThemeWatcher() {
+    if (_themeWatcherBound || typeof MutationObserver === 'undefined') return;
+    if (typeof document === 'undefined' || !document.body) return;
+    _themeWatcherBound = true;
+    _lastThemeLight = document.body.classList.contains('light');
+    const obs = new MutationObserver(() => {
+      const isLight = document.body.classList.contains('light');
+      if (isLight === _lastThemeLight) return;
+      _lastThemeLight = isLight;
+      _activeCharts.forEach(chart => {
+        if (chart.tasks && chart.tasks.length) chart.renderWhenReady();
+      });
+    });
+    obs.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  }
+
   let _globalTipDismissBound = false;
   function bindGlobalTipDismiss() {
     if (_globalTipDismissBound) return;
@@ -138,8 +158,18 @@
       max = max ? (d > max ? d : max) : new Date(d);
     };
     (tasks || []).forEach(t => {
-      consider(parseDate(t.start));
-      consider(parseDate(t.finish));
+      const s = parseDate(t.start);
+      const f = parseDate(t.finish);
+      consider(s);
+      consider(f);
+      if (!isNaN(s) && !isNaN(f)) {
+        const durMs = f - s;
+        const actS = t.actual_start ? parseDate(t.actual_start) : null;
+        const actEnd = t.actual_finish ? parseDate(t.actual_finish)
+          : (actS ? new Date(actS.getTime() + durMs) : null);
+        if (actS) consider(actS);
+        if (actEnd) consider(actEnd);
+      }
     });
     return { min, max };
   }
@@ -200,6 +230,8 @@
       this._dataMinD = null;
       this._dataMaxD = null;
       this._bound = false;
+      _activeCharts.add(this);
+      bindThemeWatcher();
     }
 
     id(name) {
@@ -898,27 +930,6 @@
           ];
           posKeys.forEach(k => { if (k) taskPosMap[k] = taskPos; });
 
-          if (!self.simplified) {
-            const durMs = planF - planS;
-            const actS = row.actual_start ? parseDate(row.actual_start) : null;
-            const actF = row.actual_finish ? parseDate(row.actual_finish) : null;
-            const actEnd = actF || (actS ? new Date(actS.getTime() + durMs) : null);
-            const actX1raw = actS ? dateToX(actS) : null;
-            const actX2raw = actEnd ? dateToX(actEnd) : null;
-            if (actS && actX1raw !== null && actX2raw !== null) {
-              const TAIL_H = 3, TICK_H = BAR_H + 2, TICK_W = 3;
-              const tx1 = Math.max(actX1raw, 0), tx2 = Math.min(actX2raw, totalW);
-              if (tx2 > tx1) {
-                const tl = document.createElementNS(NS, 'rect');
-                tl.setAttribute('x', tx1); tl.setAttribute('y', midY - TAIL_H / 2);
-                tl.setAttribute('width', tx2 - tx1); tl.setAttribute('height', TAIL_H);
-                tl.setAttribute('fill', C); tl.setAttribute('opacity', '0.90');
-                tl.setAttribute('pointer-events', 'none');
-                barsSvg.appendChild(tl);
-              }
-            }
-          }
-
           const isStarted = !!(row.actual_start);
           const isCompleted = !!(row.actual_start && row.actual_finish);
           const isOverdue = !isStarted && today >= planS;
@@ -940,6 +951,41 @@
           rect.setAttribute('data-task', JSON.stringify(row));
           rect.style.cursor = 'pointer';
           barsSvg.appendChild(rect);
+
+          if (!self.simplified && isStarted) {
+            const durMs = planF - planS;
+            const actS = parseDate(row.actual_start);
+            const actF = row.actual_finish ? parseDate(row.actual_finish) : null;
+            const actEnd = actF || new Date(actS.getTime() + durMs);
+            const TAIL_H = 3, TICK_H = BAR_H + 6, TICK_W = 3;
+            const actX1raw = dateToX(actS);
+            const actX2raw = dateToX(actEnd);
+            const tx1 = Math.max(actX1raw, 0);
+            const tx2 = Math.min(actX2raw, totalW);
+            const tickY = midY - TICK_H / 2;
+            const drawActualPart = (x, y, w, h, opacity) => {
+              if (w <= 0) return;
+              const part = document.createElementNS(NS, 'rect');
+              part.setAttribute('x', x);
+              part.setAttribute('y', y);
+              part.setAttribute('width', w);
+              part.setAttribute('height', h);
+              part.setAttribute('rx', '1.5');
+              part.setAttribute('fill', C);
+              part.setAttribute('opacity', opacity);
+              part.setAttribute('pointer-events', 'none');
+              barsSvg.appendChild(part);
+            };
+            const drawTickAt = (centerX) => {
+              const x1 = centerX - Math.floor(TICK_W / 2);
+              const lx = Math.max(x1, 0);
+              const rx = Math.min(x1 + TICK_W, totalW);
+              if (rx > lx) drawActualPart(lx, tickY, rx - lx, TICK_H, '0.95');
+            };
+            if (tx2 > tx1) drawActualPart(tx1, midY - TAIL_H / 2, tx2 - tx1, TAIL_H, '0.90');
+            if (actX1raw + TICK_W >= 0 && actX1raw <= totalW) drawTickAt(actX1raw);
+            if (actX2raw >= 0 && actX2raw - TICK_W <= totalW) drawTickAt(actX2raw);
+          }
 
           if (boxW > 0) {
             const txt = document.createElementNS(NS, 'text');

@@ -317,6 +317,9 @@ def build_result_payload_from_schedule(
         activities_for_job_ids,
         activities_to_gantt_tasks,
         deadlines_for_jobs,
+        filter_plannable_gantt_tasks,
+        fixed_activities_for_llm,
+        is_attivita_fixed,
         schedule_metrics_from_tasks,
         schedule_result_to_gantt_tasks,
     )
@@ -331,12 +334,19 @@ def build_result_payload_from_schedule(
             "Verifica commesse e che Django punti al db.sqlite3 corretto."
         )
 
-    tasks_before = activities_to_gantt_tasks(attivita, colors)
-    tasks_after = schedule_result_to_gantt_tasks(
+    tasks_before_all = activities_to_gantt_tasks(attivita, colors)
+    tasks_before = filter_plannable_gantt_tasks(tasks_before_all, attivita)
+    fixed_activities = fixed_activities_for_llm(attivita, colors)
+    tasks_after_all = schedule_result_to_gantt_tasks(
         result,
         attivita_by_id,
         colors,
         attivita=attivita,
+    )
+    tasks_after = filter_plannable_gantt_tasks(tasks_after_all, attivita)
+    fixed_tasks = activities_to_gantt_tasks(
+        [a for a in attivita if is_attivita_fixed(a)],
+        colors,
     )
     if not tasks_after and result.activities:
         from ui.services.optimization_problem import (
@@ -356,12 +366,16 @@ def build_result_payload_from_schedule(
             "e assicurati che Django usi lo stesso db.sqlite3."
         )
     deadlines = deadlines_for_jobs(unique_job_ids)
-    metrics_before = schedule_metrics_from_tasks(tasks_before, unique_job_ids)
-    metrics_after = schedule_metrics_from_tasks(tasks_after, unique_job_ids)
+    metrics_before = schedule_metrics_from_tasks(tasks_before_all, unique_job_ids)
+    metrics_after = schedule_metrics_from_tasks(
+        tasks_after + fixed_tasks,
+        unique_job_ids,
+    )
 
     return {
         "tasks_before": tasks_before,
         "tasks_after": tasks_after,
+        "fixed_activities": fixed_activities,
         "deadlines": deadlines,
         "job_ids": unique_job_ids,
         "metrics_before": metrics_before,
@@ -459,6 +473,7 @@ def format_optimization_result_for_llm(
     """
     tasks_before = payload.get("tasks_before") or []
     tasks_after = payload.get("tasks_after") or []
+    fixed_activities = payload.get("fixed_activities") or []
     if not tasks_before or not tasks_after:
         return {
             "meta": {
@@ -540,6 +555,10 @@ def format_optimization_result_for_llm(
                 "proposta": "Soluzione proposta dal solver di ottimizzazione",
                 "penale_eur": "Penale stimata in euro per ritardo sulla deadline commessa",
                 "risorse_joined": "Elenco risorse con separatore ; (convenzione applicazione)",
+                "attivita_intoccabili": (
+                    "Attività già iniziate o completate: escluse dal confronto "
+                    "attuale/proposta ma considerate come vincoli fissi"
+                ),
             },
         },
         "sintesi": {
@@ -565,6 +584,14 @@ def format_optimization_result_for_llm(
             "conteggio": unchanged_count,
             "nota": "Attività omesse dal dettaglio perché inizio, fine e risorse sono invariati.",
             **({"attivita_modificate_omesse": omitted} if omitted else {}),
+        },
+        "attivita_intoccabili": {
+            "conteggio": len(fixed_activities),
+            "nota": (
+                "Attività già iniziate o completate: non compaiono nel confronto "
+                "attuale/proposta; le risorse restano bloccate nell'intervallo effettivo."
+            ),
+            "attivita": fixed_activities,
         },
     }
 

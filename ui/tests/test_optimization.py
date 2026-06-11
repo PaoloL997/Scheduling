@@ -26,9 +26,12 @@ from ui.services.optimization_problem import (
     activities_to_gantt_tasks,
     build_scheduling_problem,
     filter_job_ids_with_activities,
+    fixed_calendar_window,
     hydrate_gantt_tasks_resources,
+    is_attivita_fixed,
     match_attivita_for_solver_activity_id,
     schedule_metrics_from_tasks,
+    schedule_result_to_gantt_tasks,
 )
 from ui.views_ottimizzazione import (
     SESSION_DRAFT_KEY,
@@ -104,6 +107,160 @@ class BuildSchedulingProblemTest(TestCase):
         self.assertEqual(len(activities_for_job_ids([a1.job_id])), 2)
         self.assertEqual(
             filter_job_ids_with_activities([a1.job_id, "TG99"]), [a1.job_id]
+        )
+
+    def test_in_progress_activity_excluded_from_model(self) -> None:
+        """Started activities must not appear in the optimization model at all."""
+        started = _make_activity("T001", 1, "SNA", di="2026-06-01", df="2026-06-10")
+        started.actual_start = date(2026, 6, 5)
+        started.save()
+        free = _make_activity("T001", 1, "SNB")
+        problem = build_scheduling_problem([started.job_id])
+        ids = {a.activity_id for j in problem.jobs for a in j.activities}
+        self.assertNotIn(started.activity_id, ids)
+        self.assertIn(free.activity_id, ids)
+
+    def test_in_progress_without_data_fine_excluded(self) -> None:
+        """Regression: actual_start alone must exclude the activity."""
+        att = _make_activity("T001", 1, "A", di="2026-06-01", df="2026-06-10")
+        att.data_fine = None
+        att.duration_min = 5 * 8 * 60
+        att.actual_start = date(2026, 6, 5)
+        att.save()
+        _make_activity("T001", 1, "B")
+        problem = build_scheduling_problem([att.job_id])
+        ids = {a.activity_id for j in problem.jobs for a in j.activities}
+        self.assertNotIn(att.activity_id, ids)
+
+    def test_in_progress_resources_become_reservations(self) -> None:
+        started = _make_activity("T001", 1, "SNA", di="2026-06-01", df="2026-06-10")
+        started.actual_start = date(2026, 6, 5)
+        started.save()
+        RisorsaAttivita.objects.create(
+            attivita=started, tipo="mandrino", risorsa_id="m-test"
+        )
+        _make_activity("T001", 1, "SNB")
+        problem = build_scheduling_problem(
+            [started.job_id], horizon_start=date(2026, 6, 1)
+        )
+        reserved = {
+            (r.resource_id, r.activity_id) for r in problem.resource_reservations
+        }
+        self.assertIn(("mandrino:m-test", started.activity_id), reserved)
+
+    def test_all_fixed_job_raises(self) -> None:
+        att = _make_activity("T001", 1, "done", di="2026-05-01", df="2026-05-10")
+        att.actual_start = date(2026, 5, 1)
+        att.actual_finish = date(2026, 5, 8)
+        att.save()
+        with self.assertRaises(OptimizationProblemError):
+            build_scheduling_problem([att.job_id])
+
+    def test_fixed_predecessor_becomes_earliest_start(self) -> None:
+        """A successor of a started activity starts after its locked window."""
+        started = _make_activity("T001", 1, "SNA", di="2026-06-01", df="2026-06-10")
+        started.actual_start = date(2026, 6, 3)
+        started.save()
+        succ = _make_activity("T001", 1, "SNB")
+        succ.predecessors = started.activity_id
+        succ.save()
+        problem = build_scheduling_problem([started.job_id])
+        act = next(
+            a
+            for j in problem.jobs
+            for a in j.activities
+            if a.activity_id == succ.activity_id
+        )
+        # Locked window ends 2026-06-10 -> successor can start from the 11th.
+        self.assertEqual(act.earliest_start, date(2026, 6, 11))
+        # The dangling reference to the excluded predecessor is dropped.
+        self.assertEqual(act.predecessors, [])
+
+    def test_predecessors_from_db_field(self) -> None:
+        a1 = _make_activity("T001", 1, "prep")
+        a2 = _make_activity("T001", 1, "work")
+        a2.predecessors = a1.activity_id
+        a2.save()
+        problem = build_scheduling_problem([a1.job_id])
+        by_id = {a.activity_id: a for a in problem.jobs[0].activities}
+        self.assertEqual(by_id[a2.activity_id].predecessors, [a1.activity_id])
+        self.assertEqual(by_id[a1.activity_id].predecessors, [])
+
+    def test_activities_without_predecessors_are_independent(self) -> None:
+        """No predecessors recorded in DB -> no forced chain in the model."""
+        from src.optimization.data_model import precedence_pairs
+
+        a1 = _make_activity("T001", 1, "SNA")
+        _make_activity("T001", 1, "SNB")
+        _make_activity("T001", 1, "SNC")
+        problem = build_scheduling_problem([a1.job_id])
+        self.assertEqual(precedence_pairs(problem.jobs[0]), [])
+
+    def test_unknown_predecessor_reference_dropped(self) -> None:
+        a1 = _make_activity("T001", 1, "prep")
+        a1.predecessors = "OTHER-01-x, " + a1.activity_id
+        a1.save()
+        problem = build_scheduling_problem([a1.job_id])
+        self.assertEqual(problem.jobs[0].activities[0].predecessors, [])
+
+    def test_gantt_after_excludes_fixed_activity(self) -> None:
+        from src.optimization.output_model import (
+            ActivitySchedule,
+            JobResult,
+            ScheduleResult,
+        )
+        from ui.services.optimization_problem import (
+            filter_plannable_gantt_tasks,
+            fixed_activities_for_llm,
+        )
+
+        started = _make_activity("T001", 1, "SNA", di="2026-06-01", df="2026-06-10")
+        started.actual_start = date(2026, 6, 3)
+        started.save()
+        free = _make_activity("T001", 1, "SNB")
+        result = ScheduleResult(
+            activities=[
+                ActivitySchedule(
+                    activity_id=free.activity_id,
+                    job_id=free.job_id,
+                    plant="Valbrembo",
+                    start_date=date(2026, 7, 1),
+                    end_date=date(2026, 7, 5),
+                    assigned_resource_ids=["mandrino:m-test"],
+                )
+            ],
+            jobs=[
+                JobResult(
+                    job_id=free.job_id,
+                    due_date=date(2026, 12, 31),
+                    completion_date=date(2026, 7, 5),
+                    delay_days=0,
+                    delay_weeks=0,
+                    penalty=0.0,
+                )
+            ],
+            total_penalty=0.0,
+            num_late_jobs=0,
+        )
+        rows = [started, free]
+        tasks_all = schedule_result_to_gantt_tasks(
+            result, {a.activity_id: a for a in rows}, {}, attivita=rows
+        )
+        tasks = filter_plannable_gantt_tasks(tasks_all, rows)
+        by_id = {t["activity_id"]: t for t in tasks}
+        self.assertNotIn(started.activity_id, by_id)
+        self.assertEqual(by_id[free.activity_id]["start"], "2026-07-01")
+        fixed = fixed_activities_for_llm(rows, {})
+        self.assertEqual(len(fixed), 1)
+        self.assertEqual(fixed[0]["activity_id"], started.activity_id)
+        self.assertEqual(fixed[0]["stato"], "in_corso")
+
+    def test_fixed_calendar_window_in_progress(self) -> None:
+        att = _make_activity("T001", 9, "win", di="2026-06-01", df="2026-06-10")
+        att.actual_start = date(2026, 6, 3)
+        self.assertTrue(is_attivita_fixed(att))
+        self.assertEqual(
+            fixed_calendar_window(att), (date(2026, 6, 3), date(2026, 6, 10))
         )
 
     def test_no_implicit_earliest_start_from_db(self) -> None:

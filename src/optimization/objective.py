@@ -24,22 +24,22 @@ def scale_penalty(penalty_per_week: float) -> int:
 def add_job_penalty(
     model: cp_model.CpModel,
     job_id: str,
-    last_day_expr,
+    end_day_exprs: list,
     calendar_offsets: list[int],
     due_offset: int,
     horizon_days: int,
 ) -> cp_model.IntVar:
     """Add tardiness variables for a job and return its late-weeks var.
 
-    ``last_day_expr`` is the working-day index of the job's last working day
-    (``start + duration - 1`` of the last activity). The completion calendar
-    offset is obtained from ``calendar_offsets`` indexed by that working-day
-    index. The number of late weeks is ``ceil(delay / 7)``, enforced as
-    ``7 * weeks >= delay`` and driven to equality by the objective's
-    minimization pressure.
+    ``end_day_exprs`` are the working-day indices of the last working day of
+    each activity (``start + duration - 1``); the job completes on their
+    maximum. The completion calendar offset is obtained from
+    ``calendar_offsets`` indexed by that working-day index. The number of late
+    weeks is ``ceil(delay / 7)``, enforced as ``7 * weeks >= delay`` and driven
+    to equality by the objective's minimization pressure.
     """
     last_day = model.NewIntVar(0, horizon_days - 1, f"last_day_{job_id}")
-    model.Add(last_day == last_day_expr)
+    model.AddMaxEquality(last_day, end_day_exprs)
 
     completion = model.NewIntVar(
         min(calendar_offsets), max(calendar_offsets), f"completion_{job_id}"

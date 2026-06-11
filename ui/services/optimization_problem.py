@@ -16,6 +16,7 @@ from src.optimization.data_model import (
     Activity,
     Job,
     Resource,
+    ResourceReservation,
     ResourceType,
     SchedulingProblem,
 )
@@ -265,12 +266,189 @@ def _fetch_inventory() -> list[Resource]:
     return resources
 
 
+def is_attivita_fixed(att: Attivita) -> bool:
+    """Return whether an activity is in progress or completed (not re-plannable)."""
+    return bool(att.actual_finish) or bool(att.actual_start)
+
+
+def _planned_finish(att: Attivita) -> date | None:
+    """Estimate planned finish when ``data_fine`` is missing."""
+    if att.data_fine:
+        return att.data_fine
+    if att.data_inizio is None:
+        return None
+    days = _duration_days(att.duration_min, att.data_inizio, None)
+    return WorkingCalendar(att.data_inizio).completion_date(0, days)
+
+
+def fixed_calendar_window(att: Attivita) -> tuple[date, date] | None:
+    """Return the locked calendar window for a fixed activity, if any."""
+    if att.actual_finish:
+        start = att.actual_start or att.data_inizio
+        end = att.actual_finish
+    elif att.actual_start:
+        start = att.actual_start
+        end = att.data_fine or _planned_finish(att)
+    else:
+        return None
+    if start is None:
+        return None
+    if end is None:
+        # In progress without a planned end: lock at least one working day.
+        end = WorkingCalendar(start).completion_date(0, 1)
+    if end < start:
+        end = start
+    return start, end
+
+
+def is_gantt_task_fixed(
+    task: dict[str, Any],
+    att_by_pk: dict[int, Attivita],
+    att_by_id: dict[str, Attivita],
+) -> bool:
+    """Return whether a Gantt task dict refers to a fixed (started/completed) activity."""
+    orm_id = task.get("orm_id")
+    if orm_id is not None:
+        att = att_by_pk.get(int(orm_id))
+        if att is not None:
+            return is_attivita_fixed(att)
+    activity_id = task.get("activity_id")
+    if activity_id:
+        att = att_by_id.get(activity_id)
+        if att is not None:
+            return is_attivita_fixed(att)
+    return False
+
+
+def filter_plannable_gantt_tasks(
+    tasks: list[dict[str, Any]],
+    attivita: Iterable[Attivita],
+) -> list[dict[str, Any]]:
+    """Drop started/completed activities from Gantt/table comparison payloads."""
+    rows = list(attivita)
+    by_pk = {a.pk: a for a in rows}
+    by_id = {a.activity_id: a for a in rows}
+    return [t for t in tasks if not is_gantt_task_fixed(t, by_pk, by_id)]
+
+
+def fixed_activities_for_llm(
+    attivita: Iterable[Attivita],
+    plant_colors: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Snapshot of locked activities for LLM context (not part of before/after diff)."""
+    fixed_rows = [a for a in attivita if is_attivita_fixed(a)]
+    if not fixed_rows:
+        return []
+    tasks = activities_to_gantt_tasks(fixed_rows, plant_colors)
+    out: list[dict[str, Any]] = []
+    for task, att in zip(tasks, fixed_rows, strict=True):
+        window = fixed_calendar_window(att)
+        resources = task.get("resources") or (
+            ";".join(task.get("assigned_resources") or []) or None
+        )
+        entry: dict[str, Any] = {
+            "activity_id": task["activity_id"],
+            "job_id": task.get("job_id"),
+            "commessa": task.get("commessa"),
+            "item": task.get("item"),
+            "attivita": task.get("activity"),
+            "stato": "completata" if att.actual_finish else "in_corso",
+            "inizio_effettivo": task.get("actual_start"),
+            "fine_effettiva": task.get("actual_finish"),
+            "inizio_pianificato_db": task.get("start"),
+            "fine_pianificata_db": task.get("finish"),
+            "risorse": resources,
+            "nota": (
+                "Intoccabile: esclusa dall'ottimizzazione; le risorse restano "
+                "bloccate nell'intervallo effettivo."
+            ),
+        }
+        if window:
+            entry["finestra_blocco_risorse"] = {
+                "inizio": window[0].isoformat(),
+                "fine": window[1].isoformat(),
+            }
+        out.append(entry)
+    return out
+
+
+def solver_resource_ids(att: Attivita) -> list[str]:
+    """Map ORM resource rows to solver resource ids (``tipo:uid``)."""
+    ids: list[str] = []
+    for row in att.risorse.all():
+        tipo = (row.tipo or "").strip()
+        uid = (row.risorsa_id or "").strip()
+        if tipo and uid:
+            resource_id = f"{tipo}:{uid}"
+            if resource_id not in ids:
+                ids.append(resource_id)
+    return ids
+
+
+def _fixed_resource_reservations(horizon_start: date) -> list[ResourceReservation]:
+    """Block resources held by every started/completed activity.
+
+    Started and completed activities are excluded from the optimization model
+    entirely; this is the only trace they leave in the problem. The reserved
+    window is clamped to the planning horizon.
+    """
+    from django.db.models import Q
+
+    calendar = WorkingCalendar(horizon_start)
+    rows = Attivita.objects.filter(
+        Q(actual_start__isnull=False) | Q(actual_finish__isnull=False)
+    ).prefetch_related("risorse")
+    reservations: list[ResourceReservation] = []
+    for att in rows:
+        window = fixed_calendar_window(att)
+        if window is None:
+            continue
+        start, end = window
+        if end < horizon_start:
+            continue
+        resource_ids = solver_resource_ids(att)
+        if not resource_ids:
+            continue
+        clamped_start = max(start, horizon_start)
+        start_idx = calendar.date_to_working_index(clamped_start)
+        duration = max(1, working_days_in_calendar_span(clamped_start, end))
+        for resource_id in resource_ids:
+            reservations.append(
+                ResourceReservation(
+                    resource_id=resource_id,
+                    start_index=start_idx,
+                    duration_days=duration,
+                    activity_id=att.activity_id,
+                )
+            )
+    return reservations
+
+
+def _parse_predecessor_ids(att: Attivita, known_ids: set[str]) -> list[str]:
+    """Parse the comma-separated ``predecessors`` field of an Attivita row.
+
+    Only references to other activities of the same problem job are kept;
+    unknown ids (e.g. activities of other commesse) are dropped.
+    """
+    raw = (att.predecessors or "").strip()
+    if not raw:
+        return []
+    seen: list[str] = []
+    for token in raw.split(","):
+        pred_id = token.strip()
+        if pred_id and pred_id != att.activity_id and pred_id in known_ids:
+            if pred_id not in seen:
+                seen.append(pred_id)
+    return seen
+
+
 def _to_opt_activity(
     att: Attivita,
     order: int,
     job_id: str,
     quantities_by_head: dict[str, dict[ResourceType, int]],
     earliest_start_overrides: dict[str, date],
+    predecessors: list[str],
 ) -> Activity:
     raw_head = (att.modello_testa or "").strip() or None
     head_model = raw_head if raw_head in HEAD_MODELS else None
@@ -284,6 +462,7 @@ def _to_opt_activity(
         plant=_plant(att.stabilimento),
         duration_days=_duration_days(att.duration_min, att.data_inizio, att.data_fine),
         earliest_start=earliest,
+        predecessors=predecessors,
         bore_min=_parse_float(att.bore_min),
         bore_mid=_parse_float(att.bore_mid),
         bore_max=_parse_float(att.bore_max),
@@ -400,20 +579,69 @@ def build_scheduling_problem(
 
     jobs: list[Job] = []
     for commessa in commesse:
-        rows = sorted(grouped[commessa], key=lambda a: (a.item, a.activity_id))
+        all_rows = sorted(grouped[commessa], key=lambda a: (a.item, a.activity_id))
+        # Started/completed activities are NOT part of the model: they are
+        # immutable facts. They surface only as resource reservations and as
+        # earliest-start lower bounds on their successors.
+        fixed_rows = [att for att in all_rows if is_attivita_fixed(att)]
+        rows = [att for att in all_rows if not is_attivita_fixed(att)]
+        if not rows:
+            continue
+        fixed_end_by_id: dict[str, date] = {}
+        for att in fixed_rows:
+            window = fixed_calendar_window(att)
+            if window is not None:
+                fixed_end_by_id[att.activity_id] = window[1]
+
         job_row = job_rows.get(commessa)
         job_id = rows[0].job_id or commessa
-        opt_activities = [
-            _to_opt_activity(att, order, job_id, quantities_by_head, overrides)
-            for order, att in enumerate(rows, 1)
-        ]
+        # Precedences come from the Attivita.predecessors field; activities
+        # without recorded predecessors are independent and may run in
+        # parallel when enough compatible resources are available.
+        known_ids = {att.activity_id for att in rows}
+        opt_activities = []
+        for order, att in enumerate(rows, 1):
+            # A predecessor that already started/completed becomes a lower
+            # bound: the successor starts after the locked window ends.
+            pred_bound: date | None = None
+            for raw_pred in (att.predecessors or "").split(","):
+                end = fixed_end_by_id.get(raw_pred.strip())
+                if end is not None:
+                    candidate = end + timedelta(days=1)
+                    if pred_bound is None or candidate > pred_bound:
+                        pred_bound = candidate
+            local_overrides = overrides
+            if pred_bound is not None:
+                existing = overrides.get(att.activity_id)
+                local_overrides = {
+                    **overrides,
+                    att.activity_id: max(existing, pred_bound)
+                    if existing
+                    else pred_bound,
+                }
+            opt_activities.append(
+                _to_opt_activity(
+                    att,
+                    order,
+                    job_id,
+                    quantities_by_head,
+                    local_overrides,
+                    _parse_predecessor_ids(att, known_ids),
+                )
+            )
         jobs.append(
             Job(
                 job_id=job_id,
-                due_date=_due_date(job_row, rows),
+                due_date=_due_date(job_row, all_rows),
                 penalty_per_week=_penalty_per_week(job_row),
                 activities=opt_activities,
             )
+        )
+
+    if not jobs:
+        raise OptimizationProblemError(
+            "Tutte le attività selezionate sono già iniziate o completate: "
+            "non c'è nulla da ottimizzare."
         )
 
     if horizon_start is None:
@@ -422,11 +650,14 @@ def build_scheduling_problem(
             min(override_dates) if override_dates else date.today() + timedelta(days=1)
         )
 
+    reservations = _fixed_resource_reservations(horizon_start)
+
     return SchedulingProblem(
         jobs=jobs,
         resources=resources,
         horizon_start=horizon_start,
         horizon_days=None,
+        resource_reservations=reservations,
     )
 
 
@@ -439,6 +670,7 @@ def problem_summary(problem: SchedulingProblem) -> dict[str, Any]:
     return {
         "jobs": len(problem.jobs),
         "activities": activities,
+        "resource_reservations": len(problem.resource_reservations),
         "resources": len(problem.resources),
         "resources_by_type": dict(by_type),
         "horizon_start": problem.horizon_start.isoformat(),
@@ -554,6 +786,7 @@ def schedule_result_to_gantt_tasks(
         list(attivita) if attivita is not None else list(attivita_by_id.values())
     )
     tasks: list[dict] = []
+    seen_pks: set[int] = set()
     for sched in result.activities:
         att = attivita_by_id.get(sched.activity_id)
         if att is None:
@@ -562,6 +795,7 @@ def schedule_result_to_gantt_tasks(
             )
         if att is None:
             continue
+        seen_pks.add(att.pk)
         task = attivita_to_gantt_task(att, plant_colors)
         task["start"] = sched.start_date.isoformat()
         task["finish"] = sched.end_date.isoformat()
@@ -573,6 +807,7 @@ def schedule_result_to_gantt_tasks(
             ";".join(task["assigned_resources"]) if task["assigned_resources"] else None
         )
         tasks.append(task)
+
     return tasks
 
 

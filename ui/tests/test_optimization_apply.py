@@ -127,6 +127,95 @@ class ApplyOptimizationResultTest(TestCase):
         with self.assertRaises(OptimizationApplyError):
             apply_optimization_result({"tasks_after": []})
 
+    def test_no_false_conflict_with_stale_dates_of_same_proposal(self) -> None:
+        """New dates overlapping another activity's OLD booking must not conflict.
+
+        Regression: the proposal moves both activities, so each must be
+        validated against the applied state, not the pre-apply dates.
+        """
+        # Old plan: att (prep) Jun 1-5 with G501; att2 (work) Jun 8-12 with G501.
+        att2 = _make_activity("T010", 2, "work", di="2026-06-08", df="2026-06-12")
+        RisorsaAttivita.objects.create(
+            attivita=att2, tipo="generatore", risorsa_id="G501"
+        )
+        # New plan shifts att onto att2's old range and att2 later.
+        payload = {
+            "job_ids": [self.att.job_id],
+            "tasks_after": [
+                {
+                    "orm_id": self.att.pk,
+                    "activity_id": self.att.activity_id,
+                    "start": "2026-06-08",
+                    "finish": "2026-06-12",
+                    "assigned_resource_ids": ["generatore:G501"],
+                },
+                {
+                    "orm_id": att2.pk,
+                    "activity_id": att2.activity_id,
+                    "start": "2026-06-15",
+                    "finish": "2026-06-19",
+                    "assigned_resource_ids": ["generatore:G501"],
+                },
+            ],
+        }
+        updated = apply_optimization_result(payload)
+        self.assertEqual(updated, 2)
+        att2.refresh_from_db()
+        self.assertEqual(att2.data_inizio.isoformat(), "2026-06-15")
+
+    def test_skips_in_progress_activity(self) -> None:
+        self.att.actual_start = date(2026, 6, 1)
+        self.att.save()
+        payload = {
+            "job_ids": [self.att.job_id],
+            "tasks_after": [
+                {
+                    "orm_id": self.att.pk,
+                    "activity_id": self.att.activity_id,
+                    "start": "2026-09-01",
+                    "finish": "2026-09-05",
+                    "assigned_resource_ids": ["generatore:G501"],
+                }
+            ],
+        }
+        updated = apply_optimization_result(payload)
+        self.assertEqual(updated, 0)
+        self.att.refresh_from_db()
+        self.assertEqual(self.att.data_inizio.isoformat(), "2026-06-01")
+
+    def test_real_conflict_detected_and_rolled_back(self) -> None:
+        """Same resource on two overlapping proposed ranges must still fail."""
+        from ui.services.resource_conflicts import ResourceConflictError
+
+        att2 = _make_activity("T010", 2, "work", di="2026-06-08", df="2026-06-12")
+        payload = {
+            "job_ids": [self.att.job_id],
+            "tasks_after": [
+                {
+                    "orm_id": self.att.pk,
+                    "activity_id": self.att.activity_id,
+                    "start": "2026-07-01",
+                    "finish": "2026-07-05",
+                    "assigned_resource_ids": ["generatore:G501"],
+                },
+                {
+                    "orm_id": att2.pk,
+                    "activity_id": att2.activity_id,
+                    "start": "2026-07-03",
+                    "finish": "2026-07-08",
+                    "assigned_resource_ids": ["generatore:G501"],
+                },
+            ],
+        }
+        with self.assertRaises(ResourceConflictError):
+            apply_optimization_result(payload)
+        # The whole transaction must roll back: original dates untouched.
+        self.att.refresh_from_db()
+        self.assertEqual(self.att.data_inizio.isoformat(), "2026-06-01")
+        att2.refresh_from_db()
+        self.assertEqual(att2.data_inizio.isoformat(), "2026-06-08")
+        self.assertEqual(MppSyncQueue.objects.count(), 0)
+
 
 class OptimizationAcceptApiTest(TestCase):
     def setUp(self) -> None:

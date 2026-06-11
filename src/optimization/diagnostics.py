@@ -4,9 +4,9 @@ For every late job, classify the dominant cause of the delay so a planner can
 act on it. Causes (in priority order):
 
 * ``chain_too_long``  -- even placed at index 0 with infinite resources the job
-  cannot meet its due date (the sum of durations is too large).
-* ``earliest_start``  -- the chain alone would meet the due date, but a binding
-  ``earliest_start`` pushes it past it.
+  cannot meet its due date (its precedence critical path is too long).
+* ``earliest_start``  -- the precedence path alone would meet the due date, but
+  a binding ``earliest_start`` pushes it past it.
 * ``resource_contention`` -- the job could finish on time in isolation, but in
   the full solution it had to wait for shared resources.
 """
@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from src.optimization.calendar import WorkingCalendar
 from src.optimization.cp_scheduler import SolveOutcome
 from src.optimization.data_model import Job, SchedulingProblem
+from src.optimization.feasibility import earliest_completion_index
 
 
 class JobDiagnosis(BaseModel):
@@ -30,28 +31,11 @@ class JobDiagnosis(BaseModel):
     detail: str | None = None
 
 
-def _resource_free_completion(
-    job: Job,
-    calendar: WorkingCalendar,
-    *,
-    honor_earliest_start: bool,
-) -> int:
-    """Earliest exclusive completion index respecting precedence (and optionally
-    ``earliest_start``), ignoring resource contention."""
-    end = 0
-    for activity in sorted(job.activities, key=lambda a: a.order):
-        lower = end
-        if honor_earliest_start and activity.earliest_start is not None:
-            lower = max(lower, calendar.date_to_working_index(activity.earliest_start))
-        end = lower + activity.duration_days
-    return end
-
-
 def _classify(
     job: Job,
     calendar: WorkingCalendar,
 ) -> tuple[str, str]:
-    solo_end = _resource_free_completion(job, calendar, honor_earliest_start=True)
+    solo_end = earliest_completion_index(job, calendar, honor_earliest_start=True)
     solo_date = calendar.working_index_to_date(solo_end - 1)
     if solo_date <= job.due_date:
         return (
@@ -59,7 +43,7 @@ def _classify(
             "Job could meet its due date in isolation; it waited for shared resources.",
         )
 
-    zero_end = _resource_free_completion(job, calendar, honor_earliest_start=False)
+    zero_end = earliest_completion_index(job, calendar, honor_earliest_start=False)
     zero_date = calendar.working_index_to_date(zero_end - 1)
     if zero_date <= job.due_date:
         return (
@@ -85,9 +69,12 @@ def diagnose(
     diagnoses: list[JobDiagnosis] = []
 
     for job in problem.jobs:
-        last = max(job.activities, key=lambda a: a.order)
-        start_index = outcome.activity_starts[last.activity_id]
-        completion = calendar.completion_date(start_index, last.duration_days)
+        completion = max(
+            calendar.completion_date(
+                outcome.activity_starts[a.activity_id], a.duration_days
+            )
+            for a in job.activities
+        )
         delay_days = calendar.calendar_delay_days(completion, job.due_date)
 
         if delay_days <= 0:

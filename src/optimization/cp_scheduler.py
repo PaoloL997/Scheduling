@@ -16,7 +16,11 @@ from pydantic import BaseModel
 
 from src.optimization.calendar import WorkingCalendar
 from src.optimization.compatibility import get_compatible_resources
-from src.optimization.data_model import Activity, SchedulingProblem
+from src.optimization.data_model import (
+    Activity,
+    SchedulingProblem,
+    precedence_pairs,
+)
 from src.optimization.feasibility import FeasibilityReport, check_feasibility
 from src.optimization.objective import (
     add_job_penalty,
@@ -76,8 +80,7 @@ class _SchedulingModel:
 
     def _add_precedences(self) -> None:
         for job in self.problem.jobs:
-            ordered = sorted(job.activities, key=lambda a: a.order)
-            for prev, curr in zip(ordered, ordered[1:]):
+            for prev, curr in precedence_pairs(job):
                 # end(prev) <= start(curr)
                 self.model.Add(
                     self.start[prev.activity_id] + prev.duration_days
@@ -89,6 +92,14 @@ class _SchedulingModel:
         for job in self.problem.jobs:
             for activity in job.activities:
                 self._add_activity_assignments(activity, resource_intervals)
+
+        for reservation in self.problem.resource_reservations:
+            interval = self.model.NewFixedSizeIntervalVar(
+                reservation.start_index,
+                reservation.duration_days,
+                f"res_{reservation.activity_id}_{reservation.resource_id}",
+            )
+            resource_intervals[reservation.resource_id].append(interval)
 
         for resource_id, intervals in resource_intervals.items():
             if len(intervals) > 1:
@@ -131,13 +142,16 @@ class _SchedulingModel:
         for job in self.problem.jobs:
             if job.penalty_per_week <= 0:
                 continue
-            last = max(job.activities, key=lambda a: a.order)
-            last_day_expr = self.start[last.activity_id] + last.duration_days - 1
+            # Job completion is the latest end across all its activities;
+            # with parallel branches no single activity is guaranteed last.
+            end_day_exprs = [
+                self.start[a.activity_id] + a.duration_days - 1 for a in job.activities
+            ]
             due_offset = calendar_due_offset(job.due_date, self.problem.horizon_start)
             weeks = add_job_penalty(
                 self.model,
                 job.job_id,
-                last_day_expr,
+                end_day_exprs,
                 offsets,
                 due_offset,
                 self.horizon,
