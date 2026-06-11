@@ -1,7 +1,11 @@
 """Django ORM models for production planning activities and resource assignments."""
 
+from decimal import Decimal
+
 from django.db import models
 from django.db.models import UniqueConstraint
+
+from ui.services.identifiers import build_activity_id, build_job_id
 
 
 class Attivita(models.Model):
@@ -23,6 +27,8 @@ class Attivita(models.Model):
     commessa = models.CharField(max_length=100)
     item = models.IntegerField()
     activity = models.CharField(max_length=200, blank=True, default="")
+    job_id = models.CharField(max_length=250, db_index=True, blank=True, default="")
+    activity_id = models.CharField(max_length=500, unique=True, blank=True, default="")
 
     duration_min = models.IntegerField(null=True, blank=True)
     data_inizio = models.DateField(null=True, blank=True)
@@ -36,10 +42,6 @@ class Attivita(models.Model):
     stabilimento = models.CharField(max_length=200, blank=True, default="")
     responsabile = models.CharField(max_length=200, blank=True, default="")
 
-    costo = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    penale_percentuale = models.DecimalField(
-        max_digits=5, decimal_places=2, null=True, blank=True
-    )
     modello_testa = models.CharField(max_length=100, blank=True, default="")
     bore_min = models.DecimalField(
         max_digits=10, decimal_places=3, null=True, blank=True
@@ -54,7 +56,6 @@ class Attivita(models.Model):
         max_digits=10, decimal_places=3, null=True, blank=True
     )
 
-    wps_file = models.FileField(upload_to="wps/", null=True, blank=True)
     synced_to_mpp = models.BooleanField(default=False)
     imported_from_mpp = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -76,7 +77,15 @@ class Attivita(models.Model):
         Returns:
             str: Commessa, item, and activity separated by underscores.
         """
-        return f"{self.commessa}_{self.item}_{self.activity}"
+        return self.activity_id or build_activity_id(
+            self.commessa, self.item, self.activity
+        )
+
+    def save(self, *args, **kwargs):
+        """Keep canonical identifiers aligned with commessa/item/activity fields."""
+        self.job_id = build_job_id(self.commessa)
+        self.activity_id = build_activity_id(self.commessa, self.item, self.activity)
+        super().save(*args, **kwargs)
 
 
 class Stabilimento(models.Model):
@@ -166,13 +175,16 @@ class RisorsaAttivita(models.Model):
 
 
 class Job(models.Model):
-    """A job/commessa row imported from the Excel file.
+    """A commessa record with commercial metadata.
 
-    Mirrors the ``Jobs`` table previously stored in ``database.db``.
-    ``commessa`` is the natural primary key.
+    One row per commessa. The ``commessa`` field is the natural unique key;
+    ``job_id`` is its URL-encoded form used as the primary key.
+
+    Item numbers belong to :class:`Attivita` rows, not to the commessa.
     """
 
-    commessa = models.CharField(max_length=100, primary_key=True)
+    job_id = models.CharField(max_length=250, primary_key=True)
+    commessa = models.CharField(max_length=100, unique=True)
     total_cost = models.FloatField(null=True, blank=True)
     penalty = models.FloatField(null=True, blank=True)
     delivery_date = models.CharField(max_length=10, null=True, blank=True)
@@ -183,7 +195,12 @@ class Job(models.Model):
         db_table = "job"
 
     def __str__(self) -> str:
-        return self.commessa
+        return self.job_id
+
+    def save(self, *args, **kwargs):
+        """Keep canonical job identifier aligned with the commessa field."""
+        self.job_id = build_job_id(self.commessa)
+        super().save(*args, **kwargs)
 
 
 class TestaItem(models.Model):
@@ -259,6 +276,56 @@ class GeneratoreItem(models.Model):
 
     def __str__(self) -> str:
         return self.uid
+
+
+class AppSettings(models.Model):
+    """Application-wide configurable settings (singleton row, pk=1).
+
+    Access via ``AppSettings.load()`` — never instantiate directly.
+    """
+
+    penale_max = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=5,
+        help_text="Percentuale massima di penale applicabile.",
+    )
+    solver_time_limit = models.FloatField(
+        default=10.0,
+        help_text="Timeout massimo del solver di ottimizzazione (secondi).",
+    )
+
+    class Meta:
+        """Table metadata for AppSettings."""
+
+        db_table = "app_settings"
+
+    def save(self, *args, **kwargs):
+        """Force singleton: always write to pk=1."""
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def load(cls) -> "AppSettings":
+        """Return the singleton settings row, creating it on first access.
+
+        Returns:
+            AppSettings: The singleton row.
+        """
+        obj, _ = cls.objects.get_or_create(
+            pk=1,
+            defaults={
+                "penale_max": Decimal("5"),
+                "solver_time_limit": 10.0,
+            },
+        )
+        return obj
+
+    def __str__(self) -> str:
+        return (
+            f"AppSettings(penale_max={self.penale_max}, "
+            f"solver_time_limit={self.solver_time_limit})"
+        )
 
 
 class MppSyncQueue(models.Model):

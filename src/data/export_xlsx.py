@@ -12,7 +12,7 @@ import openpyxl
 
 logger = logging.getLogger(__name__)
 
-_HEADERS = ["Commessa", "Costo Totale", "Penalità", "Data consegna prevista"]
+_HEADERS = ["Job ID", "Commessa", "Costo Totale", "Penalità", "Data consegna prevista"]
 
 
 def export_to_xlsx(xlsx_path: str) -> None:
@@ -59,6 +59,7 @@ def export_to_xlsx(xlsx_path: str) -> None:
     for job in Job.objects.order_by("commessa"):
         ws.append(
             [
+                job.job_id,
                 job.commessa,
                 job.total_cost,
                 job.penalty,

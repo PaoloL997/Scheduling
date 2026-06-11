@@ -186,7 +186,6 @@ class ProjectSession:
         file locked) do not wipe data that active sessions are still using.
         """
         import pythoncom
-        import win32com.client
 
         from django.conf import settings
         from ui.services.importer import (
@@ -202,6 +201,7 @@ class ProjectSession:
 
         project_module = importlib.import_module("src.data.project")
         ProjectClass = project_module.Project
+        _dispatch_msp = project_module._dispatch_msp
 
         pythoncom.CoInitialize()
         released = False
@@ -253,7 +253,7 @@ class ProjectSession:
 
             app = None
             try:
-                app = win32com.client.Dispatch("MSProject.Application")
+                app = _dispatch_msp()
                 app.Visible = False
                 app.FileOpen(os.path.abspath(mpp_path))
                 project_com = app.ActiveProject

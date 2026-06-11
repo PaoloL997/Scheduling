@@ -159,6 +159,63 @@ def _find_mpp_task(project_wrapper, commessa: str, item: int, activity: str):
 # ---------------------------------------------------------------------------
 
 
+def _activity_ids_to_mpp_predecessors(
+    project_wrapper, predecessor_str: str
+) -> str | None:
+    """Convert a comma-separated list of DB activity_ids to MSProject row IDs.
+
+    Activity identifiers stored in the database use the canonical
+    ``commessa-item-activity`` format (URL-encoded, dash-separated), whereas
+    MS Project requires predecessor references as semicolon-separated numeric
+    row IDs.  This function translates between the two representations by
+    looking up each activity's MPP task name and retrieving its ``ID`` from
+    the open project.
+
+    Any activity_id that cannot be parsed or whose corresponding task cannot
+    be located in the project is silently skipped with a warning log, so a
+    partial result is returned rather than failing the whole operation.
+
+    Args:
+        project_wrapper: Open :class:`~src.data.project.Project` COM wrapper.
+        predecessor_str: Comma-separated activity_ids, e.g. ``"25079-01-SNA, 25079-02-prep"``.
+
+    Returns:
+        str | None: Semicolon-separated MSProject row IDs (e.g. ``"5;12"``),
+        or ``None`` when no valid predecessors were resolved.
+    """
+    if not predecessor_str:
+        return None
+
+    from ui.services.identifiers import parse_activity_id
+
+    row_ids = []
+    for raw in predecessor_str.split(","):
+        activity_id = raw.strip()
+        if not activity_id:
+            continue
+        try:
+            commessa, item, activity = parse_activity_id(activity_id)
+        except ValueError:
+            logger.warning("activity_id predecessore non valido: %s", activity_id)
+            continue
+
+        mpp_name = _task_mpp_name(commessa, item, activity)
+        com_task = project_wrapper._find_task_or_none(mpp_name)
+        if com_task is None:
+            legacy_name = f"{commessa}-{int(item):02d}-{activity}"
+            com_task = project_wrapper._find_task_or_none(legacy_name)
+        if com_task is not None:
+            row_ids.append(str(com_task.ID))
+        else:
+            logger.warning(
+                "Predecessore '%s' non trovato nel .mpp (cercato come '%s').",
+                activity_id,
+                mpp_name,
+            )
+
+    return ";".join(row_ids) if row_ids else None
+
+
 def _apply_add_task(project_wrapper, payload: dict) -> None:
     """Add a new task to the MS Project file from an ``add_task`` queue entry.
 
@@ -183,6 +240,10 @@ def _apply_add_task(project_wrapper, payload: dict) -> None:
     )
     end = date.fromisoformat(payload["data_fine"]) if payload.get("data_fine") else None
 
+    mpp_predecessors = _activity_ids_to_mpp_predecessors(
+        project_wrapper, payload.get("predecessors") or ""
+    )
+
     task = Task(
         name=name,
         start=start,
@@ -190,9 +251,14 @@ def _apply_add_task(project_wrapper, payload: dict) -> None:
         plant=payload.get("stabilimento") or None,
         owner=payload.get("responsabile") or None,
         resources=payload.get("resources") or [],
-        predecessors=None,
+        predecessors=mpp_predecessors,
         actual_start=None,
         actual_end=None,
+        modello_testa=payload.get("modello_testa") or None,
+        bore_min=payload.get("bore_min"),
+        bore_mid=payload.get("bore_mid"),
+        bore_max=payload.get("bore_max"),
+        tube_pitch=payload.get("tube_pitch"),
     )
     project_wrapper.add_task(task)
     logger.debug("Task aggiunto al .mpp: %s", name)

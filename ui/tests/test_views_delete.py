@@ -152,11 +152,12 @@ class AttivitaDeleteNotFoundTest(TestCase):
 
 
 class JobsDeleteTest(TestCase):
-    """api_jobs_delete reconciles queue for all activities in the commessa."""
+    """api_jobs_delete reconciles queue for all activities in the job."""
 
     def setUp(self) -> None:
         self.factory = RequestFactory()
         self.job = Job.objects.create(commessa="E005", total_cost=50000.0)
+        self.job_id = self.job.job_id
 
         # Imported activity — always synced
         self.imported_act = Attivita.objects.create(
@@ -169,7 +170,7 @@ class JobsDeleteTest(TestCase):
         # Wizard activity already synced
         self.synced_wizard_act = Attivita.objects.create(
             commessa="E005",
-            item=2,
+            item=1,
             activity="verifica",
             imported_from_mpp=False,
             synced_to_mpp=True,
@@ -177,7 +178,7 @@ class JobsDeleteTest(TestCase):
         # Wizard activity not yet synced — has a pending add_task
         self.unsynced_act = Attivita.objects.create(
             commessa="E005",
-            item=3,
+            item=1,
             activity="montaggio",
             imported_from_mpp=False,
             synced_to_mpp=False,
@@ -188,20 +189,20 @@ class JobsDeleteTest(TestCase):
                 {
                     "attivita_id": self.unsynced_act.pk,
                     "commessa": "E005",
-                    "item": 3,
+                    "item": 1,
                     "activity": "montaggio",
                 }
             ),
         )
 
     def test_job_and_activities_deleted(self) -> None:
-        req = _delete_request(self.factory, {"commessa": "E005"})
+        req = _delete_request(self.factory, {"job_id": self.job_id})
         api_jobs_delete(req)
-        self.assertFalse(Job.objects.filter(commessa="E005").exists())
-        self.assertFalse(Attivita.objects.filter(commessa="E005").exists())
+        self.assertFalse(Job.objects.filter(job_id=self.job_id).exists())
+        self.assertFalse(Attivita.objects.filter(job_id=self.job_id).exists())
 
     def test_delete_task_enqueued_for_imported_activity(self) -> None:
-        req = _delete_request(self.factory, {"commessa": "E005"})
+        req = _delete_request(self.factory, {"job_id": self.job_id})
         api_jobs_delete(req)
         delete_entries = list(
             MppSyncQueue.objects.filter(operation="delete_task").values_list(
@@ -213,7 +214,7 @@ class JobsDeleteTest(TestCase):
         self.assertIn(1, items)  # imported activity
 
     def test_delete_task_enqueued_for_synced_wizard_activity(self) -> None:
-        req = _delete_request(self.factory, {"commessa": "E005"})
+        req = _delete_request(self.factory, {"job_id": self.job_id})
         api_jobs_delete(req)
         delete_entries = list(
             MppSyncQueue.objects.filter(operation="delete_task").values_list(
@@ -221,11 +222,11 @@ class JobsDeleteTest(TestCase):
             )
         )
         payloads = [json.loads(p) for p in delete_entries]
-        items = [p["item"] for p in payloads]
-        self.assertIn(2, items)  # synced wizard activity
+        activities = [p["activity"] for p in payloads]
+        self.assertIn("verifica", activities)  # synced wizard activity
 
     def test_no_delete_task_for_unsynced_activity(self) -> None:
-        req = _delete_request(self.factory, {"commessa": "E005"})
+        req = _delete_request(self.factory, {"job_id": self.job_id})
         api_jobs_delete(req)
         delete_entries = list(
             MppSyncQueue.objects.filter(operation="delete_task").values_list(
@@ -233,15 +234,17 @@ class JobsDeleteTest(TestCase):
             )
         )
         payloads = [json.loads(p) for p in delete_entries]
-        items = [p["item"] for p in payloads]
-        self.assertNotIn(3, items)  # unsynced activity must NOT get delete_task
+        activities = [p["activity"] for p in payloads]
+        self.assertNotIn(
+            "montaggio", activities
+        )  # unsynced activity must NOT get delete_task
 
     def test_pending_add_task_cancelled_for_unsynced(self) -> None:
-        req = _delete_request(self.factory, {"commessa": "E005"})
+        req = _delete_request(self.factory, {"job_id": self.job_id})
         api_jobs_delete(req)
         self.assertFalse(MppSyncQueue.objects.filter(operation="add_task").exists())
 
-    def test_returns_404_for_unknown_commessa(self) -> None:
-        req = _delete_request(self.factory, {"commessa": "MISSING"})
+    def test_returns_404_for_unknown_job(self) -> None:
+        req = _delete_request(self.factory, {"job_id": "MISSING"})
         resp = api_jobs_delete(req)
         self.assertEqual(resp.status_code, 404)

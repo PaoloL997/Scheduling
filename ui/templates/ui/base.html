@@ -37,7 +37,7 @@
         <li><a href="{% url 'index' %}" class="{% if request.resolver_match.url_name == 'index' %}active{% endif %}">Home</a></li>
         <li><a href="{% url 'pianificazione' %}" class="{% if request.resolver_match.url_name == 'pianificazione' %}active{% endif %}">Pianificazione{% if global_open_problems > 0 %}<span class="nav-warn-badge" id="nav-warn-badge" title="{{ global_open_problems }} problema/i aperto/i">⚠ {{ global_open_problems }}</span>{% endif %}</a></li>
         <li><a href="{% url 'inventario' %}" class="{% if request.resolver_match.url_name == 'inventario' %}active{% endif %}">Inventario</a></li>
-        <li><a href="#" class="{% if request.resolver_match.url_name == 'ottimizzazione' %}active{% endif %}">Ottimizzazione</a></li>
+        <li><a href="{% url 'ottimizzazione' %}" class="{% if request.resolver_match.url_name == 'ottimizzazione' or request.resolver_match.url_name == 'ottimizzazione_risultati' %}active{% endif %}">Ottimizzazione</a></li>
         <li><a href="{% url 'impostazioni' %}" class="{% if request.resolver_match.url_name == 'impostazioni' %}active{% endif %}">Impostazioni</a></li>
     </ul>
 

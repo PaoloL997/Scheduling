@@ -123,6 +123,9 @@ LOGGING = {
 # Application-specific paths
 # ---------------------------------------------------------------------------
 
+SERVER_DIR = Path(
+    r"Z:\how_to_AI\dataset"
+)  # Server dir è quello con la programmazione di Fede
 MPP_PATH = str(BASE_DIR / "dataset.mpp")
 XLSX_PATH = str(BASE_DIR / "jobs.xlsx")
 

@@ -31,6 +31,11 @@ class TaskRow:
     responsible: Optional[str]
     resources: Optional[str]  # semicolon-separated names
     predecessors: Optional[str]
+    modello_testa: Optional[str] = None
+    bore_min: Optional[float] = None
+    bore_mid: Optional[float] = None
+    bore_max: Optional[float] = None
+    tube_pitch: Optional[float] = None
 
 
 @dataclass

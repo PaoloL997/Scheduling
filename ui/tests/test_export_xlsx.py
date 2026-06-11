@@ -43,7 +43,14 @@ class ExportXlsxHeadersTest(TestCase):
             ws = wb["Sheet1"]
             row = [cell.value for cell in ws[1]]
             self.assertEqual(
-                row, ["Commessa", "Costo Totale", "Penalità", "Data consegna prevista"]
+                row,
+                [
+                    "Job ID",
+                    "Commessa",
+                    "Costo Totale",
+                    "Penalità",
+                    "Data consegna prevista",
+                ],
             )
 
 
@@ -80,7 +87,7 @@ class ExportXlsxDataTest(TestCase):
             wb = openpyxl.load_workbook(path)
             ws = wb["Sheet1"]
             rows = list(ws.iter_rows(min_row=2, values_only=True))
-            commesse = [r[0] for r in rows]
+            commesse = [r[1] for r in rows]
             self.assertIn("A001", commesse)
             self.assertIn("B002", commesse)
 
@@ -125,7 +132,7 @@ class ExportXlsxOverwriteTest(TestCase):
             wb = openpyxl.load_workbook(path)
             ws = wb["Sheet1"]
             rows = list(ws.iter_rows(min_row=2, values_only=True))
-            commesse = [r[0] for r in rows]
+            commesse = [r[1] for r in rows]
             self.assertNotIn("X001", commesse)
             self.assertIn("Y002", commesse)
 

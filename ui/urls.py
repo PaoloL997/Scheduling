@@ -4,12 +4,52 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path
 
-from ui import views, views_attivita, views_auth, views_import
+from ui import views, views_attivita, views_auth, views_import, views_ottimizzazione
 
 urlpatterns = [
     path("", views.index, name="index"),
     path("pianificazione/", views.pianificazione, name="pianificazione"),
     path("inventario/", views.inventario, name="inventario"),
+    path(
+        "ottimizzazione/",
+        views_ottimizzazione.ottimizzazione,
+        name="ottimizzazione",
+    ),
+    path(
+        "ottimizzazione/parametri/",
+        views_ottimizzazione.ottimizzazione_parametri,
+        name="ottimizzazione_parametri",
+    ),
+    path(
+        "ottimizzazione/esegui/",
+        views_ottimizzazione.ottimizzazione_run,
+        name="ottimizzazione_run",
+    ),
+    path(
+        "ottimizzazione/risultati/",
+        views_ottimizzazione.ottimizzazione_risultati,
+        name="ottimizzazione_risultati",
+    ),
+    path(
+        "ottimizzazione/nuova/",
+        views_ottimizzazione.ottimizzazione_nuova,
+        name="ottimizzazione_nuova",
+    ),
+    path(
+        "api/ottimizzazione/solve/",
+        views_ottimizzazione.api_ottimizzazione_solve,
+        name="api_ottimizzazione_solve",
+    ),
+    path(
+        "api/ottimizzazione/spiegazione/",
+        views_ottimizzazione.api_ottimizzazione_spiegazione,
+        name="api_ottimizzazione_spiegazione",
+    ),
+    path(
+        "api/ottimizzazione/accetta/",
+        views_ottimizzazione.api_ottimizzazione_accetta,
+        name="api_ottimizzazione_accetta",
+    ),
     path("api/status/", views.api_status, name="api_status"),
     path("api/heartbeat/", views.api_heartbeat, name="api_heartbeat"),
     path(
@@ -56,7 +96,9 @@ urlpatterns = [
         name="api_problema_risolvi",
     ),
     path("api/tasks/update/", views.api_tasks_update, name="api_tasks_update"),
+    path("api/jobs/create/", views.api_jobs_create, name="api_jobs_create"),
     path("api/jobs/check/", views.api_jobs_check, name="api_jobs_check"),
+    path("api/app-settings/", views.api_app_settings, name="api_app_settings"),
     path("api/tasks/delete/", views.api_attivita_delete, name="api_attivita_delete"),
     path("api/jobs/update/", views.api_jobs_update, name="api_jobs_update"),
     path("api/jobs/delete/", views.api_jobs_delete, name="api_jobs_delete"),

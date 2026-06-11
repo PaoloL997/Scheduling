@@ -1,0 +1,508 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block title %}Risultato ottimizzazione{% endblock %}
+
+{% block content %}
+<main class="ott-res-page" data-view="gantt">
+  <header class="ott-res-topbar">
+    <a href="{% url 'ottimizzazione' %}" class="btn btn-ghost ott-res-back">Indietro</a>
+    <div class="ott-res-topbar-end">
+      <div class="ott-res-view-switch toggle-group" role="group" aria-label="Visualizzazione risultato">
+        <button type="button" class="toggle-btn active" data-ott-view="gantt" aria-pressed="true">Gantt</button>
+        <button type="button" class="toggle-btn" data-ott-view="table" aria-pressed="false">Tabella</button>
+        <button type="button" class="toggle-btn" data-ott-view="spiegazione" aria-pressed="false">Spiegazione</button>
+      </div>
+      <button type="button" id="ott-res-accept" class="btn ott-res-accept-btn">Accetta</button>
+    </div>
+  </header>
+  <div id="ott-res-accept-error" class="ott-res-accept-error" hidden></div>
+
+  <div class="ott-res-main">
+  <div class="ott-res-view-pane" id="ott-res-gantt-view">
+    <div class="ott-res-compare">
+      <section class="ott-res-panel" id="gantt-compare-panel" aria-label="Confronto pianificazione">
+        <div class="ott-res-panel-head">
+          <div class="ott-res-panel-title">
+            <span class="ott-res-panel-name">Confronto pianificazione</span>
+          </div>
+          <div class="ott-res-panel-nav">
+            <button type="button" class="ott-res-nav-btn" id="gantt-compare-nav-prev" aria-label="Indietro">&#8249;</button>
+            <button type="button" class="ott-res-nav-btn ott-res-nav-btn--text" id="gantt-compare-nav-today">Oggi</button>
+            <button type="button" class="ott-res-nav-btn" id="gantt-compare-nav-next" aria-label="Avanti">&#8250;</button>
+            <div class="ott-res-view-toggle">
+              <button type="button" class="ott-res-view-btn tbtn" data-view="week">Settimana</button>
+              <button type="button" class="ott-res-view-btn tbtn" data-view="month">Mese</button>
+              <button type="button" class="ott-res-view-btn tbtn" data-view="year">Anno</button>
+            </div>
+          </div>
+        </div>
+        <div class="ott-res-gantt" id="gantt-compare-card">
+          <div class="gantt-axis-row">
+            <div class="gantt-axis-scroll" id="gantt-compare-axis-scroll">
+              <svg id="gantt-compare-axis-svg"></svg>
+            </div>
+          </div>
+          <div class="gantt-bars-scroll ott-res-bars" id="gantt-compare-bars-scroll">
+            <svg id="gantt-compare-bars-svg"></svg>
+          </div>
+        </div>
+      </section>
+      <div id="gantt-legend">
+        <div class="gl-item">
+          <svg width="38" height="14" viewBox="0 0 38 14" fill="none" aria-hidden="true">
+            <rect x="1" y="3" width="36" height="8" rx="3"
+                  fill="hsl(211,84%,40%)" fill-opacity="0.72"
+                  stroke="hsl(211,84%,40%)" stroke-opacity="1" stroke-width="1"/>
+          </svg>
+          <span class="gl-txt">Attuale</span>
+        </div>
+        <div class="gl-item">
+          <svg width="38" height="14" viewBox="0 0 38 14" fill="none" aria-hidden="true">
+            <rect x="1" y="3" width="36" height="8" rx="3"
+                  fill="hsl(211,84%,40%)" fill-opacity="0.42"
+                  stroke="hsl(211,84%,40%)" stroke-opacity="1" stroke-width="1.5"
+                  stroke-dasharray="4,3"/>
+          </svg>
+          <span class="gl-txt">Proposta</span>
+        </div>
+        <div class="gl-item">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <line x1="7" y1="0" x2="7" y2="9"
+                  stroke="hsl(0,55%,44%)" stroke-width="1.5"
+                  stroke-dasharray="3,2" opacity="0.85"/>
+            <polygon points="7,9 10,12 7,14 4,12"
+                     fill="hsl(0,55%,44%)" opacity="0.90"/>
+          </svg>
+          <span class="gl-txt">Deadline di consegna della commessa</span>
+        </div>
+        <div class="gl-item">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <rect x="4" y="0" width="6" height="14" rx="1.5"
+                  fill="hsl(0,82%,48%)" opacity="0.22"/>
+            <line x1="7" y1="0" x2="7" y2="14"
+                  stroke="hsl(0,88%,42%)" stroke-width="2" opacity="0.85"/>
+          </svg>
+          <span class="gl-txt">Oggi</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ott-res-view-pane" id="ott-res-table-view" hidden>
+    <div class="ott-res-table-wrap">
+      <table class="ott-res-table" id="ott-res-table">
+        <thead>
+          <tr>
+            <th class="ott-res-th-name" rowspan="2">Attività</th>
+            <th class="ott-res-th-group" colspan="3" id="ott-res-th-before">Attuale</th>
+            <th class="ott-res-th-group ott-res-th-group--proposta" colspan="3" id="ott-res-th-after">Proposta</th>
+          </tr>
+          <tr>
+            <th>Inizio</th>
+            <th>Fine</th>
+            <th>Risorse</th>
+            <th>Inizio</th>
+            <th>Fine</th>
+            <th>Risorse</th>
+          </tr>
+        </thead>
+        <tbody id="ott-res-table-body"></tbody>
+      </table>
+    </div>
+    <div id="ott-res-table-legend" class="ott-res-table-legend" aria-label="Legenda tabella">
+      <div class="gl-item">
+        <svg width="28" height="14" viewBox="0 0 28 14" fill="none" aria-hidden="true">
+          <rect x="1" y="2" width="26" height="10" rx="3"
+                fill="hsl(4,90%,62%)" fill-opacity="0.12"
+                stroke="hsl(4,90%,62%)" stroke-opacity="0.9" stroke-width="1"/>
+        </svg>
+        <span class="gl-txt">Fine oltre la deadline di consegna della commessa</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="ott-res-view-pane" id="ott-res-spiegazione-view" hidden aria-label="Spiegazione">
+    <div class="ott-res-spiegazione">
+      <div class="ott-res-spiegazione-card">
+        <article id="ott-res-spiegazione-body" class="ott-res-spiegazione-prose"></article>
+      </div>
+    </div>
+  </div>
+  </div>
+
+</main>
+<div id="ott-gantt-tip"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'ui/gantt.js' %}"></script>
+<script>
+(function () {
+  const DATA = {{ result_json|safe }};
+  const EXPLANATION = {{ explanation_json|safe }};
+  const gantt = new GanttChart({
+    prefix: 'gantt-compare',
+    tooltipId: 'ott-gantt-tip',
+    simplified: true,
+    fitToData: false,
+    compareMode: true,
+  });
+  gantt.bindControls();
+
+  const changes = {};
+  const beforeMap = {};
+  (DATA.tasks_before || []).forEach(t => { beforeMap[t.activity_id] = t.start; });
+  (DATA.tasks_after || []).forEach(t => {
+    if (beforeMap[t.activity_id] && beforeMap[t.activity_id] !== t.start) changes[t.activity_id] = true;
+  });
+
+  const tasksBefore = DATA.tasks_before || [];
+  const tasksAfter = DATA.tasks_after || [];
+  const deadlines = DATA.deadlines || {};
+  const sharedFit = GanttChart.computeFitViewport(tasksBefore, tasksAfter);
+
+  gantt.tasks = tasksBefore;
+  gantt.compareTasks = tasksAfter;
+  gantt.deadlines = deadlines;
+  gantt.highlightChanges = changes;
+
+  if (sharedFit) {
+    gantt._fitRestore = sharedFit;
+    gantt.applyFitViewport(sharedFit);
+  } else {
+    gantt.view = 'month';
+  }
+
+  const COMM_PALETTE = GanttChart.LIGHT_PALETTE && document.body.classList.contains('light')
+    ? GanttChart.LIGHT_PALETTE
+    : [
+      'hsl(211,90%,60%)', 'hsl(38,95%,58%)', 'hsl(160,55%,50%)', 'hsl(280,60%,68%)',
+      'hsl(0,75%,62%)', 'hsl(190,65%,52%)', 'hsl(48,90%,55%)', 'hsl(320,60%,65%)',
+    ];
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+  }
+
+  function fmtDate(s) {
+    if (!s) return '—';
+    return new Date(s + 'T00:00:00').toLocaleDateString('it-IT', {
+      day: '2-digit', month: 'short', year: 'numeric',
+    });
+  }
+
+  function activityKey(t) {
+    const parts = [];
+    if (t.commessa) parts.push(t.commessa);
+    if (t.item !== undefined && t.item !== null && t.item !== '') parts.push(t.item);
+    if (t.activity) parts.push(t.activity);
+    return parts.length ? parts.join('-') : '—';
+  }
+
+  function isoDay(s) {
+    if (!s) return '';
+    return String(s).slice(0, 10);
+  }
+
+  function deadlineForJob(jobId) {
+    if (!jobId) return '';
+    return isoDay(deadlines[jobId] || deadlines[String(jobId)]);
+  }
+
+  function isLateFinish(finish, jobId) {
+    const f = isoDay(finish);
+    const dl = deadlineForJob(jobId);
+    if (!f || !dl) return false;
+    return f > dl;
+  }
+
+  function finishCellClass(finish, jobId) {
+    const cls = ['ott-res-table-date'];
+    if (isLateFinish(finish, jobId)) cls.push('ott-res-cell-late');
+    return cls.join(' ');
+  }
+
+  function stripResourceCode(id) {
+    const s = String(id || '');
+    const i = s.indexOf(':');
+    return i >= 0 ? s.slice(i + 1) : s;
+  }
+
+  function fmtResources(t) {
+    let list = [];
+    if (t.assigned_resources && t.assigned_resources.length) {
+      list = t.assigned_resources.map(stripResourceCode);
+    } else if (t.resources) {
+      list = String(t.resources).split(/[;,]/).map(s => stripResourceCode(s.trim())).filter(Boolean);
+    }
+    list = [...new Set(list.filter(Boolean))];
+    return list.length ? list.join(';') : '—';
+  }
+
+  function fmtPenalty(val) {
+    const n = Number(val);
+    if (!Number.isFinite(n)) return '—';
+    return n.toLocaleString('it-IT', {
+      style: 'currency',
+      currency: 'EUR',
+      maximumFractionDigits: 0,
+    });
+  }
+
+  function penaltyHeaderHtml(val) {
+    const n = Number(val);
+    const cls = Number.isFinite(n) && n > 0 ? 'ott-res-th-penalty--late' : 'ott-res-th-penalty--ok';
+    return '<span class="ott-res-th-penalty ' + cls + '">(penale: ' + escHtml(fmtPenalty(val)) + ')</span>';
+  }
+
+  function updateTableHeaders() {
+    const before = DATA.metrics_before?.total_penalty ?? 0;
+    const after = DATA.metrics_after?.total_penalty ?? DATA.result?.total_penalty ?? 0;
+    const thBefore = document.getElementById('ott-res-th-before');
+    const thAfter = document.getElementById('ott-res-th-after');
+    if (thBefore) {
+      thBefore.innerHTML = 'Attuale ' + penaltyHeaderHtml(before);
+    }
+    if (thAfter) {
+      thAfter.innerHTML = 'Proposta ' + penaltyHeaderHtml(after);
+    }
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById('ott-res-table-body');
+    if (!tbody) return;
+
+    const afterById = {};
+    tasksAfter.forEach(t => { afterById[t.activity_id] = t; });
+
+    const commessaColor = {};
+    let colorIdx = 0;
+
+    const rows = tasksBefore.map(before => {
+      const after = afterById[before.activity_id] || before;
+      return { before, after };
+    });
+
+    rows.sort((a, b) => {
+      const c = (a.before.commessa || '').localeCompare(b.before.commessa || '', 'it');
+      if (c !== 0) return c;
+      return String(a.before.item || '').localeCompare(String(b.before.item || ''), 'it', { numeric: true });
+    });
+
+    tbody.innerHTML = rows.map(row => {
+      const b = row.before;
+      const a = row.after;
+      const comm = b.commessa || '—';
+      if (!commessaColor[comm]) {
+        commessaColor[comm] = COMM_PALETTE[colorIdx++ % COMM_PALETTE.length];
+      }
+      const color = commessaColor[comm];
+      const label = activityKey(b);
+      const resBefore = fmtResources(b);
+      const resAfter = fmtResources(a);
+      const lateBefore = isLateFinish(b.finish, b.job_id);
+      const lateAfter = isLateFinish(a.finish, a.job_id);
+      const rowLate = lateBefore || lateAfter;
+      return (
+        '<tr class="' + (rowLate ? 'ott-res-table-row--late' : '') + '">' +
+          '<td class="ott-res-table-name">' +
+            '<span class="ott-res-table-label" style="--ott-comm-c:' + color + '">' + escHtml(label) + '</span>' +
+          '</td>' +
+          '<td class="ott-res-table-date">' + fmtDate(b.start) + '</td>' +
+          '<td class="' + finishCellClass(b.finish, b.job_id) + '">' + fmtDate(b.finish) + '</td>' +
+          '<td class="ott-res-table-resources">' + escHtml(resBefore) + '</td>' +
+          '<td class="ott-res-table-date">' + fmtDate(a.start) + '</td>' +
+          '<td class="' + finishCellClass(a.finish, a.job_id) + '">' + fmtDate(a.finish) + '</td>' +
+          '<td class="ott-res-table-resources">' + escHtml(resAfter) + '</td>' +
+        '</tr>'
+      );
+    }).join('');
+  }
+
+  function inlineMarkdown(s) {
+    return escHtml(s)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>');
+  }
+
+  function parseTableCells(line) {
+    return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+  }
+
+  function isTableSeparator(line) {
+    const cells = parseTableCells(line);
+    return cells.length > 0 && cells.every(c => /^:?-{2,}:?$/.test(c));
+  }
+
+  function renderMarkdownTable(headerCells, bodyRows) {
+    const head = headerCells.map(c => '<th>' + inlineMarkdown(c) + '</th>').join('');
+    const body = bodyRows.map(row => {
+      const cells = row.map(c => '<td>' + inlineMarkdown(c) + '</td>').join('');
+      return '<tr>' + cells + '</tr>';
+    }).join('');
+    return '<div class="md-table-wrap"><table class="md-table"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+  }
+
+  function formatExplanationHtml(raw) {
+    const lines = String(raw || '').split('\n');
+    const parts = [];
+    let inList = false;
+    let listType = null;
+
+    function closeList() {
+      if (!inList) return;
+      parts.push(listType === 'ol' ? '</ol>' : '</ul>');
+      inList = false;
+      listType = null;
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+      if (!trimmed) {
+        closeList();
+        continue;
+      }
+      if (trimmed.startsWith('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+        closeList();
+        const headerCells = parseTableCells(trimmed);
+        i += 1;
+        const bodyRows = [];
+        while (i + 1 < lines.length && lines[i + 1].trim().startsWith('|')) {
+          i += 1;
+          const row = parseTableCells(lines[i]);
+          if (!isTableSeparator(lines[i])) bodyRows.push(row);
+        }
+        parts.push(renderMarkdownTable(headerCells, bodyRows));
+        continue;
+      }
+      if (trimmed.startsWith('### ')) {
+        closeList();
+        parts.push('<h3>' + inlineMarkdown(trimmed.slice(4)) + '</h3>');
+      } else if (trimmed.startsWith('## ')) {
+        closeList();
+        parts.push('<h2>' + inlineMarkdown(trimmed.slice(3)) + '</h2>');
+      } else if (trimmed.startsWith('# ')) {
+        closeList();
+        parts.push('<h2>' + inlineMarkdown(trimmed.slice(2)) + '</h2>');
+      } else if (/^[-*]\s+/.test(trimmed)) {
+        if (!inList || listType !== 'ul') {
+          closeList();
+          parts.push('<ul>');
+          inList = true;
+          listType = 'ul';
+        }
+        parts.push('<li>' + inlineMarkdown(trimmed.replace(/^[-*]\s+/, '')) + '</li>');
+      } else if (/^\d+\.\s+/.test(trimmed)) {
+        if (!inList || listType !== 'ol') {
+          closeList();
+          parts.push('<ol>');
+          inList = true;
+          listType = 'ol';
+        }
+        parts.push('<li>' + inlineMarkdown(trimmed.replace(/^\d+\.\s+/, '')) + '</li>');
+      } else {
+        closeList();
+        parts.push('<p>' + inlineMarkdown(trimmed) + '</p>');
+      }
+    }
+    closeList();
+    return parts.join('');
+  }
+
+  const ganttView = document.getElementById('ott-res-gantt-view');
+  const tableView = document.getElementById('ott-res-table-view');
+  const spiegazioneView = document.getElementById('ott-res-spiegazione-view');
+  const pageEl = document.querySelector('.ott-res-page');
+  const viewBtns = document.querySelectorAll('[data-ott-view]');
+  const spiegazioneBody = document.getElementById('ott-res-spiegazione-body');
+
+  if (spiegazioneBody) {
+    spiegazioneBody.innerHTML = formatExplanationHtml(EXPLANATION);
+  }
+
+  updateTableHeaders();
+  renderTable();
+  gantt.renderWhenReady();
+
+  function setView(mode) {
+    if (ganttView) ganttView.hidden = mode !== 'gantt';
+    if (tableView) tableView.hidden = mode !== 'table';
+    if (spiegazioneView) spiegazioneView.hidden = mode !== 'spiegazione';
+    if (pageEl) pageEl.dataset.view = mode;
+    viewBtns.forEach(btn => {
+      const active = btn.dataset.ottView === mode;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    if (mode === 'gantt') {
+      gantt.renderWhenReady();
+    }
+  }
+
+  viewBtns.forEach(btn => {
+    btn.addEventListener('click', () => setView(btn.dataset.ottView));
+  });
+
+  const acceptUrl = '/api/ottimizzazione/accetta/';
+  const acceptBtn = document.getElementById('ott-res-accept');
+  const acceptError = document.getElementById('ott-res-accept-error');
+  const ACCEPT_LABEL = 'Accetta';
+
+  function getCsrfToken() {
+    const m = document.cookie.match(/csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+
+  function showAcceptError(message) {
+    if (!acceptError) return;
+    acceptError.hidden = false;
+    acceptError.textContent = message || 'Errore durante l\'applicazione.';
+  }
+
+  function resetAcceptBtn() {
+    if (!acceptBtn) return;
+    acceptBtn.disabled = false;
+    acceptBtn.classList.remove('is-loading');
+    acceptBtn.removeAttribute('aria-busy');
+    acceptBtn.textContent = ACCEPT_LABEL;
+  }
+
+  async function acceptProposal() {
+    if (!acceptBtn || acceptBtn.disabled) return;
+    if (!window.confirm('Applicare la proposta alla pianificazione? Verranno aggiornate date e risorse.')) {
+      return;
+    }
+    if (acceptError) acceptError.hidden = true;
+    acceptBtn.disabled = true;
+    acceptBtn.classList.add('is-loading');
+    acceptBtn.setAttribute('aria-busy', 'true');
+    acceptBtn.innerHTML = '<span class="ott-spinner ott-spinner--solo" aria-hidden="true"></span>';
+
+    try {
+      const resp = await fetch(acceptUrl, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCsrfToken() },
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) {
+        resetAcceptBtn();
+        showAcceptError(data.error || 'Impossibile applicare la proposta.');
+        return;
+      }
+      window.location.href = data.redirect_url || '{% url "pianificazione" %}';
+    } catch (_err) {
+      resetAcceptBtn();
+      showAcceptError('Errore di rete durante l\'applicazione.');
+    }
+  }
+
+  if (acceptBtn) {
+    acceptBtn.addEventListener('click', acceptProposal);
+  }
+
+})();
+</script>
+{% endblock %}

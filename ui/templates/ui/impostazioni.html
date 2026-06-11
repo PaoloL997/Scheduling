@@ -1,19 +1,46 @@
 {% extends "ui/base.html" %}
+{% load l10n %}
 
 {% block title %}Impostazioni — Programmazione Produzione{% endblock %}
 
 {% block content %}
 <div class="settings-page">
-    <h1>Impostazioni</h1>
 
-    <!-- ---------------------------------------------------------------- -->
-    <!-- Stabilimenti                                                       -->
-    <!-- ---------------------------------------------------------------- -->
-    <section class="settings-section" id="section-stabilimenti">
+    <section class="settings-section settings-section--generali" id="section-generali">
         <div class="settings-section-header">
-            <h2>Stabilimenti</h2>
-            <button class="btn btn-primary" onclick="openModal('stabilimento', null)">Aggiungi</button>
+            <h2>Parametri generali</h2>
         </div>
+        <div class="settings-generali-card">
+            <div class="settings-form-row">
+                <label for="input-penale-max">Penale max. (%)</label>
+                <input id="input-penale-max" type="number" min="0" max="100" step="0.01"
+                       class="settings-input" value="{{ penale_max|unlocalize }}">
+            </div>
+            <div class="settings-form-row">
+                <label for="input-solver-time-limit">Timeout solver (s)</label>
+                <input id="input-solver-time-limit" type="number" min="1" max="600" step="1"
+                       class="settings-input" value="{{ solver_time_limit|unlocalize }}">
+            </div>
+            <div class="settings-generali-actions">
+                <button class="btn btn-primary" onclick="saveGenerali()">Salva</button>
+                <span id="generali-feedback" style="display:none;"></span>
+            </div>
+        </div>
+    </section>
+
+    <section class="settings-accordion" id="section-stabilimenti">
+        <div class="settings-accordion-header">
+            <button type="button" class="settings-accordion-toggle" aria-expanded="false" aria-controls="panel-stabilimenti" onclick="toggleSettingsAccordion(this)">
+                <svg class="settings-accordion-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <polyline points="2,4 7,10 12,4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="settings-accordion-label">Stabilimenti</span>
+                <span class="settings-accordion-count">{{ stabilimenti|length }}</span>
+            </button>
+            <button type="button" class="btn btn-primary" onclick="openModal('stabilimento', null)">Aggiungi</button>
+        </div>
+        <div class="settings-accordion-panel" id="panel-stabilimenti" hidden>
+        <div class="settings-accordion-panel-inner">
         <table class="settings-table" id="table-stabilimenti">
             <thead>
                 <tr>
@@ -42,16 +69,23 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
+        </div>
     </section>
 
-    <!-- ---------------------------------------------------------------- -->
-    <!-- Responsabili                                                       -->
-    <!-- ---------------------------------------------------------------- -->
-    <section class="settings-section" id="section-responsabili">
-        <div class="settings-section-header">
-            <h2>Responsabili</h2>
-            <button class="btn btn-primary" onclick="openModal('responsabile', null)">Aggiungi</button>
+    <section class="settings-accordion" id="section-responsabili">
+        <div class="settings-accordion-header">
+            <button type="button" class="settings-accordion-toggle" aria-expanded="false" aria-controls="panel-responsabili" onclick="toggleSettingsAccordion(this)">
+                <svg class="settings-accordion-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <polyline points="2,4 7,10 12,4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="settings-accordion-label">Responsabili</span>
+                <span class="settings-accordion-count">{{ responsabili|length }}</span>
+            </button>
+            <button type="button" class="btn btn-primary" onclick="openModal('responsabile', null)">Aggiungi</button>
         </div>
+        <div class="settings-accordion-panel" id="panel-responsabili" hidden>
+        <div class="settings-accordion-panel-inner">
         <table class="settings-table" id="table-responsabili">
             <thead>
                 <tr>
@@ -75,16 +109,23 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
+        </div>
     </section>
 
-    <!-- ---------------------------------------------------------------- -->
-    <!-- Configurazione Teste                                               -->
-    <!-- ---------------------------------------------------------------- -->
-    <section class="settings-section" id="section-config-testa">
-        <div class="settings-section-header">
-            <h2>Configurazione modelli testa</h2>
-            <button class="btn btn-primary" onclick="openModal('config-testa', null)">Aggiungi</button>
+    <section class="settings-accordion" id="section-config-testa">
+        <div class="settings-accordion-header">
+            <button type="button" class="settings-accordion-toggle" aria-expanded="false" aria-controls="panel-config-testa" onclick="toggleSettingsAccordion(this)">
+                <svg class="settings-accordion-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <polyline points="2,4 7,10 12,4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="settings-accordion-label">Configurazione modelli testa</span>
+                <span class="settings-accordion-count">{{ configurazioni_teste|length }}</span>
+            </button>
+            <button type="button" class="btn btn-primary" onclick="openModal('config-testa', null)">Aggiungi</button>
         </div>
+        <div class="settings-accordion-panel" id="panel-config-testa" hidden>
+        <div class="settings-accordion-panel-inner settings-accordion-panel-inner--wide">
         <table class="settings-table" id="table-config-testa">
             <thead>
                 <tr>
@@ -139,6 +180,8 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
+        </div>
     </section>
 </div>
 
@@ -242,6 +285,16 @@
 </div>
 
 <script>
+function toggleSettingsAccordion(btn) {
+    const accordion = btn.closest('.settings-accordion');
+    if (!accordion) return;
+    const panel = accordion.querySelector('.settings-accordion-panel');
+    const isOpen = !accordion.classList.contains('is-open');
+    accordion.classList.toggle('is-open', isOpen);
+    btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    if (panel) panel.hidden = !isOpen;
+}
+
 (function () {
     /* ------------------------------------------------------------------ */
     /* State                                                                */
@@ -484,6 +537,56 @@
         })
         .catch(function () { alert("Errore di rete. Riprova."); });
     };
+
+    /* ------------------------------------------------------------------ */
+    /* Parametri generali                                                   */
+    /* ------------------------------------------------------------------ */
+    window.saveGenerali = function () {
+        const penale = parseFloat(document.getElementById("input-penale-max").value);
+        const limit = parseFloat(document.getElementById("input-solver-time-limit").value);
+        const fb  = document.getElementById("generali-feedback");
+        if (isNaN(penale) || penale < 0) {
+            fb.textContent = "Penale massima non valida.";
+            fb.style.color = "var(--color-danger, #c00)";
+            fb.style.display = "";
+            return;
+        }
+        if (isNaN(limit) || limit < 1 || limit > 600) {
+            fb.textContent = "Timeout solver deve essere tra 1 e 600 secondi.";
+            fb.style.color = "var(--color-danger, #c00)";
+            fb.style.display = "";
+            return;
+        }
+        fetch("/api/app-settings/", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", "X-CSRFToken": getCsrfToken() },
+            body: JSON.stringify({ penale_max: penale, solver_time_limit: limit }),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.ok) {
+                fb.textContent = "Salvato.";
+                fb.style.color = "var(--color-success, #1a7a4a)";
+            } else {
+                fb.textContent = data.error || "Errore durante il salvataggio.";
+                fb.style.color = "var(--color-danger, #c00)";
+            }
+            fb.style.display = "";
+            setTimeout(function () { fb.style.display = "none"; }, 3000);
+        })
+        .catch(function () {
+            fb.textContent = "Errore di rete.";
+            fb.style.color = "var(--color-danger, #c00)";
+            fb.style.display = "";
+        });
+    };
+
+    function getCsrfToken() {
+        const el = document.querySelector('[name=csrfmiddlewaretoken]');
+        if (el) return el.value;
+        const m = document.cookie.match(/csrftoken=([^;]+)/);
+        return m ? m[1] : '';
+    }
 
     /* ------------------------------------------------------------------ */
     /* Enter key submits modal                                              */

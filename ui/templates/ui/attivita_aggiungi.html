@@ -75,32 +75,6 @@
           </div>
         </div>
 
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1.5rem;">
-          <!-- Costo -->
-          <div class="form-group">
-            <label>{{ form.costo.label }}</label>
-            <div class="input-wrap has-prefix">
-              <span class="input-prefix">€</span>
-              <input type="number" name="costo" step="0.01" min="0" placeholder="Es. 15000.00"
-                value="{{ form.costo.value|default:'' }}"
-                class="{% if form.costo.errors %}is-error{% endif %}">
-            </div>
-            {% if form.costo.errors %}<p class="form-error">{{ form.costo.errors.0 }}</p>{% endif %}
-          </div>
-
-          <!-- Penale -->
-          <div class="form-group">
-            <label>{{ form.penale_percentuale.label }}</label>
-            <div class="input-wrap has-suffix">
-              <input type="number" name="penale_percentuale" step="0.01" min="0" max="100" placeholder="Es. 5.00"
-                value="{{ form.penale_percentuale.value|default:'' }}"
-                class="{% if form.penale_percentuale.errors %}is-error{% endif %}">
-              <span class="input-suffix">%</span>
-            </div>
-            {% if form.penale_percentuale.errors %}<p class="form-error">{{ form.penale_percentuale.errors.0 }}</p>{% endif %}
-          </div>
-        </div>
-
         <div style="display:flex; justify-content:flex-end;">
           <button type="submit" class="btn btn-primary">Avanti →</button>
         </div>

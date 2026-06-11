@@ -1,4 +1,6 @@
+import logging
 import os
+import time
 from datetime import date, datetime
 from typing import Optional
 
@@ -6,8 +8,66 @@ import win32com.client
 
 from src.data.models import Resource, Task
 
+logger = logging.getLogger(__name__)
+
 # MS Project sentinel date used for "not set" optional date fields.
 _MSP_SENTINEL_YEAR = 1990
+
+# COM HRESULT for "server process could not be started" (0x80080005).
+_CO_E_SERVER_EXEC_FAILURE = -2146959355
+_DISPATCH_RETRY_INTERVAL = 0.5  # seconds between retry attempts
+_DISPATCH_RETRY_MAX_WAIT = 5.0  # maximum total wait before giving up
+
+
+def _dispatch_msp() -> object:
+    """Create a new isolated MSProject.Application COM instance.
+
+    Uses ``DispatchEx`` to always start a fresh process, avoiding reuse of a
+    potentially stale COM server registered in the Running Object Table.
+
+    On ``CO_E_SERVER_EXEC_FAILURE`` (0x80080005), polls for up to
+    ``_DISPATCH_RETRY_MAX_WAIT`` seconds and retries — handles the race where a
+    previous Project instance has not yet fully exited.
+
+    Returns:
+        A new ``MSProject.Application`` COM object.
+
+    Raises:
+        pywintypes.com_error: If MS Project cannot be started after retries.
+        RuntimeError: If the server repeatedly fails to start within the timeout.
+    """
+    import pywintypes
+
+    try:
+        return win32com.client.DispatchEx("MSProject.Application")
+    except pywintypes.com_error as exc:
+        hresult = exc.args[0] if exc.args else None
+        if hresult != _CO_E_SERVER_EXEC_FAILURE:
+            raise
+        logger.warning(
+            "MSProject.Application non avviabile (0x%08X) — attesa e nuovo tentativo.",
+            hresult & 0xFFFFFFFF,
+        )
+
+    # Poll until the retry window expires, retrying DispatchEx each interval.
+    elapsed = 0.0
+    last_exc: Optional[Exception] = None
+    while elapsed < _DISPATCH_RETRY_MAX_WAIT:
+        time.sleep(_DISPATCH_RETRY_INTERVAL)
+        elapsed += _DISPATCH_RETRY_INTERVAL
+        try:
+            return win32com.client.DispatchEx("MSProject.Application")
+        except pywintypes.com_error as retry_exc:
+            last_exc = retry_exc
+            if retry_exc.args[0] != _CO_E_SERVER_EXEC_FAILURE:
+                raise
+
+    raise RuntimeError(
+        "MSProject.Application non risponde dopo il retry "
+        f"({_DISPATCH_RETRY_MAX_WAIT:.0f}s). "
+        "Verificare che MS Project sia installato, non bloccato da finestre di dialogo "
+        f"e che non ci siano processi WINPROJ.EXE bloccati. Errore COM: {last_exc}"
+    )
 
 
 class Project:
@@ -18,17 +78,32 @@ class Project:
         Args:
             path (str): The file path to the MS Project file to open.
         """
-        self.app = win32com.client.Dispatch("MSProject.Application")
-        self.app.Visible = False
-        self.app.FileOpen(os.path.abspath(path))
-        self.project = self.app.ActiveProject
-        if self.project.ReadOnly:
-            self.app.FileCloseEx(Save=0)
-            self.app.Quit()
+        app = _dispatch_msp()
+        app.Visible = False
+        try:
+            app.FileOpen(os.path.abspath(path))
+            project = app.ActiveProject
+        except Exception:
+            # Ensure the COM server is released if anything after Dispatch fails,
+            # so we don't leave a zombie WINPROJ.EXE that would cause
+            # CO_E_SERVER_EXEC_FAILURE on the next import attempt.
+            try:
+                app.Quit()
+            except Exception:
+                pass
+            raise
+        if project.ReadOnly:
+            try:
+                app.FileCloseEx(Save=0)
+            except Exception:
+                pass
+            app.Quit()
             raise PermissionError(
                 f"Il file '{path}' è aperto in un'altra applicazione ed è in sola lettura. "
                 "Chiuderlo prima di procedere."
             )
+        self.app = app
+        self.project = project
 
     def __enter__(self) -> "Project":
         return self
@@ -78,6 +153,15 @@ class Project:
 
         t.Text1 = task.plant or ""
         t.Text2 = task.owner or ""
+        t.Text3 = task.modello_testa or ""
+        if task.bore_min is not None:
+            t.Number1 = task.bore_min
+        if task.bore_mid is not None:
+            t.Number2 = task.bore_mid
+        if task.bore_max is not None:
+            t.Number3 = task.bore_max
+        if task.tube_pitch is not None:
+            t.Number4 = task.tube_pitch
 
         if task.resources:
             self.assign_resources(task.name, task.resources)
@@ -103,6 +187,22 @@ class Project:
         """
         return [self._task_from_com(t) for t in self.project.Tasks if t is not None]
 
+    def list_tasks_with_ids(self) -> list[tuple[int, Task]]:
+        """Return all tasks together with their MS Project row IDs.
+
+        MS Project assigns each task a unique integer ``ID`` that is used as a
+        row reference in predecessor strings (e.g. ``"5"`` or ``"5FS+1d"``).
+        This method exposes those IDs alongside the task data so that callers
+        can build a mapping from predecessor row IDs to canonical identifiers.
+
+        Returns:
+            list[tuple[int, Task]]: Each element is ``(row_id, task)`` where
+            *row_id* is the MSProject ``Task.ID`` integer.
+        """
+        return [
+            (t.ID, self._task_from_com(t)) for t in self.project.Tasks if t is not None
+        ]
+
     def list_resources(self) -> list[Resource]:
         """Return all resources currently present in the project.
 
@@ -125,6 +225,11 @@ class Project:
         actual_end: date | None = None,
         plant: str | None = None,
         owner: str | None = None,
+        modello_testa: str | None = None,
+        bore_min: float | None = None,
+        bore_mid: float | None = None,
+        bore_max: float | None = None,
+        tube_pitch: float | None = None,
     ) -> None:
         """Partially update an existing task.
 
@@ -141,6 +246,11 @@ class Project:
             actual_end: New actual end date (Finish1).
             plant: New plant name (Text1).
             owner: New responsible person (Text2).
+            modello_testa: New testa model name (Text3).
+            bore_min: New minimum bore diameter (Number1).
+            bore_mid: New mean bore diameter (Number2).
+            bore_max: New maximum bore diameter (Number3).
+            tube_pitch: New tube pitch / distanza interasse (Number4).
 
         Raises:
             ValueError: If no task with *name* is found.
@@ -162,6 +272,16 @@ class Project:
             t.Text1 = plant
         if owner is not None:
             t.Text2 = owner
+        if modello_testa is not None:
+            t.Text3 = modello_testa
+        if bore_min is not None:
+            t.Number1 = bore_min
+        if bore_mid is not None:
+            t.Number2 = bore_mid
+        if bore_max is not None:
+            t.Number3 = bore_max
+        if tube_pitch is not None:
+            t.Number4 = tube_pitch
 
     def update_resource(
         self,
@@ -320,6 +440,11 @@ class Project:
             actual_end=_to_optional_date(t.Finish1),
             plant=t.Text1 or None,
             owner=t.Text2 or None,
+            modello_testa=t.Text3 or None,
+            bore_min=_to_optional_float(t.Number1),
+            bore_mid=_to_optional_float(t.Number2),
+            bore_max=_to_optional_float(t.Number3),
+            tube_pitch=_to_optional_float(t.Number4),
             resources=self._read_assignments(t),
         )
 
@@ -393,3 +518,24 @@ def _to_optional_date(value) -> Optional[date]:
     if isinstance(d, date) and d.year < _MSP_SENTINEL_YEAR:
         return None
     return d
+
+
+def _to_optional_float(value) -> Optional[float]:
+    """Convert a COM Number field value to float, returning None for zero (unset sentinel).
+
+    MS Project returns 0.0 for Number fields that have never been set.  For
+    bore diameters and tube pitch this is safe because physical values are
+    always strictly positive — zero is not a valid measurement in this domain.
+
+    Args:
+        value: Raw value from a COM Number field.
+
+    Returns:
+        Optional[float]: The float value, or None if falsy/zero.
+    """
+    if value is None or value == 0.0:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

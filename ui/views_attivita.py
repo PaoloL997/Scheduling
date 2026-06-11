@@ -12,7 +12,6 @@ from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import transaction
 from django.http import HttpRequest, JsonResponse
@@ -20,8 +19,12 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from ui.models import Attivita, MppSyncQueue, RisorsaAttivita
-from ui.services.activity_inventory import get_available_resources
+from ui.services.activity_inventory import (
+    find_modello_testa_in_db,
+    get_available_resources,
+)
 from ui.services.gemini import ReadWPS
+from ui.services.identifiers import build_job_id
 from ui.services.wps_parser import compute_bore, extract_tube_pitch, parse_wps_name
 
 
@@ -38,13 +41,18 @@ def api_analizza_wps(request: HttpRequest) -> JsonResponse:
     Gemini fails, the endpoint returns success with the filename-parsed fields
     and an empty ``bore`` dict so the wizard can continue.
 
+    The ``modello_testa`` in ``parsed`` is normalised to the canonical value
+    stored in :class:`~ui.models.ConfigurazioneTesta` when a match is found
+    (case-insensitive exact first, substring fallback).  The ``testa_db_match``
+    flag in ``parsed`` indicates whether a matching configuration record exists.
+
     Args:
         request: Multipart POST with a ``wps_file`` field.
 
     Returns:
         JsonResponse with ``ok=True`` and keys ``tmp_path``, ``wps_name``,
         ``parsed``, ``gemini``, ``bore`` on success, or ``ok=False`` on
-        validation error.
+        validation error.  ``parsed`` includes ``testa_db_match`` (bool).
     """
     pdf = request.FILES.get("wps_file")
     if not pdf:
@@ -55,6 +63,21 @@ def api_analizza_wps(request: HttpRequest) -> JsonResponse:
         )
 
     parsed = parse_wps_name(pdf.name)
+    if not parsed.get("modello_testa") or not parsed.get("commessa"):
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Nome file non valido. Usa il formato "
+                "ModelloTesta_Commessa[_Item][_Attività].pdf.",
+            },
+            status=400,
+        )
+
+    matched_modello = find_modello_testa_in_db(parsed["modello_testa"])
+    if matched_modello is not None:
+        parsed["modello_testa"] = matched_modello
+    parsed["testa_db_match"] = matched_modello is not None
+
     tmp_path = default_storage.save(f"wps/_tmp_{pdf.name}", pdf)
     abs_path = os.path.join(settings.MEDIA_ROOT, tmp_path)
 
@@ -208,6 +231,56 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"ok": False, "error": "Date non valide."}, status=400)
 
     bore = data.get("bore", {})
+    predecessor_ids = [
+        str(v).strip() for v in data.get("predecessors", []) if str(v).strip()
+    ]
+
+    if predecessor_ids:
+        valid_predecessors = set(
+            Attivita.objects.filter(commessa=commessa, item=item).values_list(
+                "activity_id", flat=True
+            )
+        )
+        invalid = [p for p in predecessor_ids if p not in valid_predecessors]
+        if invalid:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "Predecessor non validi per commessa e item selezionati.",
+                },
+                status=400,
+            )
+
+    from ui.models import Job
+
+    job_exists = Job.objects.filter(commessa=commessa).exists()
+    new_job = data.get("new_job")
+    if not job_exists:
+        if not new_job or new_job.get("delivery_date") in (None, ""):
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "Per una nuova commessa devi indicare data di consegna.",
+                },
+                status=400,
+            )
+        try:
+            date.fromisoformat(new_job.get("delivery_date"))
+        except (TypeError, ValueError):
+            return JsonResponse(
+                {"ok": False, "error": "Data di consegna non valida."},
+                status=400,
+            )
+        raw_cost = new_job.get("total_cost")
+        if raw_cost not in (None, "") and _float_or_none(raw_cost) is None:
+            return JsonResponse(
+                {"ok": False, "error": "Costo totale non valido."}, status=400
+            )
+        raw_penalty = new_job.get("penalty")
+        if raw_penalty not in (None, "") and _float_or_none(raw_penalty) is None:
+            return JsonResponse(
+                {"ok": False, "error": "Penale non valida."}, status=400
+            )
 
     risorse_data = data.get("risorse", {})
     assignments_pairs = []
@@ -251,32 +324,21 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
             bore_max=_dec(bore.get("max")),
             bore_mid=_dec(bore.get("mid")),
             tube_pitch=_dec(bore.get("tube_pitch")),
+            predecessors=", ".join(predecessor_ids),
         )
 
         if tmp_path:
-            modello = data.get("modello_testa", "")
-            if modello:
-                parts = [modello, commessa, f"{item:02d}"]
-            else:
-                parts = [commessa, f"{item:02d}"]
-            if data.get("attivita"):
-                parts.append(data["attivita"])
-            final_name = "_".join(parts) + ".pdf"
-            content = default_storage.open(tmp_path).read()
             default_storage.delete(tmp_path)
-            att.wps_file.save(final_name, ContentFile(content), save=False)
 
         att.save()
 
-        new_job = data.get("new_job")
         if new_job and new_job.get("commessa"):
-            from ui.models import Job
-
             job_commessa = new_job["commessa"].strip()
             if job_commessa:
                 Job.objects.get_or_create(
                     commessa=job_commessa,
                     defaults={
+                        "job_id": build_job_id(job_commessa),
                         "total_cost": _float_or_none(new_job.get("total_cost")),
                         "penalty": _float_or_none(new_job.get("penalty")),
                         "delivery_date": new_job.get("delivery_date") or None,
@@ -313,6 +375,20 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
                     "stabilimento": att.stabilimento,
                     "responsabile": att.responsabile,
                     "resources": all_resource_ids,
+                    "predecessors": att.predecessors or None,
+                    "modello_testa": att.modello_testa or None,
+                    "bore_min": float(att.bore_min)
+                    if att.bore_min is not None
+                    else None,
+                    "bore_mid": float(att.bore_mid)
+                    if att.bore_mid is not None
+                    else None,
+                    "bore_max": float(att.bore_max)
+                    if att.bore_max is not None
+                    else None,
+                    "tube_pitch": float(att.tube_pitch)
+                    if att.tube_pitch is not None
+                    else None,
                 }
             ),
         )

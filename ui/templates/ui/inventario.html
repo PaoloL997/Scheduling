@@ -3,14 +3,13 @@
 {% block title %}Inventario{% endblock %}
 
 {% block content %}
-<main style="padding: 2rem 1rem;">
-  <div style="max-width: 900px; margin: 0 auto;">
+<main class="pian-page">
+  <div class="pian-shell inv-shell">
 
     <!-- Import success toast (shown after Excel import, hidden by default) -->
     <div id="import-success-banner" style="display:none;"></div>
 
-    <!-- Toggle switch + Add button row -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+    <div class="inv-head-row">
       <div id="inv-toggle" class="toggle-group" role="group">
         <button id="btn-generatori" class="toggle-btn active" onclick="showInv('generatori')">Generatori</button>
         <button id="btn-mandrini"   class="toggle-btn"        onclick="showInv('mandrini')">Mandrini</button>
@@ -18,9 +17,9 @@
         <button id="btn-tastatori"  class="toggle-btn"        onclick="showInv('tastatori')">Tastatori</button>
         <button id="btn-teste"      class="toggle-btn"        onclick="showInv('teste')">Teste</button>
       </div>
-      <div style="display:flex; align-items:center; gap:0.5rem;">
-        <input id="inv-search" class="tbl-search-input" style="width:14rem;" placeholder="Cerca…" oninput="filterActiveTable()">
-        <div style="position:relative;">
+      <div class="inv-head-actions">
+        <input id="inv-search" class="pian-search-input inv-search-input" type="search" placeholder="Cerca…" oninput="filterActiveTable()" aria-label="Cerca risorse">
+        <div class="inv-add-wrap">
           <button id="btn-add" class="btn btn-primary" onclick="toggleAddDropdown(event)">
             Aggiungi
           </button>
@@ -527,6 +526,9 @@
   }
 
   function deleteRow(table, uid, btn) {
+    if (!confirm(`Eliminare la risorsa ${table} "${uid}"?\nQuesta operazione non può essere annullata.`)) {
+      return;
+    }
     btn.disabled = true;
     fetch('/api/inventario/' + table + '/' + encodeURIComponent(uid) + '/', {
       method: 'DELETE',

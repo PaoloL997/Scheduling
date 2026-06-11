@@ -19,6 +19,24 @@ def get_stabilimenti() -> list[str]:
     return list(Stabilimento.objects.order_by("nome").values_list("nome", flat=True))
 
 
+def get_testa_models() -> list[str]:
+    """Return sorted unique testa model names from the inventory.
+
+    Returns:
+        list[str]: Distinct non-empty ``model`` values from
+        :class:`~ui.models.TestaItem`, ordered alphabetically.
+    """
+    from ui.models import TestaItem
+
+    return sorted(
+        set(
+            TestaItem.objects.exclude(model__isnull=True)
+            .exclude(model="")
+            .values_list("model", flat=True)
+        )
+    )
+
+
 def get_responsabili() -> list[str]:
     """Return sorted responsible-person names from the Responsabile ORM model.
 
@@ -55,6 +73,41 @@ def _occupied_ids(
     from ui.services.resource_conflicts import occupied_resource_ids
 
     return occupied_resource_ids(tipo, data_inizio, data_fine, exclude_activity_id)
+
+
+def find_modello_testa_in_db(modello_testa: str) -> str | None:
+    """Return the canonical DB value for a testa model name.
+
+    Performs a two-stage lookup against :class:`~ui.models.ConfigurazioneTesta`:
+
+    1. Case-insensitive exact match (``iexact``).
+    2. If no exact match, a case-insensitive substring match (``icontains``),
+       returning the first alphabetically-ordered result.
+
+    Args:
+        modello_testa: Raw testa model name extracted from the WPS filename.
+
+    Returns:
+        str | None: The canonical ``modello_testa`` string stored in the
+        database, or ``None`` if no record matches.
+    """
+    from ui.models import ConfigurazioneTesta
+
+    exact = (
+        ConfigurazioneTesta.objects.filter(modello_testa__iexact=modello_testa)
+        .values_list("modello_testa", flat=True)
+        .first()
+    )
+    if exact is not None:
+        return exact
+
+    partial = (
+        ConfigurazioneTesta.objects.filter(modello_testa__icontains=modello_testa)
+        .order_by("modello_testa")
+        .values_list("modello_testa", flat=True)
+        .first()
+    )
+    return partial
 
 
 def _get_testa_config(modello_testa: str | None) -> tuple[int, int, int, int, set[str]]:

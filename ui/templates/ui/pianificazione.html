@@ -3,127 +3,229 @@
 {% block title %}Pianificazione{% endblock %}
 
 {% block content %}
-<main style="padding: 2rem 1rem;">
-  <div style="max-width: 1600px; margin: 0 auto;">
+<main class="pian-page">
+  <div class="pian-shell">
 
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
-      <div id="view-toggle" class="toggle-group" role="group">
-        <button id="btn-attivita" onclick="showView('attivita')" class="toggle-btn active">Attività</button>
-        <button id="btn-commesse" onclick="showView('commesse')" class="toggle-btn">Commesse</button>
-      </div>
-
-      <div style="display:flex; align-items:center; gap:0.5rem;">
-        <input id="pian-search" class="tbl-search-input" style="width:14rem;" placeholder="Cerca…" oninput="filterActiveTable()">
-        <button onclick="openAddModal()" class="btn btn-primary">
-          Aggiungi
-        </button>
+    <div class="pian-topbar pian-topbar--end">
+      <div class="pian-topbar-actions">
+        <input
+          id="pian-search"
+          class="pian-search-input inv-search-input"
+          type="search"
+          placeholder="Cerca commessa, attività, risorsa…"
+          oninput="filterPianGroups(this.value)"
+          aria-label="Cerca commesse e attività"
+        >
+        <button onclick="openAddModal()" class="btn btn-primary">Aggiungi attività</button>
       </div>
     </div>
 
-    <div id="table-attivita">
-      {% if tasks %}
-      <div class="data-table-wrap">
-        <table id="tbl-attivita" class="data-table">
-          <thead>
-            <tr>
-              <th>Commessa</th>
-              <th>Item</th>
-              <th>Attività</th>
-              <th>Inizio</th>
-              <th>Fine</th>
-              <th>Inizio eff.</th>
-              <th>Fine eff.</th>
-              <th>Stabilimento</th>
-              <th>Responsabile</th>
-              <th>Risorse</th>
-              <th>Note</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for task in tasks %}
-            <tr data-source="{{ task.source }}" data-orm-id="{{ task.orm_id|default:'' }}"
-                data-warning-count="{{ task.warning_count|default:0 }}"
-                data-note-count="{{ task.note_count|default:0 }}"
-                data-commessa="{{ task.commessa }}"
-                data-item="{{ task.item|default:'' }}"
-                data-activity="{{ task.activity|default:'' }}"
-                data-start="{{ task.start|default:'' }}"
-                data-finish="{{ task.finish|default:'' }}"
-                data-actual-start="{{ task.actual_start|default:'' }}"
-                data-actual-finish="{{ task.actual_finish|default:'' }}"
-                data-plant="{{ task.plant|default:'' }}"
-                data-responsible="{{ task.responsible|default:'' }}"
-                data-resources="{{ task.resources|default:'' }}">
-              <td data-col="commessa" class="td-primary">{{ task.commessa }}{% if task.warning_count and task.warning_count > 0 %}<span class="warn-badge" title="{{ task.warning_count }} problema/i aperto/i">&#9888; {{ task.warning_count }}</span>{% endif %}</td>
-              <td data-col="item" class="td-muted">{{ task.item|default:"—" }}</td>
-              <td data-col="activity">{{ task.activity|default:"—" }}</td>
-              <td data-col="start" class="td-nowrap">{{ task.start|default:"—" }}</td>
-              <td data-col="finish" class="td-nowrap">{{ task.finish|default:"—" }}</td>
-              <td data-col="actual-start" class="td-nowrap">{{ task.actual_start|default:"—" }}</td>
-              <td data-col="actual-finish" class="td-nowrap">{{ task.actual_finish|default:"—" }}</td>
-              <td data-col="plant" class="td-muted stab-plant-cell" data-stab="{{ task.plant|default:'' }}">{{ task.plant|default:"—" }}</td>
-              <td data-col="responsible" class="td-muted">{{ task.responsible|default:"—" }}</td>
-              <td data-col="resources" class="td-muted">{{ task.resources|default:"—" }}</td>
-              <td data-col="note" class="td-muted">{% if task.orm_id %}{% if task.warning_count and task.warning_count > 0 %}<button class="btn-risolvi" onclick="event.stopPropagation();openNotesModal('{{ task.orm_id }}')">Risolvi</button>{% elif task.note_count and task.note_count > 0 %}<button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('{{ task.orm_id }}')">Note</button>{% else %}—{% endif %}{% else %}—{% endif %}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <p style="text-align: center; color: var(--text-subtle); margin-top: 4rem; font-size: 0.9rem;">
-        Nessuna attività disponibile. Attendi il completamento del caricamento del database.
-      </p>
-      {% endif %}
-    </div>
+    <div class="pian-group-list" id="pian-group-list">
+      {% if groups %}
+        {% for group in groups %}
+        <article class="pian-group" data-commessa="{{ group.job.commessa }}">
+          <header class="pian-project-head"
+                  onclick="togglePianGroupFromCard(event, this)"
+                  tabindex="0"
+                  role="button"
+                  aria-expanded="false">
+            <div class="pian-job-card"
+                    data-job-id="{{ group.job.job_id|default:'' }}"
+                    data-commessa="{{ group.job.commessa }}"
+                    data-total-cost="{{ group.job.total_cost|default:'' }}"
+                    data-penalty="{{ group.job.penalty|default:'' }}"
+                    data-delivery-date="{{ group.job.delivery_date|default:'' }}"
+                    data-n-activities="{{ group.job.n_activities }}">
+              <div class="pian-head-identity">
+                <span class="pian-job-name">{{ group.job.commessa }}</span>
+                <button type="button" class="pian-edit-btn" title="Modifica commessa"
+                        onclick="event.stopPropagation(); openDetailModal(this.closest('.pian-job-card'), 'job')">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                    <path d="M8.5 1.5a1.414 1.414 0 0 1 2 2L4 10H1.5V7.5L8.5 1.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+                <span class="pian-job-state status-pill status-pill--non_pianificata">NON PIANIFICATA</span>
+              </div>
+              <span class="pian-head-sep" aria-hidden="true"></span>
+              <div class="pian-head-meta">
+                <span class="pian-head-item">
+                  <span class="pian-head-lbl">Deadline</span>
+                  <span class="pian-head-val{% if not group.job.delivery_date %} is-empty{% endif %}">{{ group.job.delivery_date|default:"—" }}</span>
+                </span>
+                <span class="pian-head-item pian-head-item--penalty">
+                  <span class="pian-head-lbl">Penale</span>
+                  <span class="pian-head-val{% if not group.job.penalty %} is-empty{% endif %}">{% if group.job.penalty %}{{ group.job.penalty }}%{% else %}—{% endif %}</span>
+                </span>
+              </div>
+              <span class="pian-head-sep" aria-hidden="true"></span>
+              <div class="pian-project-stats" aria-label="Metriche attività">
+                <span class="pian-stat-item"><span class="pian-stat-lbl">Attività</span><strong data-job-total>{{ group.job.n_activities }}</strong></span>
+                <span class="pian-stat-item"><span class="pian-stat-lbl">In corso</span><strong data-job-working>0</strong></span>
+                <span class="pian-stat-item pian-stat-item--late"><span class="pian-stat-lbl">In ritardo</span><strong data-job-late>0</strong></span>
+                <span class="pian-stat-item pian-stat-item--alerts{% if group.job.n_open_problems %} is-active{% endif %}"><span class="pian-stat-lbl">Problemi</span><strong data-job-alerts>{{ group.job.n_open_problems|default:0 }}</strong></span>
+              </div>
+              <span class="pian-head-sep" aria-hidden="true"></span>
+              <div class="pian-head-progress">
+                <span class="pian-head-lbl">Completamento</span>
+                <div class="pian-progress-wrap">
+                  <span class="pian-progress-pct" data-job-progress-pct>0%</span>
+                  <div class="pian-progress" role="progressbar" aria-label="Completamento attività" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <div class="pian-progress-track">
+                      <div class="pian-progress-fill" data-job-progress-fill style="width:0%"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button type="button"
+                    class="pian-expand-btn"
+                    aria-expanded="false"
+                    onclick="togglePianGroup(this)"
+                    title="Mostra attività">
+              <svg class="pian-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <polyline points="2,4 7,10 12,4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </header>
 
-    <div id="table-commesse" style="display: none;">
-      {% if jobs %}
-      <div class="data-table-wrap">
-        <table id="tbl-commesse" class="data-table">
-          <thead>
-            <tr>
-              <th>Commessa</th>
-              <th class="td-right">Costo totale (€)</th>
-              <th class="td-right">Penale (%)</th>
-              <th>Consegna</th>
-              <th class="td-right">N. item</th>
-              <th class="td-right">N. attività</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for job in jobs %}
-            <tr data-commessa="{{ job.commessa }}"
-                data-total-cost="{{ job.total_cost|default:'' }}"
-                data-penalty="{{ job.penalty|default:'' }}"
-                data-delivery-date="{{ job.delivery_date|default:'' }}"
-                data-n-items="{{ job.n_items }}"
-                data-n-activities="{{ job.n_activities }}">
-              <td data-col="commessa" class="td-primary">{{ job.commessa }}</td>
-              <td data-col="total-cost" class="td-right">{{ job.total_cost|default:"—" }}</td>
-              <td data-col="penalty" class="td-right">{{ job.penalty|default:"—" }}</td>
-              <td data-col="delivery-date" class="td-nowrap">{{ job.delivery_date|default:"—" }}</td>
-              <td data-col="n-items" class="td-right td-muted">{{ job.n_items }}</td>
-              <td data-col="n-activities" class="td-right td-muted">{{ job.n_activities }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+          <div class="pian-activities" data-commessa="{{ group.job.commessa }}">
+            {% if group.activities %}
+              <div class="pian-activity-table-head" aria-hidden="true">
+                <span>Attività</span>
+                <span>Inizio</span>
+                <span>Fine</span>
+                <span>Inizio eff.</span>
+                <span>Fine eff.</span>
+                <span>Stato</span>
+                <span>Stabilimento</span>
+                <span>Responsabile</span>
+                <span>Risorse</span>
+                <span>Dipendenze</span>
+                <span></span>
+              </div>
+              {% for task in group.activities %}
+              <div class="pian-activity-row"
+                   data-source="{{ task.source }}"
+                   data-orm-id="{{ task.orm_id|default:'' }}"
+                   data-warning-count="{{ task.warning_count|default:0 }}"
+                   data-note-count="{{ task.note_count|default:0 }}"
+                   data-activity-id="{{ task.activity_id }}"
+                   data-job-id="{{ task.job_id }}"
+                   data-commessa="{{ task.commessa }}"
+                   data-item="{{ task.item|default:'' }}"
+                   data-activity="{{ task.activity|default:'' }}"
+                   data-start="{{ task.start|default:'' }}"
+                   data-finish="{{ task.finish|default:'' }}"
+                   data-actual-start="{{ task.actual_start|default:'' }}"
+                   data-actual-finish="{{ task.actual_finish|default:'' }}"
+                   data-plant="{{ task.plant|default:'' }}"
+                   data-responsible="{{ task.responsible|default:'' }}"
+                   data-resources="{{ task.resources|default:'' }}"
+                   data-resources-typed="{{ task.resources_by_tipo_json }}"
+                   data-predecessors="{{ task.predecessors|default:'' }}"
+                   onclick="openDetailModal(this, 'task')">
+                <span class="pian-col-id">{{ task.activity_id }}</span>
+                <span class="pian-col-date pian-col-date--planned-start">
+                  <strong>{{ task.start|default:"—" }}</strong>
+                </span>
+                <span class="pian-col-date pian-col-date--planned-finish">
+                  <strong>{{ task.finish|default:"—" }}</strong>
+                </span>
+                <span class="pian-col-date pian-col-date--actual-start">{{ task.actual_start|default:"—" }}</span>
+                <span class="pian-col-date pian-col-date--actual-finish">{{ task.actual_finish|default:"—" }}</span>
+                <span class="pian-col-status">
+                  {% if task.actual_finish %}
+                    <span class="status-pill status-pill--completata">COMPLETATA</span>
+                  {% elif task.actual_start %}
+                    <span class="status-pill status-pill--in_lavorazione">IN LAVORAZIONE</span>
+                  {% else %}
+                    {% for pill in task.status_pills %}<span class="status-pill status-pill--{{ pill.key }}">{{ pill.label }}</span>{% empty %}<span class="status-pill status-pill--da_iniziare">DA INIZIARE</span>{% endfor %}
+                  {% endif %}
+                </span>
+                <span class="pian-col-stab stab-plant-cell" data-stab="{{ task.plant|default:'' }}">{{ task.plant|default:"—" }}</span>
+                <span class="pian-col-resp">{{ task.responsible|default:"—" }}</span>
+                <span class="pian-col-res">{% if task.resources_html %}{{ task.resources_html|safe }}{% else %}—{% endif %}</span>
+                <span class="pian-col-pred">{{ task.predecessors|default:"Nessuna" }}</span>
+                <span class="pian-col-action">
+                  {% if task.orm_id %}
+                    {% if task.warning_count and task.warning_count > 0 %}
+                      <button class="btn-risolvi" onclick="event.stopPropagation();openNotesModal('{{ task.orm_id }}')">&#9888; Risolvi ({{ task.warning_count }})</button>
+                    {% elif task.note_count and task.note_count > 0 %}
+                      <button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('{{ task.orm_id }}')">Note</button>
+                    {% endif %}
+                  {% endif %}
+                </span>
+              </div>
+              {% endfor %}
+            {% else %}
+              <div class="pian-no-activities">Nessuna attività</div>
+            {% endif %}
+          </div>
+        </article>
+        {% endfor %}
       {% else %}
-      <p style="text-align: center; color: var(--text-subtle); margin-top: 4rem; font-size: 0.9rem;">
-        Nessuna commessa disponibile. Attendi il completamento del caricamento del database.
-      </p>
+        <div class="pian-empty-state" id="pian-empty-jobs">
+          <p>Nessuna commessa disponibile.</p>
+          <button class="btn btn-primary" onclick="openAddCommessaModal()">Nuova commessa</button>
+        </div>
       {% endif %}
     </div>
 
   </div>
 </main>
 
+<!-- ── Simple commessa creation modal ───────────────────────────────────────── -->
+<div class="det-overlay" id="job-create-overlay"
+     role="dialog" aria-modal="true" aria-labelledby="job-create-title"
+     onclick="_jcOverlayClick(event)">
+  <div class="det-modal" style="max-width:420px;">
+    <div class="det-header">
+      <h2 id="job-create-title">Nuova commessa</h2>
+      <button class="btn-icon" onclick="closeAddCommessaModal()" aria-label="Chiudi">&#x2715;</button>
+    </div>
+    <div class="det-body-wrap" style="padding:1.25rem 1.5rem 0.75rem;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
+
+        <div class="wiz-field" style="grid-column:1/-1;">
+          <label>Commessa <span class="req">*</span></label>
+          <input id="jc-commessa" type="text" class="form-input"
+                 placeholder="es. AB123"
+                 oninput="document.getElementById('jc-error').style.display='none'">
+        </div>
+
+        <div class="wiz-field">
+          <label>Data consegna</label>
+          <input id="jc-deadline" type="date" class="form-input">
+        </div>
+
+        <div class="wiz-field">
+          <label>Costo totale (€)</label>
+          <input id="jc-cost" type="number" class="form-input" min="0" step="0.01" placeholder="es. 50000">
+        </div>
+
+        <div class="wiz-field" style="grid-column:1/-1;">
+          <label>Penale (%)</label>
+          <input id="jc-penalty" type="number" class="form-input" min="0" step="0.01"
+                 placeholder="max {{ penale_max_json|safe }}"
+                 max="{{ penale_max_json|safe }}">
+        </div>
+
+      </div>
+      <div id="jc-error" class="alert alert-error" style="display:none; margin-top:0.75rem;"></div>
+    </div>
+    <div class="det-footer">
+      <div style="display:flex; gap:0.5rem; justify-content:flex-end; width:100%;">
+        <button class="btn btn-ghost" onclick="closeAddCommessaModal()">Annulla</button>
+        <button id="jc-save-btn" class="btn btn-primary" onclick="saveNewCommessa()">Salva</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Stili wizard ─────────────────────────────────────────────────────────── -->
 
 <!-- Modal overlay -->
-<div id="add-modal-overlay" onclick="closeAddModal()"></div>
+<div id="add-modal-overlay"></div>
 
 <!-- Modal container -->
 <div id="add-modal" style="display:none;">
@@ -136,33 +238,41 @@
     </div>
 
     <!-- Step indicator dots -->
-    <div class="wiz-steps-row">
-      <div class="sdot active" id="sdot-1">1</div>
-      <div class="sline" id="sline-1"></div>
-      <div class="sdot" id="sdot-2">2</div>
-      <div class="sline" id="sline-2"></div>
-      <div class="sdot" id="sdot-3">3</div>
-      <div class="sline" id="sline-3"></div>
-      <div class="sdot" id="sdot-4">4</div>
-      <div class="sline" id="sline-4"></div>
-      <div class="sdot" id="sdot-5">5</div>
-    </div>
-    <!-- Step labels -->
-    <div class="wiz-labels-row">
-      <span class="wlabel active" id="slbl-1">WPS</span>
-      <span class="wiz-label-gap"></span>
-      <span class="wlabel" id="slbl-2">Info</span>
-      <span class="wiz-label-gap"></span>
-      <span class="wlabel" id="slbl-3">Date</span>
-      <span class="wiz-label-gap"></span>
-      <span class="wlabel" id="slbl-4">Risorse</span>
-      <span class="wiz-label-gap"></span>
-      <span class="wlabel" id="slbl-5">Riepilogo</span>
-    </div>
+    <div style="height:.25rem;"></div>
   </div>
 
   <!-- Scrollable body -->
   <div class="wiz-body">
+
+  <!-- ── STEP 0: Nuova commessa ──────────────────────────────────────── -->
+  <div id="wiz-step-0" style="display:none;">
+    <p class="wiz-subtitle">
+      La commessa <strong id="s0-commessa-name"></strong> non è ancora presente in archivio.
+      Inserisci i dati per crearla prima di procedere.
+    </p>
+    <div class="wiz-grid-3 s0-fields">
+      <div class="wiz-field">
+        <label>Data consegna <span class="req">*</span></label>
+        <input id="s0-deadline" type="date" oninput="if(WIZ.newJob) WIZ.newJob.delivery_date = this.value">
+      </div>
+      <div class="wiz-field">
+        <label>Costo totale (€)</label>
+        <input id="s0-cost" type="number" min="0" step="0.01" placeholder="es. 50000"
+               oninput="if(WIZ.newJob) WIZ.newJob.total_cost = this.value">
+      </div>
+      <div class="wiz-field">
+        <label>Penale (%)</label>
+        <input id="s0-penalty" type="number" min="0" step="0.01"
+               placeholder="max {{ penale_max_json|safe }}" max="{{ penale_max_json|safe }}"
+               oninput="if(WIZ.newJob) WIZ.newJob.penalty = this.value">
+      </div>
+    </div>
+    <div id="s0-error" class="wiz-error" style="display:none;"></div>
+    <div class="wiz-footer">
+      <button class="wiz-btn-back" onclick="step0Back()">← Indietro</button>
+      <button class="wiz-btn-next" onclick="step0Next()">Avanti</button>
+    </div>
+  </div>
 
   <!-- ── STEP 1: Carica WPS ────────────────────────────────────────────── -->
   <div id="wiz-step-1">
@@ -180,7 +290,7 @@
         </svg>
         <span class="drop-zone-label">Trascina il PDF oppure <span class="drop-zone-link">sfoglia</span></span>
         <span id="s1-fname" class="drop-zone-fname"></span>
-        <span class="drop-zone-hint">Formato: <code>Modello_Commessa[_Item][_Attività].pdf</code></span>
+        <span class="drop-zone-hint">Formato: <code>ModelloTesta_Commessa[_Item][_Attività].pdf</code></span>
       </label>
       <input id="s1-file-input" type="file" accept=".pdf" style="display:none;" onchange="s1HandleSelect(this);">
     </div>
@@ -192,32 +302,45 @@
 
     <!-- Data panel — shown after WPS analysis or manual entry -->
     <div id="s1-data-panel" style="display:none;">
-      <div id="s1-autofill-notice" style="display:none;" class="s1-autofill-notice">
-        <span>✦</span> Dati compilati automaticamente dalla WPS — verifica e modifica se necessario
-      </div>
-      <!-- Editable fields -->
-      <div class="wiz-grid-2" style="margin-top:.75rem;">
-        <div class="wiz-field">
-          <label>Modello testa</label>
-          <input id="s1-testa" type="text" placeholder="es. HT200">
+      <div id="s1-autofill-notice" style="display:none;" class="s1-autofill-notice" aria-hidden="true"></div>
+
+      <!-- Editable identity fields -->
+      <div class="wiz-grid-2 s1-identity-grid">
+        <div class="wiz-field s1-commessa-field">
+          <label>Commessa <span class="req">*</span></label>
+          <div class="s1-commessa-control">
+            <input id="s1-commessa" type="text" placeholder="es. AB123" oninput="_s1CommessaChange(this.value)">
+          </div>
+          <div id="s1-commessa-status" class="s1-commessa-status" style="display:none;"></div>
         </div>
         <div class="wiz-field">
-          <label>Commessa <span class="req">*</span></label>
-          <input id="s1-commessa" type="text" placeholder="es. AB123" oninput="_s1CommessaChange(this.value)">
+          <label>Modello testa</label>
+          <div class="ac-wrap" id="s1-testa-wrap">
+            <input id="s1-testa" type="text" placeholder="es. HT200" autocomplete="off"
+                   oninput="_s1TestaInput(this.value)" onfocus="_s1TestaFocus()" onkeydown="_s1TestaKeydown(event)">
+            <div id="s1-testa-dropdown" class="ac-dropdown" hidden role="listbox" aria-label="Modelli testa"></div>
+          </div>
         </div>
         <div class="wiz-field">
           <label>Item</label>
-          <input id="s1-item" type="number" min="1" placeholder="1" value="1">
+          <input id="s1-item" type="number" min="1" placeholder="1" value="1" oninput="_s1CommessaItemChange()">
         </div>
         <div class="wiz-field">
           <label>Attività <span class="opt">(opz.)</span></label>
           <input id="s1-attivita" type="text" placeholder="es. Qualifica">
         </div>
       </div>
-      <!-- Misure bore -->
+
+      <!-- Bore measurements card -->
       <div class="wiz-meas-section">
-        <div class="wiz-meas-title">Misure (mm)</div>
-        <div class="wiz-grid-4">
+        <div class="wiz-meas-header">
+          <div class="wiz-meas-title">
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Misure Gemini (mm)
+          </div>
+          <span class="wiz-meas-hint">Calcolate dal WPS · modificabili</span>
+        </div>
+        <div class="wiz-grid-4 wiz-meas-grid">
           <div class="wiz-field">
             <label>Ø min</label>
             <input id="s1-bore-min" type="number" step="0.001" placeholder="—">
@@ -236,8 +359,7 @@
           </div>
         </div>
       </div>
-      <!-- Panel commessa: appare se la commessa non è in archivio -->
-      <div id="s1-commessa-panel" style="display:none;"></div>
+
     </div>
 
     <div id="s1-error" class="wiz-error" style="display:none;"></div>
@@ -247,8 +369,20 @@
     </div>
   </div>
 
-  <!-- ── STEP 2: Info attività ─────────────────────────────────────────── -->
+
+  <!-- ── STEP 2: Predecessore ──────────────────────────────────────────── -->
   <div id="wiz-step-2" style="display:none;">
+    <p class="wiz-subtitle">Seleziona un'attività della stessa commessa da cui questa dipende, oppure procedi senza predecessore.</p>
+    <div id="s2-predecessor-body"></div>
+    <div id="s2-error" class="wiz-error" style="display:none;margin-top:.75rem;"></div>
+    <div class="wiz-footer">
+      <button class="wiz-btn-back" onclick="wizGoTo(1)">Indietro</button>
+      <button class="wiz-btn-next" onclick="step2Next()">Avanti</button>
+    </div>
+  </div>
+
+  <!-- ── STEP 3: Info attività ─────────────────────────────────────────── -->
+  <div id="wiz-step-3" style="display:none;">
     <p class="wiz-subtitle">Inserisci le informazioni dell'attività.</p>
     <div class="wiz-grid-2">
 
@@ -271,13 +405,13 @@
     </div>
     <div id="s3-error" class="wiz-error" style="display:none;"></div>
     <div class="wiz-footer">
-      <button class="wiz-btn-back" onclick="wizGoTo(1)">Indietro</button>
+      <button class="wiz-btn-back" onclick="wizGoTo(2)">Indietro</button>
       <button class="wiz-btn-next" onclick="step3Next()">Avanti</button>
     </div>
   </div>
 
-  <!-- ── STEP 3: Pianificazione / Date ─────────────────────────────────── -->
-  <div id="wiz-step-3" style="display:none;">
+  <!-- ── STEP 4: Pianificazione / Date ─────────────────────────────────── -->
+  <div id="wiz-step-4" style="display:none;">
     <div class="s4-cal-wrap">
       <div class="s4-cal-nav">
         <button type="button" class="s4-nav-btn" onclick="s4Prev()">&#8249;</button>
@@ -290,13 +424,13 @@
 
     <div id="s4-error" class="wiz-error" style="display:none;margin-top:.75rem;"></div>
     <div class="wiz-footer">
-      <button class="wiz-btn-back" onclick="wizGoTo(2)">Indietro</button>
+      <button class="wiz-btn-back" onclick="wizGoTo(3)">Indietro</button>
       <button class="wiz-btn-next" onclick="step4Next()">Avanti</button>
     </div>
   </div>
 
-  <!-- ── STEP 4: Risorse ───────────────────────────────────────────────── -->
-  <div id="wiz-step-4" style="display:none;">
+  <!-- ── STEP 5: Risorse ───────────────────────────────────────────────── -->
+  <div id="wiz-step-5" style="display:none;">
     <p class="wiz-subtitle">Seleziona le risorse da assegnare.</p>
 
     <!-- Recap misure + modello testa (populated by JS) -->
@@ -405,32 +539,20 @@
 
     <div id="s5-error" class="wiz-error" style="display:none;margin-top:.75rem;"></div>
     <div class="wiz-footer">
-      <button class="wiz-btn-back" onclick="wizGoTo(3)">Indietro</button>
+      <button class="wiz-btn-back" onclick="wizGoTo(4)">Indietro</button>
       <button id="s5-next-btn" class="wiz-btn-next" onclick="step5Next()">Avanti</button>
     </div>
   </div>
 
-  <!-- ── STEP 5: Riepilogo ──────────────────────────────────────────── -->
-  <div id="wiz-step-5" style="display:none;">
+  <!-- ── STEP 6: Riepilogo ──────────────────────────────────────────── -->
+  <div id="wiz-step-6" style="display:none;">
     <p class="wiz-subtitle">Verifica i dettagli e conferma l'aggiunta.</p>
 
     <div id="s6-recap-grid" class="s6-recap-grid"></div>
 
-    <div id="s6-problems-wrap" style="display:none; margin-top:1.25rem;">
-      <div class="s6-warn-header">
-        <span class="s6-warn-icon">&#9888;</span>
-        <span class="s6-warn-title">Sono presenti i seguenti problemi — vuoi procedere comunque?</span>
-      </div>
-      <ul id="s6-problems-list" class="s6-problems-list"></ul>
-    </div>
-
-    <div id="s6-ok-notice" style="display:none;" class="s6-ok-notice">
-      &#10003; Nessun problema rilevato.
-    </div>
-
     <div id="s6-error" class="wiz-error" style="display:none;margin-top:.75rem;"></div>
     <div class="wiz-footer">
-      <button class="wiz-btn-back" onclick="wizGoTo(4)">Indietro</button>
+      <button class="wiz-btn-back" onclick="wizGoTo(5)">Indietro</button>
       <button id="s6-save-btn" class="wiz-btn-next" onclick="step6Save()">Salva</button>
     </div>
   </div>
@@ -440,6 +562,9 @@
 
 <!-- Success toast -->
 <div id="wiz-toast" style="display:none;"></div>
+
+<!-- Resource list popover (fixed, above table stacking contexts) -->
+<div id="pian-res-popover" hidden role="dialog" aria-label="Risorse assegnate"></div>
 
 <!-- Notes modal — read-only view of all problems/notes for an activity -->
 <div id="notes-modal-overlay" onclick="_notesOverlayClick(event)"
@@ -497,27 +622,320 @@
 </div>
 
 <script>
+// ── App-wide settings ─────────────────────────────────────────────────────────
+const PENALE_MAX = {{ penale_max_json|safe }};
+const TESTA_MODELS = {{ testa_models_json|safe }};
+
 // ── Wizard state ──────────────────────────────────────────────────────────────
 const WIZ = {
-  stabilimento:'', responsabile:'', costo:'', penale:'',
+  stabilimento:'', responsabile:'',
   tmpPath:'', wpsName:'',
   parsed:{}, gemini:{}, bore:{},
   modello_testa:'', commessa:'', item:1, attivita:'',
   dataInizio:'', dataFine:'',
   newJob: null,
+  predecessors: [],
+  predecessorItems: [],
   risorse:{ teste:[], mandrini:[], tastatori:[], maschere:[], generatori:[] }
 };
 
-const _WIZ_TITLES = ['','WPS','Info attività','Pianificazione','Risorse','Riepilogo'];
+const _WIZ_TITLES = ['Nuova commessa','WPS','Predecessore','Info attività','Pianificazione','Risorse','Riepilogo'];
+const _enc = v => encodeURIComponent((v || '').trim());
+const buildJobId = (commessa) => _enc(commessa);
+const buildActivityId = (commessa, item, attivita) => `${_enc(commessa)}-${String(parseInt(item || 1, 10) || 1).padStart(2, '0')}-${_enc(attivita || '')}`;
+let _selectedPianCommessa = '';
+let _pianDetachedActivities = null;
+let _pianLockedJob = null;
 
+function _resolveActivityName(activityId) {
+  const row = document.querySelector(`.pian-activity-row[data-activity-id="${CSS.escape(activityId)}"]`);
+  return row ? (row.dataset.activity || activityId) : activityId;
+}
+
+function _pianGroupByCommessa(commessa) {
+  if (!commessa) return null;
+  return document.querySelector(`.pian-group[data-commessa="${CSS.escape(commessa)}"]`);
+}
+
+function _pianActivitiesByCommessa(commessa) {
+  if (!commessa) return null;
+  return document.querySelector(`.pian-activities[data-commessa="${CSS.escape(commessa)}"]`);
+}
+
+function _pianCardFromGroup(group) {
+  return group ? group.querySelector('.pian-job-card') : null;
+}
+
+
+function _pianProgressHtml() {
+  return `<div class="pian-head-progress">
+    <span class="pian-head-lbl">Completamento</span>
+    <div class="pian-progress-wrap">
+      <span class="pian-progress-pct" data-job-progress-pct>0%</span>
+      <div class="pian-progress" role="progressbar" aria-label="Completamento attività" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="pian-progress-track">
+          <div class="pian-progress-fill" data-job-progress-fill style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function _pianStatsHtml(nAct) {
+  return `<div class="pian-project-stats" aria-label="Metriche attività">
+    <span class="pian-stat-item"><span class="pian-stat-lbl">Attività</span><strong data-job-total>${nAct}</strong></span>
+    <span class="pian-stat-item"><span class="pian-stat-lbl">In corso</span><strong data-job-working>0</strong></span>
+    <span class="pian-stat-item pian-stat-item--late"><span class="pian-stat-lbl">In ritardo</span><strong data-job-late>0</strong></span>
+    <span class="pian-stat-item pian-stat-item--alerts"><span class="pian-stat-lbl">Problemi</span><strong data-job-alerts>0</strong></span>
+  </div>`;
+}
+
+function _pianHeadInfoHtml(job) {
+  const _hi = (lbl, val, prefix, suffix, cls) => {
+    const hasVal = val !== null && val !== undefined && val !== '';
+    const display = hasVal ? `${prefix || ''}${esc(String(val))}${suffix || ''}` : '—';
+    const emptyClass = hasVal ? '' : ' is-empty';
+    const itemClass = cls ? ` ${cls}` : '';
+    return `<span class="pian-head-item${itemClass}">` +
+      `<span class="pian-head-lbl">${lbl}</span>` +
+      `<span class="pian-head-val${emptyClass}">${display}</span>` +
+      `</span>`;
+  };
+  return _hi('Deadline', job.delivery_date) +
+    _hi('Penale', job.penalty, '', '%', 'pian-head-item--penalty');
+}
+
+function _pianGroupHeadHtml(job) {
+  const commessa = esc(job.commessa || '');
+  const nAct = job.n_activities || 0;
+  const chevron = `<svg class="pian-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><polyline points="2,4 7,10 12,4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  return `
+    <header class="pian-project-head" onclick="togglePianGroupFromCard(event, this)" tabindex="0" role="button" aria-expanded="false">
+      <div class="pian-job-card"
+           data-job-id="${esc(job.job_id || '')}"
+           data-commessa="${commessa}"
+           data-total-cost="${esc(job.total_cost || '')}"
+           data-penalty="${esc(job.penalty || '')}"
+           data-delivery-date="${esc(job.delivery_date || '')}"
+           data-n-activities="${nAct}">
+        <div class="pian-head-identity">
+          <span class="pian-job-name">${commessa}</span>
+          <button type="button" class="pian-edit-btn" title="Modifica commessa"
+                  onclick="event.stopPropagation(); openDetailModal(this.closest('.pian-job-card'), 'job')">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M8.5 1.5a1.414 1.414 0 0 1 2 2L4 10H1.5V7.5L8.5 1.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          </button>
+          <span class="pian-job-state status-pill status-pill--non_pianificata">NON PIANIFICATA</span>
+        </div>
+        <span class="pian-head-sep" aria-hidden="true"></span>
+        <div class="pian-head-meta">${_pianHeadInfoHtml(job)}</div>
+        <span class="pian-head-sep" aria-hidden="true"></span>
+        ${_pianStatsHtml(nAct)}
+        <span class="pian-head-sep" aria-hidden="true"></span>
+        ${_pianProgressHtml()}
+      </div>
+      <button type="button" class="pian-expand-btn" aria-expanded="false" onclick="togglePianGroup(this)" title="Mostra attività">
+        ${chevron}
+      </button>
+    </header>`;
+}
+
+function _pianRowsForCommessa(commessa) {
+  const host = _pianActivitiesByCommessa(commessa);
+  return host ? Array.from(host.querySelectorAll('.pian-activity-row')) : [];
+}
+
+function _pianVisibleRowsForCommessa(commessa) {
+  return _pianRowsForCommessa(commessa).filter(row => row.dataset.searchHidden !== '1');
+}
+
+function _pianActivityState(row) {
+  const pills = Array.from(row.querySelectorAll('.status-pill'))
+    .flatMap(p => Array.from(p.classList))
+    .filter(c => c.startsWith('status-pill--'))
+    .map(c => c.replace('status-pill--', ''));
+  if (pills.includes('in_ritardo')) return 'in_ritardo';
+  if (pills.includes('in_lavorazione') || pills.includes('in_lavorazione_ritardo')) return 'in_lavorazione';
+  if (pills.includes('completata')) return 'completata';
+  if (pills.includes('pianificata')) return 'pianificata';
+  return 'non_pianificata';
+}
+
+function _pianJobStats(commessa) {
+  const rows = _pianRowsForCommessa(commessa);
+  const stats = { total: rows.length, completed: 0, openProblems: 0, late: 0, working: 0, planned: 0 };
+  rows.forEach(row => {
+    const wc = parseInt(row.dataset.warningCount || '0', 10) || 0;
+    const state = _pianActivityState(row);
+    if (state === 'completata') stats.completed += 1;
+    stats.openProblems += wc;
+    if (state === 'in_ritardo') stats.late += 1;
+    if (state === 'in_lavorazione') stats.working += 1;
+    if (state === 'pianificata') stats.planned += 1;
+  });
+  return stats;
+}
+
+function _pianAggregateStatus(stats) {
+  if (!stats.total) return { key: 'non_pianificata', label: 'NON PIANIFICATA' };
+  if (stats.late > 0) return { key: 'in_ritardo', label: 'IN RITARDO' };
+  if (stats.working > 0) return { key: 'in_lavorazione', label: 'IN LAVORAZIONE' };
+  if (stats.completed === stats.total) return { key: 'completata', label: 'COMPLETATA' };
+  return { key: 'pianificata', label: 'PIANIFICATA' };
+}
+
+function _refreshPianJobCard(group) {
+  const card = _pianCardFromGroup(group);
+  if (!card) return;
+  const stats = _pianJobStats(group.dataset.commessa || '');
+  const status = _pianAggregateStatus(stats);
+  card.dataset.nActivities = stats.total;
+  const stateEl = group.querySelector('.pian-job-state');
+  if (stateEl) {
+    stateEl.className = `pian-job-state status-pill status-pill--${status.key}`;
+    stateEl.textContent = status.label.replaceAll('_', ' ');
+  }
+  const totalEls = group.querySelectorAll('[data-job-total]');
+  const alertsEls = group.querySelectorAll('[data-job-alerts]');
+  const workingEls = group.querySelectorAll('[data-job-working]');
+  const lateEls = group.querySelectorAll('[data-job-late]');
+  const progressFills = group.querySelectorAll('[data-job-progress-fill]');
+  const progressBars = group.querySelectorAll('.pian-progress[role="progressbar"]');
+  const progressPcts = group.querySelectorAll('[data-job-progress-pct]');
+  const pct = stats.total ? Math.round(stats.completed / stats.total * 100) : 0;
+  totalEls.forEach(el => { el.textContent = stats.total; });
+  alertsEls.forEach(el => { el.textContent = stats.openProblems; });
+  workingEls.forEach(el => { el.textContent = stats.working; });
+  lateEls.forEach(el => { el.textContent = stats.late; });
+  progressFills.forEach(el => { el.style.width = `${pct}%`; });
+  progressBars.forEach(el => { el.setAttribute('aria-valuenow', String(pct)); });
+  progressPcts.forEach(el => { el.textContent = `${pct}%`; });
+  const lateStat = group.querySelector('.pian-stat-item--late');
+  if (lateStat) lateStat.classList.toggle('is-active', stats.late > 0);
+  const alertsStat = group.querySelector('.pian-stat-item--alerts');
+  if (alertsStat) alertsStat.classList.toggle('is-active', stats.openProblems > 0);
+}
+
+function togglePianGroup(btn) {
+  const group = btn.closest('.pian-group');
+  if (!group) return;
+  const isOpen = group.classList.toggle('is-open');
+  btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  const head = group.querySelector('.pian-project-head');
+  if (head) head.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+}
+
+function togglePianGroupFromCard(event, head) {
+  if (event.target.closest('button, a, input, select, textarea')) return;
+  const group = head.closest('.pian-group');
+  const btn = group ? group.querySelector('.pian-expand-btn') : null;
+  if (btn) togglePianGroup(btn);
+}
+
+function refreshPianSummary() {
+  document.querySelectorAll('.pian-group').forEach(_refreshPianJobCard);
+  const visible = Array.from(document.querySelectorAll('.pian-group')).filter(g => g.style.display !== 'none').length;
+  const countEl = document.getElementById('pian-jobs-count');
+  if (countEl) countEl.textContent = `${visible} visibil${visible === 1 ? 'e' : 'i'}`;
+}
+
+function _restoreDetachedActivities() {
+  if (!_pianDetachedActivities) return;
+  const commessa = _pianDetachedActivities.dataset.commessa || '';
+  const group = _pianGroupByCommessa(commessa);
+  if (group) group.appendChild(_pianDetachedActivities);
+  _pianDetachedActivities.classList.remove('is-in-detail');
+  _pianDetachedActivities = null;
+}
+
+function _renderSelectedPianJob() {
+  const group = _pianGroupByCommessa(_selectedPianCommessa);
+  const body = document.getElementById('pian-detail-body');
+  const title = document.getElementById('pian-detail-title');
+  const meta = document.getElementById('pian-detail-meta');
+  const editBtn = document.getElementById('pian-edit-job-btn');
+  const addBtn = document.getElementById('pian-add-task-btn');
+  _restoreDetachedActivities();
+  document.querySelectorAll('.pian-group').forEach(g => g.classList.toggle('is-selected', g === group));
+  if (!body) return;
+  if (!group || !body) {
+    if (title) title.textContent = 'Seleziona una commessa';
+    if (meta) meta.textContent = '';
+    if (editBtn) editBtn.disabled = true;
+    if (addBtn) addBtn.disabled = true;
+    body.innerHTML = '<div class="pian-empty-state"><p>Seleziona una commessa per vedere le attività.</p></div>';
+    return;
+  }
+
+  const card = _pianCardFromGroup(group);
+  const commessa = group.dataset.commessa || '';
+  const stats = _pianJobStats(commessa);
+  const visibleRows = _pianVisibleRowsForCommessa(commessa);
+  if (title) title.textContent = commessa;
+  if (meta && card) {
+    const parts = [
+      card.dataset.deliveryDate ? `Consegna ${card.dataset.deliveryDate}` : 'Consegna non impostata',
+      card.dataset.totalCost ? `Costo € ${card.dataset.totalCost}` : 'Costo non impostato',
+      card.dataset.penalty ? `Penale ${card.dataset.penalty}%` : 'Penale non impostata',
+    ];
+    meta.textContent = parts.join(' · ');
+  }
+  document.getElementById('pian-kpi-total').textContent = stats.total;
+  document.getElementById('pian-kpi-completed').textContent = stats.completed;
+  const kpiAlerts = document.getElementById('pian-kpi-alerts');
+  if (kpiAlerts) kpiAlerts.textContent = stats.openProblems;
+  if (editBtn) editBtn.disabled = false;
+  if (addBtn) addBtn.disabled = false;
+
+  const host = _pianActivitiesByCommessa(commessa);
+  body.innerHTML = '';
+  if (!host || !stats.total) {
+    body.innerHTML = '<div class="pian-empty-state"><p>Questa commessa non ha attività.</p><button class="btn btn-primary" onclick="openAddModalForSelectedJob()">Aggiungi attività per questa commessa</button></div>';
+    return;
+  }
+  if (!visibleRows.length) {
+    body.innerHTML = '<div class="pian-empty-state"><p>Nessuna attività della commessa corrisponde alla ricerca.</p><button class="btn btn-ghost" onclick="clearPianSearch()">Cancella ricerca</button></div>';
+    return;
+  }
+  host.classList.add('is-in-detail');
+  body.appendChild(host);
+  _pianDetachedActivities = host;
+}
+
+function selectPianJob(commessa) {
+  _selectedPianCommessa = commessa || '';
+  _renderSelectedPianJob();
+}
+
+function editSelectedPianJob() {
+  const card = _pianCardFromGroup(_pianGroupByCommessa(_selectedPianCommessa));
+  if (card) openDetailModal(card, 'job');
+}
+
+function openAddModalForSelectedJob() {
+  if (!_selectedPianCommessa) return;
+  openAddModal({ commessa: _selectedPianCommessa });
+}
+
+function openAddModalForJob(commessa) {
+  openAddModal({ commessa });
+}
+
+function clearPianSearch() {
+  const search = document.getElementById('pian-search');
+  if (search) search.value = '';
+  filterPianGroups('');
+}
 // ── Open / Close ──────────────────────────────────────────────────────────────
-function openAddModal() {
+function openAddModal(opts) {
+  _pianLockedJob = opts && opts.commessa ? opts.commessa : null;
   Object.assign(WIZ, {
     stabilimento:'', responsabile:'',
     tmpPath:'', wpsName:'', parsed:{}, gemini:{}, bore:{},
     modello_testa:'', commessa:'', item:1, attivita:'',
     dataInizio:'', dataFine:'',
     newJob: null,
+    predecessors: [],
+    predecessorItems: [],
     risorse:{ teste:[], mandrini:[], tastatori:[], maschere:[], generatori:[] }
   });
   document.getElementById('add-modal-overlay').style.display = 'flex';
@@ -528,8 +946,8 @@ function openAddModal() {
   document.getElementById('s1-spinner').style.display = 'none';
   document.getElementById('s1-data-panel').style.display = 'none';
   document.getElementById('s1-autofill-notice').style.display = 'none';
-  document.getElementById('s1-commessa-panel').style.display = 'none';
-  document.getElementById('s1-commessa-panel').innerHTML = '';
+  document.getElementById('s1-commessa-status').style.display = 'none';
+  document.getElementById('s1-commessa-status').innerHTML = '';
   document.getElementById('s1-fname').textContent = '';
   document.getElementById('s1-file-input').value = '';
   document.getElementById('s1-error').style.display = 'none';
@@ -538,7 +956,16 @@ function openAddModal() {
     const el = document.getElementById(id);
     if (el) { el.value = id === 's1-item' ? '1' : ''; el.style.background = ''; el.style.borderColor = ''; }
   });
-  // Reset step-2 UI
+  _s1TestaCloseDropdown();
+  const commessaInput = document.getElementById('s1-commessa');
+  if (commessaInput) {
+    commessaInput.readOnly = !!_pianLockedJob;
+    commessaInput.classList.toggle('is-readonly', !!_pianLockedJob);
+  }
+  // Reset step-2 UI (predecessor)
+  const predBody = document.getElementById('s2-predecessor-body');
+  if (predBody) predBody.innerHTML = '';
+  // Reset step-3 UI (Info attività)
   const stabSel = document.getElementById('s3-stabilimento');
   const respSel = document.getElementById('s3-responsabile');
   if (stabSel) { stabSel.selectedIndex = 0; stabSel.style.borderColor = ''; }
@@ -549,6 +976,11 @@ function openAddModal() {
   if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salva'; }
   document.getElementById('s6-error').style.display = 'none';
   wizGoTo(1);
+  if (_pianLockedJob) {
+    step1Skip();
+    document.getElementById('s1-commessa').value = _pianLockedJob;
+    _s1CheckCommessa(_pianLockedJob, document.getElementById('s1-item').value);
+  }
   document.addEventListener('keydown', _wizEsc);
 }
 
@@ -558,25 +990,17 @@ function closeAddModal() {
   document.removeEventListener('keydown', _wizEsc);
 }
 
-function _wizEsc(e) { if (e.key === 'Escape') { closeAddModal(); closeDetailModal(); closeNotesModal(); } }
+function _wizEsc(e) { if (e.key === 'Escape') { closeAddModal(); closeDetailModal(); closeNotesModal(); closeAddCommessaModal(); } }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 function wizGoTo(n) {
-  for (let i = 1; i <= 5; i++) {
+  for (let i = 0; i <= 6; i++) {
     const s = document.getElementById('wiz-step-' + i);
     if (s) s.style.display = (i === n) ? '' : 'none';
-    const d = document.getElementById('sdot-' + i);
-    if (d) d.className = 'sdot' + (i < n ? ' done' : i === n ? ' active' : '');
-    if (i < 5) {
-      const l = document.getElementById('sline-' + i);
-      if (l) l.className = 'sline' + (i < n ? ' done' : '');
-    }
-    const lb = document.getElementById('slbl-' + i);
-    if (lb) lb.className = 'wlabel' + (i < n ? ' done' : i === n ? ' active' : '');
   }
   document.getElementById('wiz-title').textContent = _WIZ_TITLES[n] || '';
   document.querySelector('.wiz-body').scrollTop = 0;
-  if (n === 3) s4Init();
+  if (n === 4) s4Init();
 }
 
 // ── Step 1: WPS upload + commessa check ───────────────────────────────────────
@@ -600,7 +1024,6 @@ async function _s1Upload(file) {
   document.getElementById('s1-drop-zone').style.display = 'none';
   document.getElementById('s1-spinner').style.display = '';
   document.getElementById('s1-error').style.display = 'none';
-  document.getElementById('s1-commessa-panel').style.display = 'none';
   document.getElementById('s1-next-btn').style.display = 'none';
   const fd = new FormData();
   fd.append('wps_file', file);
@@ -615,7 +1038,7 @@ async function _s1Upload(file) {
       WIZ.gemini  = data.gemini  || {};
       WIZ.bore    = data.bore    || {};
       _s1ShowDataPanel(true);
-      await _s1CheckCommessa(WIZ.parsed.commessa || '');
+      await _s1CheckCommessa(WIZ.parsed.commessa || '', WIZ.parsed.item || 1);
       document.getElementById('s1-next-btn').style.display = '';
     } else {
       document.getElementById('s1-drop-zone').style.display = '';
@@ -628,62 +1051,217 @@ async function _s1Upload(file) {
   }
 }
 
-async function _s1CheckCommessa(commessa) {
-  const panel = document.getElementById('s1-commessa-panel');
+async function _s1CheckCommessa(commessa, itemVal) {
+  const status = document.getElementById('s1-commessa-status');
+  const item = parseInt(itemVal || document.getElementById('s1-item').value || 1, 10) || 1;
+  WIZ.predecessors = [];
+  WIZ.predecessorItems = [];
   if (!commessa) {
-    panel.style.display = 'none';
     WIZ.newJob = null;
+    status.style.display = 'none';
+    status.innerHTML = '';
     return;
   }
-  panel.style.display = '';
-  panel.innerHTML = '<p class="wiz-subtitle" style="margin:.5rem 0;">Verifica commessa in corso…</p>';
+  status.style.display = '';
+  status.className = 's1-commessa-status';
+  status.textContent = 'Verifica commessa in corso...';
   try {
-    const resp = await fetch(`/api/jobs/check/?commessa=${encodeURIComponent(commessa)}`);
+    const resp = await fetch(`/api/jobs/check/?commessa=${encodeURIComponent(commessa)}&item=${encodeURIComponent(item)}`);
     const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || 'check failed');
     if (data.exists) {
       WIZ.newJob = null;
-      panel.style.display = 'none';
-      panel.innerHTML = '';
+      status.className = 's1-commessa-status is-ok';
+      status.innerHTML = `Commessa <strong>${esc(commessa)}</strong> presente in archivio`;
     } else {
-      WIZ.newJob = { commessa, total_cost: '', penalty: '', delivery_date: '' };
-      panel.innerHTML = `
-        <div class="s1-commessa-new">
-          <p class="s1-commessa-badge s1-commessa-warn">Commessa <strong>${commessa}</strong> non ancora in archivio — compila i dati (opzionale)</p>
-          <div class="wiz-grid-3" style="margin-top:.75rem;">
-            <div class="wiz-field">
-              <label>Costo totale (€) <span class="opt">(opz.)</span></label>
-              <input id="s1-job-cost" type="number" min="0" step="0.01" placeholder="es. 50000"
-                oninput="WIZ.newJob.total_cost=this.value">
-            </div>
-            <div class="wiz-field">
-              <label>Penale (%) <span class="opt">(opz.)</span></label>
-              <input id="s1-job-penalty" type="number" min="0" max="100" step="0.01" placeholder="es. 10"
-                oninput="WIZ.newJob.penalty=this.value">
-            </div>
-            <div class="wiz-field">
-              <label>Data consegna <span class="opt">(opz.)</span></label>
-              <input id="s1-job-deadline" type="date"
-                oninput="WIZ.newJob.delivery_date=this.value">
-            </div>
-          </div>
-        </div>`;
+      WIZ.newJob = WIZ.newJob || { job_id: buildJobId(commessa), commessa, total_cost: '', penalty: '', delivery_date: '' };
+      WIZ.newJob.commessa = commessa;
+      WIZ.newJob.job_id = buildJobId(commessa);
+      status.className = 's1-commessa-status is-warn';
+      status.innerHTML = `Commessa <strong>${esc(commessa)}</strong> non presente in archivio — potrai crearla al passo successivo`;
+      status.style.display = '';
     }
+    WIZ.predecessorItems = data.predecessors || [];
   } catch (_) {
     WIZ.newJob = null;
-    panel.innerHTML = `<p class="s1-commessa-badge s1-commessa-warn">Impossibile verificare la commessa. Procedi comunque.</p>`;
+    WIZ.predecessors = [];
+    WIZ.predecessorItems = [];
+    status.className = 's1-commessa-status is-warn';
+    status.textContent = 'Impossibile verificare la commessa';
+    status.style.display = '';
   }
 }
+
+function _s1OpenCommessaStep(commessa) {
+  const nc = WIZ.newJob;
+  const nameEl = document.getElementById('s0-commessa-name');
+  if (nameEl) nameEl.textContent = commessa;
+  const dl = document.getElementById('s0-deadline');
+  const co = document.getElementById('s0-cost');
+  const pe = document.getElementById('s0-penalty');
+  if (dl) dl.value = nc.delivery_date || '';
+  if (co) co.value = nc.total_cost || '';
+  if (pe) pe.value = nc.penalty || '';
+  const errEl = document.getElementById('s0-error');
+  if (errEl) errEl.style.display = 'none';
+  if (dl) dl.style.borderColor = '';
+  wizGoTo(0);
+}
+
+function step0Next() {
+  const dl = document.getElementById('s0-deadline');
+  const errEl = document.getElementById('s0-error');
+  if (!dl || !dl.value) {
+    if (errEl) { errEl.textContent = 'Data di consegna obbligatoria.'; errEl.style.display = ''; }
+    if (dl) { dl.style.borderColor = '#ef4444'; dl.focus(); }
+    return;
+  }
+  if (errEl) errEl.style.display = 'none';
+  if (dl) dl.style.borderColor = '';
+  if (WIZ.newJob) {
+    WIZ.newJob.delivery_date = dl.value;
+    WIZ.newJob.total_cost    = (document.getElementById('s0-cost')    || {}).value || '';
+    WIZ.newJob.penalty       = (document.getElementById('s0-penalty') || {}).value || '';
+  }
+  _s1ContinueToPredecessor();
+}
+
+function step0Back() {
+  if (WIZ.newJob) {
+    const dl = document.getElementById('s0-deadline');
+    const co = document.getElementById('s0-cost');
+    const pe = document.getElementById('s0-penalty');
+    if (dl) WIZ.newJob.delivery_date = dl.value;
+    if (co) WIZ.newJob.total_cost    = co.value;
+    if (pe) WIZ.newJob.penalty       = pe.value;
+  }
+  wizGoTo(1);
+}
+
+function _s1PredecessorsHtml(items) {
+  WIZ.predecessors = [];
+  if (!items.length) return '';
+  return `
+    <div class="s1-predecessor-box">
+      <div class="s1-predecessor-head">
+        <span>Predecessor</span>
+        <small>Selezione singola</small>
+      </div>
+      <div class="s1-predecessor-list" role="radiogroup" aria-label="Predecessor attività">
+        <label class="s1-predecessor-item is-none">
+          <input type="radio" name="s1-predecessor" value="" checked onchange="_s1SelectPredecessor(this.value)">
+          <span><strong>Nessuno</strong><small>L'attività non dipende da un'altra attività dello stesso item</small></span>
+        </label>
+        ${items.map(a => {
+          const label = a.activity || a.activity_id;
+          const dates = [a.start, a.finish].filter(Boolean).join(' → ');
+          return `<label class="s1-predecessor-item">
+            <input type="radio" name="s1-predecessor" value="${esc(a.activity_id)}" onchange="_s1SelectPredecessor(this.value)">
+            <span><strong>${esc(label)}</strong><small>${esc(a.activity_id)}${dates ? ' · ' + esc(dates) : ''}</small></span>
+          </label>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
+function _s1SelectPredecessor(activityId) {
+  WIZ.predecessors = activityId ? [activityId] : [];
+}
+
+let _s1TestaAcIdx = -1;
+
+function _s1TestaMatches(q) {
+  const needle = (q || '').trim().toLowerCase();
+  if (!needle) return TESTA_MODELS.slice(0, 25);
+  return TESTA_MODELS.filter(m => m.toLowerCase().includes(needle)).slice(0, 25);
+}
+
+function _s1TestaRenderDropdown(matches) {
+  const dd = document.getElementById('s1-testa-dropdown');
+  if (!dd) return;
+  if (!matches.length) {
+    dd.innerHTML = '<div class="ac-empty">Nessun modello trovato nell\'inventario</div>';
+    dd.hidden = false;
+    return;
+  }
+  dd.innerHTML = matches.map((m, i) =>
+    `<button type="button" class="ac-option${i === _s1TestaAcIdx ? ' is-active' : ''}" data-value="${esc(m)}" role="option">${esc(m)}</button>`
+  ).join('');
+  dd.hidden = false;
+}
+
+function _s1TestaInput(val) {
+  WIZ.modello_testa = val.trim();
+  _s1TestaAcIdx = -1;
+  _s1TestaRenderDropdown(_s1TestaMatches(val));
+}
+
+function _s1TestaFocus() {
+  _s1TestaRenderDropdown(_s1TestaMatches(document.getElementById('s1-testa')?.value || ''));
+}
+
+function _s1TestaPick(val) {
+  const inp = document.getElementById('s1-testa');
+  if (inp) inp.value = val;
+  WIZ.modello_testa = val;
+  _s1TestaCloseDropdown();
+}
+
+function _s1TestaCloseDropdown() {
+  const dd = document.getElementById('s1-testa-dropdown');
+  if (dd) dd.hidden = true;
+  _s1TestaAcIdx = -1;
+}
+
+function _s1TestaKeydown(e) {
+  const dd = document.getElementById('s1-testa-dropdown');
+  if (!dd || dd.hidden) return;
+  const opts = [...dd.querySelectorAll('.ac-option')];
+  if (!opts.length) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    _s1TestaAcIdx = Math.min(_s1TestaAcIdx + 1, opts.length - 1);
+    opts.forEach((o, i) => o.classList.toggle('is-active', i === _s1TestaAcIdx));
+    opts[_s1TestaAcIdx]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    _s1TestaAcIdx = Math.max(_s1TestaAcIdx - 1, 0);
+    opts.forEach((o, i) => o.classList.toggle('is-active', i === _s1TestaAcIdx));
+    opts[_s1TestaAcIdx]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter' && _s1TestaAcIdx >= 0) {
+    e.preventDefault();
+    _s1TestaPick(opts[_s1TestaAcIdx].dataset.value);
+  } else if (e.key === 'Escape') {
+    _s1TestaCloseDropdown();
+  }
+}
+
+document.getElementById('s1-testa-dropdown')?.addEventListener('mousedown', e => {
+  const btn = e.target.closest('.ac-option');
+  if (btn) {
+    e.preventDefault();
+    _s1TestaPick(btn.dataset.value);
+  }
+});
+document.getElementById('s1-testa')?.addEventListener('blur', () => {
+  setTimeout(_s1TestaCloseDropdown, 150);
+});
 
 async function _s1CommessaChange(val) {
   const commessa = val.trim();
   if (!commessa) {
-    const panel = document.getElementById('s1-commessa-panel');
-    panel.style.display = 'none';
-    panel.innerHTML = '';
     WIZ.newJob = null;
+    WIZ.predecessors = [];
+    document.getElementById('s1-commessa-status').style.display = 'none';
     return;
   }
-  await _s1CheckCommessa(commessa);
+  await _s1CheckCommessa(commessa, document.getElementById('s1-item').value);
+}
+
+async function _s1CommessaItemChange() {
+  const commessa = document.getElementById('s1-commessa').value.trim();
+  if (!commessa) return;
+  await _s1CheckCommessa(commessa, document.getElementById('s1-item').value);
 }
 
 function _s1ShowError(msg) {
@@ -695,22 +1273,16 @@ function _s1ShowError(msg) {
 function step1Skip() {
   WIZ.tmpPath = ''; WIZ.wpsName = ''; WIZ.parsed = {}; WIZ.gemini = {}; WIZ.bore = {};
   WIZ.newJob = null;
+  WIZ.predecessors    = [];
+  WIZ.predecessorItems = [];
+  document.getElementById('s1-commessa-status').style.display = 'none';
   document.getElementById('s1-drop-zone').style.display = 'none';
   _s1ShowDataPanel(false);
   document.getElementById('s1-next-btn').style.display = '';
 }
 
-function step1Next() {
+function _s1ContinueToPredecessor() {
   const commessa = document.getElementById('s1-commessa').value.trim();
-  const errEl = document.getElementById('s1-error');
-  if (!commessa) {
-    errEl.textContent = 'La commessa è obbligatoria.';
-    errEl.style.display = '';
-    document.getElementById('s1-commessa').style.borderColor = '#ef4444';
-    return;
-  }
-  errEl.style.display = 'none';
-  document.getElementById('s1-commessa').style.borderColor = '';
   WIZ.modello_testa = document.getElementById('s1-testa').value.trim();
   WIZ.commessa      = commessa;
   WIZ.item          = parseInt(document.getElementById('s1-item').value) || 1;
@@ -722,7 +1294,27 @@ function step1Next() {
     max:        _n(document.getElementById('s1-bore-max').value),
     tube_pitch: _n(document.getElementById('s1-passo').value),
   });
+  _renderPredecessorStep();
   wizGoTo(2);
+}
+
+async function step1Next() {
+  const commessa = document.getElementById('s1-commessa').value.trim();
+  const errEl = document.getElementById('s1-error');
+  if (!commessa) {
+    errEl.textContent = 'La commessa è obbligatoria.';
+    errEl.style.display = '';
+    document.getElementById('s1-commessa').style.borderColor = '#ef4444';
+    return;
+  }
+  errEl.style.display = 'none';
+  document.getElementById('s1-commessa').style.borderColor = '';
+  await _s1CheckCommessa(commessa, document.getElementById('s1-item').value);
+  if (WIZ.newJob && !WIZ.newJob.delivery_date) {
+    _s1OpenCommessaStep(commessa);
+    return;
+  }
+  _s1ContinueToPredecessor();
 }
 
 function _s1ShowDataPanel(autofill) {
@@ -737,8 +1329,7 @@ function _s1ShowDataPanel(autofill) {
       const el = document.getElementById(id);
       if (!el) return;
       el.value = (val != null && val !== '') ? String(val) : '';
-      if (el.value && highlight) { el.style.background = 'hsl(142 25% 12%)'; el.style.borderColor = 'hsl(142 50% 32%)'; }
-      else { el.style.background = ''; el.style.borderColor = ''; }
+      el.classList.toggle('is-ai-fill', !!(el.value && highlight));
     };
     setF('s1-testa',    p.modello_testa,   true);
     setF('s1-commessa', p.commessa,         true);
@@ -749,6 +1340,43 @@ function _s1ShowDataPanel(autofill) {
     setF('s1-bore-max', b.max,              true);
     setF('s1-passo',    b.tube_pitch,       true);
   }
+}
+
+function _renderPredecessorStep() {
+  const body = document.getElementById('s2-predecessor-body');
+  const items = WIZ.predecessorItems || [];
+  WIZ.predecessors = [];
+  if (!items.length) {
+    body.innerHTML = `
+      <div class="s2-no-pred">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>Nessuna attività precedente trovata per questa commessa.</span>
+      </div>`;
+    return;
+  }
+  body.innerHTML = `
+    <div class="s1-predecessor-list" role="radiogroup" aria-label="Predecessore attività">
+      <label class="s1-predecessor-item is-none">
+        <input type="radio" name="s2-pred" value="" checked onchange="_s2SelectPredecessor(this.value)">
+        <span><strong>Nessuno</strong><small>L'attività non dipende da un'altra dello stesso item</small></span>
+      </label>
+      ${items.map(a => {
+        const label = a.activity || a.activity_id;
+        const dates = [a.start, a.finish].filter(Boolean).join(' → ');
+        return `<label class="s1-predecessor-item">
+          <input type="radio" name="s2-pred" value="${esc(a.activity_id)}" onchange="_s2SelectPredecessor(this.value)">
+          <span><strong>${esc(label)}</strong><small>${esc(a.activity_id)}${dates ? ' · ' + esc(dates) : ''}</small></span>
+        </label>`;
+      }).join('')}
+    </div>`;
+}
+
+function _s2SelectPredecessor(activityId) {
+  WIZ.predecessors = activityId ? [activityId] : [];
+}
+
+function step2Next() {
+  wizGoTo(3);
 }
 
 // ── Step 2: Info attività ─────────────────────────────────────────────────────
@@ -768,7 +1396,7 @@ function step3Next() {
   document.getElementById('s3-responsabile').style.borderColor = '';
   WIZ.stabilimento = stab;
   WIZ.responsabile = resp;
-  wizGoTo(3);
+  wizGoTo(4);
 }
 
 // ── Step 4: Interactive Two-Month Calendar ───────────────────────────────────
@@ -918,7 +1546,7 @@ function step4Next() {
   errEl.style.display = 'none';
   WIZ.dataInizio = S4.rangeStart;
   WIZ.dataFine   = S4.rangeEnd;
-  wizGoTo(4);
+  wizGoTo(5);
   _s5LoadRisorse();
 }
 
@@ -1133,69 +1761,79 @@ async function step5Save() {
 }
 
 function step5Next() {
-  // Validate step 4 is filled (risorse step)
-  wizGoTo(5);
+  wizGoTo(6);
   _s6BuildRiepilogo();
 }
 
 function _s6BuildRiepilogo() {
-  // ── Recap grid ──────────────────────────────────────────────────────────
   const r = WIZ;
   const fmt = v => v ? esc(String(v)) : '<span style="color:var(--text-subtle)">—</span>';
-  const allResArr = Object.entries(r.risorse)
-    .filter(([,v]) => v && v.length)
-    .map(([k,v]) => `<b>${k}</b>: ${v.map(esc).join(', ')}`);
+  const stab = r.stabilimento;
+  const inventoryMap = window._S5_INVENTORY_MAP || {};
+  const catLabels = {
+    teste: 'Teste', mandrini: 'Mandrini', tastatori: 'Tastatori',
+    maschere: 'Maschere', generatori: 'Generatori',
+  };
+
+  const resourcesHtml = (() => {
+    const rows = [];
+    Object.entries(r.risorse)
+      .filter(([, v]) => v && v.length)
+      .forEach(([k, v]) => {
+        const catLabel = catLabels[k] || k;
+        const groups = {};
+        v.forEach(uid => {
+          const plant = inventoryMap[uid];
+          const key = (plant && plant !== stab) ? plant : '__ok__';
+          (groups[key] = groups[key] || []).push(uid);
+        });
+        Object.entries(groups).forEach(([fromPlant, uids]) => {
+          const idsHtml = uids.map(u => `<code class="s6-uid">${esc(u)}</code>`).join(' ');
+          const noteHtml = fromPlant === '__ok__'
+            ? ''
+            : `<span class="s6-move-hint"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg> spostamento da ${esc(fromPlant)} a ${esc(stab)}</span>`;
+          rows.push(`<tr><td class="s6-tbl-cat">${catLabel}</td><td class="s6-tbl-ids">${idsHtml}</td><td class="s6-tbl-note">${noteHtml}</td></tr>`);
+        });
+      });
+    if (!rows.length) return '';
+    return `<table class="s6-res-table"><thead><tr><th>Categoria</th><th>Risorse</th><th>Note</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+  })();
 
   const grid = document.getElementById('s6-recap-grid');
   grid.innerHTML = `
-    <div class="s6-recap-item"><span class="s6-recap-label">Commessa</span><span class="s6-recap-value">${fmt(r.commessa)}</span></div>
-    <div class="s6-recap-item"><span class="s6-recap-label">Item</span><span class="s6-recap-value">${fmt(r.item)}</span></div>
-    <div class="s6-recap-item full-width"><span class="s6-recap-label">Attività</span><span class="s6-recap-value">${fmt(r.attivita)}</span></div>
-    <div class="s6-recap-item"><span class="s6-recap-label">Stabilimento</span><span class="s6-recap-value">${r.stabilimento ? stabBadge(r.stabilimento) : '—'}</span></div>
-    <div class="s6-recap-item"><span class="s6-recap-label">Responsabile</span><span class="s6-recap-value">${fmt(r.responsabile)}</span></div>
-    <div class="s6-recap-item"><span class="s6-recap-label">Inizio</span><span class="s6-recap-value">${fmt(r.dataInizio)}</span></div>
-    <div class="s6-recap-item"><span class="s6-recap-label">Fine</span><span class="s6-recap-value">${fmt(r.dataFine)}</span></div>
-    <div class="s6-recap-item"><span class="s6-recap-label">Modello testa</span><span class="s6-recap-value">${fmt(r.modello_testa)}</span></div>
-    ${allResArr.length ? `<div class="s6-recap-item full-width"><span class="s6-recap-label">Risorse selezionate</span><span class="s6-recap-value" style="font-size:.8rem">${allResArr.join('<br>')}</span></div>` : ''}
+    <div class="s6-recap-left">
+      <div class="s6-recap-item full-width">
+        <span class="s6-recap-label">Attività ID</span>
+        <span class="s6-recap-value">${fmt(buildActivityId(r.commessa, r.item, r.attivita))}</span>
+      </div>
+      <div class="s6-recap-item">
+        <span class="s6-recap-label">Stabilimento</span>
+        <span class="s6-recap-value">${r.stabilimento ? stabBadge(r.stabilimento) : '—'}</span>
+      </div>
+      <div class="s6-recap-item">
+        <span class="s6-recap-label">Responsabile</span>
+        <span class="s6-recap-value">${fmt(r.responsabile)}</span>
+      </div>
+      <div class="s6-recap-item">
+        <span class="s6-recap-label">Inizio</span>
+        <span class="s6-recap-value">${fmt(r.dataInizio)}</span>
+      </div>
+      <div class="s6-recap-item">
+        <span class="s6-recap-label">Fine</span>
+        <span class="s6-recap-value">${fmt(r.dataFine)}</span>
+      </div>
+      <div class="s6-recap-item full-width">
+        <span class="s6-recap-label">Modello testa</span>
+        <span class="s6-recap-value">${fmt(r.modello_testa)}</span>
+      </div>
+    </div>
+    <div class="s6-recap-right">
+      ${resourcesHtml ? `
+        <span class="s6-recap-label">Risorse selezionate</span>
+        <div class="s6-res-list">${resourcesHtml}</div>
+      ` : '<span style="color:var(--text-subtle);font-size:.8rem;">Nessuna risorsa selezionata</span>'}
+    </div>
   `;
-
-  // ── Problem detection ────────────────────────────────────────────────────
-  const problems = [];
-  const stab = r.stabilimento;
-  const cats = {
-    teste: 'testa', mandrini: 'mandrino', tastatori: 'tastatore',
-    maschere: 'maschera', generatori: 'generatore'
-  };
-
-  // Access the inventory data stored on _S5_DATA (populated during step 4 load)
-  const inventoryMap = window._S5_INVENTORY_MAP || {};
-
-  Object.entries(cats).forEach(([plural, label]) => {
-    const selected = r.risorse[plural] || [];
-    if (!selected.length) {
-      problems.push(`<b>${label}</b>: nessuna risorsa selezionata — da recuperare / acquistare / affittare`);
-    } else {
-      selected.forEach(uid => {
-        const plant = inventoryMap[uid];
-        if (plant && plant !== stab) {
-          problems.push(`<b>${label}</b> <i>${esc(uid)}</i>: appartiene a <b>${esc(plant)}</b> — richiede spostamento verso ${esc(stab || '?')}`);
-        }
-      });
-    }
-  });
-
-  const wrap = document.getElementById('s6-problems-wrap');
-  const ok   = document.getElementById('s6-ok-notice');
-  const list = document.getElementById('s6-problems-list');
-
-  if (problems.length) {
-    list.innerHTML = problems.map(p => `<li>${p}</li>`).join('');
-    wrap.style.display = '';
-    ok.style.display = 'none';
-  } else {
-    wrap.style.display = 'none';
-    ok.style.display = '';
-  }
   document.getElementById('s6-error').style.display = 'none';
 }
 
@@ -1217,6 +1855,7 @@ async function step6Save() {
     bore:          WIZ.bore,
     risorse:       WIZ.risorse,
     new_job:       WIZ.newJob,
+    predecessors:  WIZ.predecessors,
   };
   try {
     const resp = await fetch('/api/attivita/salva/', {
@@ -1227,7 +1866,7 @@ async function step6Save() {
     const data = await resp.json();
     if (data.ok) {
       closeAddModal();
-      _wizToast(`✓ Attività ${WIZ.commessa}-${String(WIZ.item).padStart(2,'0')} aggiunta con successo.`);
+      _wizToast(`✓ Attività ${buildActivityId(WIZ.commessa, WIZ.item, WIZ.attivita)} aggiunta con successo.`);
       _wizAppendRow(data.id || '', data.warning_count || 0, data.note_count || 0);
     } else {
       const errEl = document.getElementById('s6-error');
@@ -1259,76 +1898,194 @@ function _wizToast(msg) {
   setTimeout(() => { t.style.display = 'none'; }, 5000);
 }
 
+function _computeActivityStatus(start, finish, actualStart, actualFinish) {
+  if (!start || !finish) return [{ key: 'non_pianificata', label: 'NON PIANIFICATA' }];
+  const today = new Date(); today.setHours(0,0,0,0);
+  const planS = new Date(start);
+  const actS  = actualStart  ? new Date(actualStart)  : null;
+  const actF  = actualFinish ? new Date(actualFinish) : null;
+  const isCompleted = !!(actS && actF);
+  const isStarted   = !!(actS && !actF);
+  const isLate      = !!(actS && actS > planS);
+  const isOverdue   = !actS && today >= planS;
+  if (isCompleted) return [{ key: 'completata', label: 'COMPLETATA' }];
+  const pills = [];
+  if (isLate || isOverdue) pills.push({ key: 'in_ritardo', label: 'IN RITARDO' });
+  if (isStarted)           pills.push({ key: 'in_lavorazione', label: 'IN LAVORAZIONE' });
+  else if (isOverdue)      pills.push({ key: 'da_iniziare', label: 'DA INIZIARE' });
+  else                     pills.push({ key: 'pianificata', label: 'PIANIFICATA' });
+  return pills;
+}
+
+function _statusPillsHtml(pills) {
+  return pills.map(p => `<span class="status-pill status-pill--${p.key}">${p.label}</span>`).join('');
+}
+
+function _refreshActivityRowCells(div) {
+  const ds = div.dataset;
+  const wc = parseInt(ds.warningCount || '0', 10);
+  const nc = parseInt(ds.noteCount    || '0', 10);
+  const ormIdVal = ds.ormId;
+
+  const pills = _computeActivityStatus(ds.start, ds.finish, ds.actualStart, ds.actualFinish);
+
+  const statusCol = div.querySelector('.pian-col-status');
+  if (statusCol) statusCol.innerHTML = _statusPillsHtml(pills);
+
+  const idCell = div.querySelector('.pian-col-id');
+  if (idCell) idCell.textContent = ds.activityId || '—';
+
+  const predCell = div.querySelector('.pian-col-pred');
+  if (predCell) predCell.textContent = ds.predecessors || 'Nessuna';
+
+  const plannedStartCell = div.querySelector('.pian-col-date--planned-start');
+  if (plannedStartCell) plannedStartCell.innerHTML = `<strong>${esc(ds.start || '—')}</strong>`;
+
+  const plannedFinishCell = div.querySelector('.pian-col-date--planned-finish');
+  if (plannedFinishCell) plannedFinishCell.innerHTML = `<strong>${esc(ds.finish || '—')}</strong>`;
+
+  const actualStartCell = div.querySelector('.pian-col-date--actual-start');
+  if (actualStartCell) actualStartCell.textContent = ds.actualStart || '—';
+
+  const actualFinishCell = div.querySelector('.pian-col-date--actual-finish');
+  if (actualFinishCell) actualFinishCell.textContent = ds.actualFinish || '—';
+
+  const plantCell = div.querySelector('.pian-col-stab');
+  if (plantCell) plantCell.innerHTML = ds.plant ? stabBadge(ds.plant) : '—';
+
+  const respCell = div.querySelector('.pian-col-resp');
+  if (respCell) respCell.textContent = ds.responsible || '—';
+
+  const resCell = div.querySelector('.pian-col-res');
+  if (resCell) {
+    const typed = ds.resourcesTyped || ds.resources;
+    resCell.innerHTML = formatResourcesHtml(typed);
+  }
+
+  const actionCol = div.querySelector('.pian-col-action');
+  if (actionCol) {
+    if (ormIdVal && wc > 0) {
+      actionCol.innerHTML = `<button class="btn-risolvi" onclick="event.stopPropagation();openNotesModal('${ormIdVal}')">Risolvi (${wc})</button>`;
+    } else if (ormIdVal && nc > 0) {
+      actionCol.innerHTML = `<button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('${ormIdVal}')">Note</button>`;
+    } else {
+      actionCol.innerHTML = '';
+    }
+  }
+  const group = _pianGroupByCommessa(ds.commessa || _selectedPianCommessa);
+  if (group) _refreshPianJobCard(group);
+}
+
 function _wizAppendRow(ormId, warningCount, noteCount) {
-  const tbody = document.querySelector('#table-attivita .data-table tbody');
-  if (!tbody) return;
   const r = WIZ;
   const fmt = v => v || '—';
-  const allRes = Object.values(r.risorse).flat().join(', ');
+  const resByTipo = {
+    testa: r.risorse.teste || [],
+    generatore: r.risorse.generatori || [],
+    mandrino: r.risorse.mandrini || [],
+    tastatore: r.risorse.tastatori || [],
+    maschera: r.risorse.maschere || [],
+  };
+  const allRes = _flatResourceIds(resByTipo).join(';');
   const wc = warningCount || 0;
   const nc = noteCount || 0;
-  const tr = document.createElement('tr');
-  tr.classList.add('row--new');
-  tr.dataset.source       = 'attivita';
-  tr.dataset.ormId        = ormId || '';
-  tr.dataset.warningCount = wc;
-  tr.dataset.noteCount    = nc;
-  tr.dataset.commessa     = r.commessa;
-  tr.dataset.item         = r.item;
-  tr.dataset.activity     = r.attivita;
-  tr.dataset.start        = r.dataInizio;
-  tr.dataset.finish       = r.dataFine;
-  tr.dataset.actualStart  = '';
-  tr.dataset.actualFinish = '';
-  tr.dataset.plant        = r.stabilimento;
-  tr.dataset.responsible  = r.responsabile;
-  tr.dataset.resources    = allRes;
-  const warnBadge = wc > 0 ? ` <span class="warn-badge" title="${wc} problema/i aperto/i">&#9888; ${wc}</span>` : '';
-  const noteBtn   = ormId && wc > 0
-    ? `<button class="btn-risolvi" onclick="event.stopPropagation();openNotesModal('${ormId}')">Risolvi</button>`
+  const activityId = buildActivityId(r.commessa, r.item, r.attivita);
+  const jobId = buildJobId(r.commessa);
+
+  // Build the new activity row div
+  const div = document.createElement('div');
+  div.className = 'pian-activity-row row--new';
+  div.dataset.source       = 'attivita';
+  div.dataset.ormId        = ormId || '';
+  div.dataset.warningCount = wc;
+  div.dataset.noteCount    = nc;
+  div.dataset.jobId        = jobId;
+  div.dataset.activityId   = activityId;
+  div.dataset.commessa     = r.commessa;
+  div.dataset.item         = r.item;
+  div.dataset.activity     = r.attivita;
+  div.dataset.start        = r.dataInizio;
+  div.dataset.finish       = r.dataFine;
+  div.dataset.actualStart  = '';
+  div.dataset.actualFinish = '';
+  div.dataset.plant        = r.stabilimento;
+  div.dataset.responsible  = r.responsabile;
+  div.dataset.resources      = allRes;
+  div.dataset.resourcesTyped = JSON.stringify(resByTipo);
+  div.dataset.predecessors   = r.predecessors && r.predecessors.length ? r.predecessors.join(', ') : '';
+  div.setAttribute('onclick', 'openDetailModal(this, \'task\')');
+
+  const pills = _computeActivityStatus(r.dataInizio, r.dataFine, null, null);
+  const noteBtn = ormId && wc > 0
+    ? `<button class="btn-risolvi" onclick="event.stopPropagation();openNotesModal('${ormId}')">Risolvi (${wc})</button>`
     : ormId && nc > 0
     ? `<button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('${ormId}')">Note</button>`
-    : '—';
-  tr.innerHTML = `
-    <td class="td-primary" data-col="commessa">${fmt(r.commessa)}${warnBadge}</td>
-    <td class="td-muted" data-col="item">${fmt(r.item)}</td>
-    <td data-col="activity">${fmt(r.attivita)}</td>
-    <td class="td-nowrap" data-col="start">${fmt(r.dataInizio)}</td>
-    <td class="td-nowrap" data-col="finish">${fmt(r.dataFine)}</td>
-    <td class="td-nowrap" data-col="actual-start">—</td>
-    <td class="td-nowrap" data-col="actual-finish">—</td>
-    <td data-col="plant">${stabBadge(r.stabilimento)}</td>
-    <td class="td-muted" data-col="responsible">${fmt(r.responsabile)}</td>
-    <td class="td-muted" data-col="resources">${allRes || '—'}</td>
-    <td class="td-muted" data-col="note">${noteBtn}</td>`;
-  tbody.prepend(tr);
-  filterTable('tbl-attivita', document.getElementById('pian-search').value);
+    : '';
+  div.innerHTML = `
+    <span class="pian-col-id">${esc(activityId)}</span>
+    <span class="pian-col-date pian-col-date--planned-start"><strong>${fmt(r.dataInizio)}</strong></span>
+    <span class="pian-col-date pian-col-date--planned-finish"><strong>${fmt(r.dataFine)}</strong></span>
+    <span class="pian-col-date pian-col-date--actual-start">—</span>
+    <span class="pian-col-date pian-col-date--actual-finish">—</span>
+    <span class="pian-col-status">${_statusPillsHtml(pills)}</span>
+    <span class="pian-col-stab">${r.stabilimento ? stabBadge(r.stabilimento) : '—'}</span>
+    <span class="pian-col-resp">${esc(fmt(r.responsabile))}</span>
+    <span class="pian-col-res">${formatResourcesHtml(resByTipo)}</span>
+    <span class="pian-col-pred">${r.predecessors && r.predecessors.length ? r.predecessors.map(pid => esc(pid)).join(', ') : 'Nessuna'}</span>
+    <span class="pian-col-action">${noteBtn}</span>`;
+
+  // Find existing group for this commessa or create one
+  const list = document.getElementById('pian-group-list');
+  let group = list.querySelector(`.pian-group[data-commessa="${CSS.escape(r.commessa)}"]`);
+  if (!group) {
+    group = document.createElement('article');
+    group.className = 'pian-group';
+    group.dataset.commessa = r.commessa;
+    group.innerHTML = `${_pianGroupHeadHtml({ commessa: r.commessa, n_activities: 0 })}
+      <div class="pian-activities" data-commessa="${esc(r.commessa)}">
+        <div class="pian-activity-table-head" aria-hidden="true">
+          <span>Attività</span><span>Inizio</span><span>Fine</span><span>Stato</span><span>Stabilimento</span><span>Responsabile</span><span>Risorse</span><span>Dipendenze</span><span></span>
+        </div>
+      </div>`;
+    list.prepend(group);
+  }
+  // Remove "Nessuna attività" placeholder if present
+  const host = _pianActivitiesByCommessa(r.commessa) || group.querySelector('.pian-activities');
+  const placeholder = host ? host.querySelector('.pian-no-activities') : null;
+  if (placeholder) placeholder.remove();
+
+  if (host) host.prepend(div);
+  filterPianGroups(document.getElementById('pian-search').value);
 }
 
-function showView(view) {
-  document.getElementById('table-attivita').style.display = view === 'attivita' ? '' : 'none';
-  document.getElementById('table-commesse').style.display = view === 'commesse' ? '' : 'none';
-  document.getElementById('btn-attivita').classList.toggle('active', view === 'attivita');
-  document.getElementById('btn-commesse').classList.toggle('active', view === 'commesse');
-  document.getElementById('pian-search').value = '';
-  filterTable(view === 'attivita' ? 'tbl-attivita' : 'tbl-commesse', '');
-}
-
-// ── Table search ──────────────────────────────────────────────────────────────
-function filterTable(tableId, term) {
-  var table = document.getElementById(tableId);
-  if (!table) return;
-  var q = term.trim().toLowerCase();
-  table.querySelectorAll('tbody tr').forEach(function(row) {
-    row.style.display = !q || row.textContent.toLowerCase().includes(q) ? '' : 'none';
+// ── Search / filter ───────────────────────────────────────────────────────────
+function filterPianGroups(term) {
+  const q = (term || '').trim().toLowerCase();
+  let firstVisible = '';
+  document.querySelectorAll('.pian-group').forEach(function(group) {
+    const jobText = (group.querySelector('.pian-job-card') || {}).textContent || '';
+    const card = group.querySelector('.pian-job-card');
+    const jobDataText = card ? Object.values(card.dataset).join(' ') : '';
+    const jobMatch = !q || (jobText + ' ' + jobDataText).toLowerCase().includes(q);
+    let hasVisibleRow = false;
+    _pianRowsForCommessa(group.dataset.commessa || '').forEach(function(row) {
+      const rowText = (row.textContent + ' ' + Object.values(row.dataset).join(' ')).toLowerCase();
+      const visible = !q || rowText.includes(q) || jobMatch;
+      row.dataset.searchHidden = visible ? '0' : '1';
+      row.style.display = visible ? '' : 'none';
+      if (visible) hasVisibleRow = true;
+    });
+    // Show the group if the job card or at least one activity row matches
+    const showGroup = !q || jobMatch || hasVisibleRow;
+    group.style.display = showGroup ? '' : 'none';
+    if (showGroup && !firstVisible) firstVisible = group.dataset.commessa || '';
   });
+  refreshPianSummary();
 }
 
+// Legacy alias kept so any residual callers don't error
 function filterActiveTable() {
-  var term = document.getElementById('pian-search').value;
-  var activeTable = document.getElementById('table-attivita').style.display !== 'none'
-    ? 'tbl-attivita' : 'tbl-commesse';
-  filterTable(activeTable, term);
+  filterPianGroups(document.getElementById('pian-search').value);
 }
 
 // Close ms-wrap dropdowns when clicking outside
@@ -1361,6 +2118,113 @@ function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+const _RES_TIPO_LABELS = {
+  testa: 'Testa', generatore: 'Generatore',
+  mandrino: 'Mandrino', tastatore: 'Tastatore', maschera: 'Maschera',
+};
+
+function _normalizeResourcesByTipo(source) {
+  const empty = { testa: [], generatore: [], mandrino: [], tastatore: [], maschera: [] };
+  if (!source) return empty;
+  let raw = source;
+  if (typeof source === 'string') {
+    try { raw = JSON.parse(source); } catch { return empty; }
+  }
+  return {
+    testa: raw.testa || raw.teste || [],
+    generatore: raw.generatore || raw.generatori || [],
+    mandrino: raw.mandrino || raw.mandrini || [],
+    tastatore: raw.tastatore || raw.tastatori || [],
+    maschera: raw.maschera || raw.maschere || [],
+  };
+}
+
+function _flatResourceIds(byTipo) {
+  return ['testa', 'generatore', 'mandrino', 'tastatore', 'maschera']
+    .flatMap(t => byTipo[t] || []);
+}
+
+function formatResourcesTooltip(byTipo) {
+  const lines = [];
+  for (const [tipo, label] of Object.entries(_RES_TIPO_LABELS)) {
+    for (const rid of (byTipo[tipo] || [])) lines.push(`${label}: ${rid}`);
+  }
+  return lines.join('\n');
+}
+
+function formatResourcesHtml(source) {
+  const byTipo = _normalizeResourcesByTipo(source);
+  const flat = _flatResourceIds(byTipo);
+  if (!flat.length) return '—';
+
+  const parts = [];
+  for (const rid of byTipo.testa) {
+    parts.push(`<span class="pian-res-chip pian-res-chip--testa">${esc(rid)}</span>`);
+  }
+  for (const rid of byTipo.generatore) {
+    parts.push(`<span class="pian-res-chip pian-res-chip--gen">${esc(rid)}</span>`);
+  }
+  const nAcc = (byTipo.mandrino.length + byTipo.tastatore.length + byTipo.maschera.length);
+  if (nAcc) {
+    const label = nAcc === 1 ? 'accessorio' : 'accessori';
+    parts.push(`<span class="pian-res-accessories">+ ${nAcc} ${label}</span>`);
+  }
+
+  const tooltip = formatResourcesTooltip(byTipo);
+  const tooltipAttr = tooltip
+    ? ` data-tooltip="${esc(tooltip)}" title="${esc(tooltip)}"`
+    : '';
+  return `<span class="pian-res-summary"${tooltipAttr}><span class="pian-res-inner">${parts.join(' ')}</span></span>`;
+}
+
+let _pianResPopoverAnchor = null;
+
+function closePianResPopover() {
+  const pop = document.getElementById('pian-res-popover');
+  if (!pop) return;
+  pop.hidden = true;
+  pop.textContent = '';
+  _pianResPopoverAnchor = null;
+}
+
+function openPianResPopover(el) {
+  const tip = el.getAttribute('data-tooltip');
+  if (!tip) return;
+  const pop = document.getElementById('pian-res-popover');
+  if (!pop) return;
+  pop.textContent = tip;
+  pop.hidden = false;
+  _pianResPopoverAnchor = el;
+  const margin = 8;
+  const rect = el.getBoundingClientRect();
+  pop.style.left = '0';
+  pop.style.top = '0';
+  let left = rect.left;
+  let top = rect.bottom + margin;
+  const popRect = pop.getBoundingClientRect();
+  if (left + popRect.width > window.innerWidth - margin) {
+    left = window.innerWidth - popRect.width - margin;
+  }
+  if (left < margin) left = margin;
+  if (top + popRect.height > window.innerHeight - margin) {
+    top = rect.top - popRect.height - margin;
+  }
+  if (top < margin) top = margin;
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+}
+
+function _pianResPopoverClick(e) {
+  const summary = e.target.closest('.pian-res-summary[data-tooltip]');
+  if (!summary) return;
+  e.stopPropagation();
+  if (_pianResPopoverAnchor === summary && !document.getElementById('pian-res-popover')?.hidden) {
+    closePianResPopover();
+    return;
+  }
+  openPianResPopover(summary);
+}
+
 const PIAN_STAB_OPTIONS = {{ stabilimenti_json|safe }};
 const STAB_COLORS = {{ plant_colors_json|safe }};
 
@@ -1378,6 +2242,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const name = td.dataset.stab;
     if (name) td.innerHTML = stabBadge(name);
   });
+  refreshPianSummary();
+  filterPianGroups(document.getElementById('pian-search')?.value || '');
+
+  document.addEventListener('click', _pianResPopoverClick, true);
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#pian-res-popover') && !e.target.closest('.pian-res-summary[data-tooltip]')) {
+      closePianResPopover();
+    }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closePianResPopover();
+  });
+  window.addEventListener('resize', closePianResPopover);
+  document.getElementById('pian-res-popover')?.addEventListener('click', e => e.stopPropagation());
 
   // Auto-open notes modal when arriving from Gantt warning badge click
   const focusId = new URLSearchParams(window.location.search).get('focus');
@@ -1388,16 +2266,17 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 const TASK_FIELDS = [
-  { label:'Commessa',      key:'commessa',     readonly:true  },
-  { label:'Item',          key:'item',         readonly:true  },
-  { label:'Attività',      key:'activity',     readonly:true  },
-  { label:'Inizio',        key:'start',        readonly:false, isDate:true },
-  { label:'Fine',          key:'finish',       readonly:false, isDate:true },
-  { label:'Inizio effett.',key:'actualStart',  readonly:false, isDate:true },
-  { label:'Fine effett.',  key:'actualFinish', readonly:false, isDate:true },
-  { label:'Stabilimento',  key:'plant',        readonly:false, isPlant:true },
-  { label:'Responsabile',  key:'responsible',  readonly:false, ormReadonly:true },
-  { label:'Risorse',       key:'resources',    readonly:false, ormReadonly:true },
+  { label:'Commessa',      key:'commessa',      readonly:true },
+  { label:'Item',          key:'item',          readonly:true },
+  { label:'Attività',      key:'activity',      readonly:false },
+  { label:'Predecessore',  key:'predecessors',  readonly:false, isPredecessor:true },
+  { label:'Inizio',        key:'start',         readonly:false, isDate:true },
+  { label:'Fine',          key:'finish',        readonly:false, isDate:true },
+  { label:'Inizio effett.',key:'actualStart',   readonly:false, isDate:true },
+  { label:'Fine effett.',  key:'actualFinish',  readonly:false, isDate:true },
+  { label:'Stabilimento',  key:'plant',         readonly:false, isPlant:true },
+  { label:'Responsabile',  key:'responsible',   readonly:false, ormReadonly:true },
+  { label:'Risorse',       key:'resources',     readonly:false, ormReadonly:true },
 ];
 
 const JOB_FIELDS = [
@@ -1405,7 +2284,6 @@ const JOB_FIELDS = [
   { label:'Costo totale',   key:'totalCost',    readonly:false },
   { label:'Penale',         key:'penalty',      readonly:false },
   { label:'Data consegna',  key:'deliveryDate', readonly:false },
-  { label:'N. item',        key:'nItems',       readonly:true  },
   { label:'N. attività',    key:'nActivities',  readonly:true  },
 ];
 
@@ -1416,6 +2294,8 @@ function openDetailModal(tr, entityType) {
   let data, fields, title;
   if (entityType === 'task') {
     data = {
+      activityId:   ds.activityId   || '',
+      jobId:        ds.jobId        || '',
       commessa:     ds.commessa     || '',
       item:         ds.item         || '',
       activity:     ds.activity     || '',
@@ -1426,18 +2306,19 @@ function openDetailModal(tr, entityType) {
       plant:        ds.plant        || '',
       responsible:  ds.responsible  || '',
       resources:    ds.resources    || '',
+      predecessors: ds.predecessors || '',
       source:       ds.source       || 'tasks',
       ormId:        ds.ormId        || '',
     };
     fields = TASK_FIELDS;
-    title  = `Attività: ${data.commessa} – ${data.item}`;
+    title  = `Attività: ${data.activityId || buildActivityId(data.commessa, data.item, data.activity)}`;
   } else {
     data = {
+      jobId:        ds.jobId        || '',
       commessa:     ds.commessa     || '',
       totalCost:    ds.totalCost    || '',
       penalty:      ds.penalty      || '',
       deliveryDate: ds.deliveryDate || '',
-      nItems:       ds.nItems       || '',
       nActivities:  ds.nActivities  || '',
     };
     fields = JOB_FIELDS;
@@ -1466,7 +2347,14 @@ function _renderPianViewMode(data, fields) {
   body.className = 'det-grid';
   body.innerHTML = fields.map(f => {
     const rawVal = data[f.key];
-    const displayVal = f.isPlant ? stabBadge(rawVal) : (esc(rawVal) || '—');
+    let displayVal;
+    if (f.isPlant) {
+      displayVal = stabBadge(rawVal);
+    } else if (f.isPredecessor) {
+      displayVal = rawVal ? `<code class="s6-uid">${esc(rawVal)}</code>` : '—';
+    } else {
+      displayVal = esc(rawVal) || '—';
+    }
     return `<div class="det-field">
        <span class="det-label">${esc(f.label)}</span>
        <span class="det-value">${displayVal}</span>
@@ -1474,7 +2362,7 @@ function _renderPianViewMode(data, fields) {
   }).join('');
 }
 
-function enterEditMode() {
+async function enterEditMode() {
   if (!_detState) return;
   const { originalData, fields, entityType } = _detState;
   const isOrm = entityType === 'task' && originalData.source === 'attivita';
@@ -1489,6 +2377,12 @@ function enterEditMode() {
                 <span class="det-value">${v || '—'}</span>
               </div>`;
     }
+    if (f.isPredecessor) {
+      return `<div class="det-field" id="det-pred-wrap">
+                <span class="det-label">${esc(f.label)}</span>
+                <span class="det-value" style="color:var(--text-muted);font-size:.8rem;">Caricamento…</span>
+              </div>`;
+    }
     if (f.isPlant) {
       const opts = PIAN_STAB_OPTIONS.map(s =>
         `<option value="${esc(s)}"${s === originalData[f.key] ? ' selected' : ''}>${esc(s)}</option>`
@@ -1498,14 +2392,45 @@ function enterEditMode() {
                 <select class="det-input" name="${f.key}">${opts}</select>
               </div>`;
     }
-    const inputType = f.isDate ? 'date' : 'text';
+    const inputType = f.isDate ? 'date' : (f.isNumber ? 'number' : 'text');
+    const inputAttrs = f.isNumber ? 'min="1" step="1"' : '';
+    const editVal = f.isNumber ? (parseInt(v, 10) || v) : v;
     return `<div class="det-field">
               <span class="det-label">${esc(f.label)}</span>
-              <input class="det-input" type="${inputType}" name="${f.key}" value="${v}">
+              <input class="det-input" type="${inputType}" name="${f.key}" value="${editVal}" ${inputAttrs}>
             </div>`;
   }).join('');
   document.getElementById('det-view-btns').style.display = 'none';
   document.getElementById('det-edit-btns').style.display = 'flex';
+
+  // Async: populate predecessor select for task entities
+  if (entityType === 'task') {
+    const wrap = document.getElementById('det-pred-wrap');
+    if (!wrap) return;
+    try {
+      const resp = await fetch(
+        `/api/jobs/check/?commessa=${_enc(originalData.commessa)}&item=${_enc(originalData.item)}`
+      );
+      const data = await resp.json();
+      const activities = (data.predecessors || []).filter(
+        a => a.activity_id !== originalData.activityId
+      );
+      const currentPred = (originalData.predecessors || '').trim();
+      const opts = [`<option value="">— Nessuno —</option>`]
+        .concat(activities.map(a => {
+          const sel = a.activity_id === currentPred ? ' selected' : '';
+          const dates = [a.start, a.finish].filter(Boolean).join(' → ');
+          const lbl = a.activity || a.activity_id;
+          return `<option value="${esc(a.activity_id)}"${sel}>${esc(lbl)}${dates ? ' · ' + esc(dates) : ''}</option>`;
+        }))
+        .join('');
+      wrap.innerHTML = `<span class="det-label">Predecessore</span>
+                        <select class="det-input" name="predecessors">${opts}</select>`;
+    } catch (_) {
+      wrap.innerHTML = `<span class="det-label">Predecessore</span>
+                        <span class="det-value" style="color:var(--text-muted);">Errore caricamento</span>`;
+    }
+  }
 }
 
 function cancelEdit() {
@@ -1531,20 +2456,29 @@ async function saveEdit() {
 
   let url, payload;
   if (entityType === 'task') {
+    // Validate item is a valid integer.
+    const itemNum = parseInt(newData.item, 10);
+    if (!Number.isInteger(itemNum) || itemNum < 1) {
+      _showPianDetError('Il campo Item deve essere un numero intero positivo.');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Salva';
+      return;
+    }
     url = '/api/tasks/update/';
     payload = {
-      source:       originalData.source,
-      orm_id:       originalData.ormId,
-      commessa:     originalData.commessa,
-      item:         originalData.item,
-      activity:     originalData.activity,
-      start:        newData.start,
-      finish:       newData.finish,
-      actual_start: newData.actualStart,
-      actual_finish:newData.actualFinish,
-      plant:        newData.plant,
-      responsible:  newData.responsible,
-      resources:    newData.resources,
+      source:        originalData.source,
+      orm_id:        originalData.ormId,
+      commessa:      newData.commessa,
+      item:          itemNum,
+      activity:      newData.activity,
+      start:         newData.start,
+      finish:        newData.finish,
+      actual_start:  newData.actualStart,
+      actual_finish: newData.actualFinish,
+      plant:         newData.plant,
+      responsible:   newData.responsible,
+      resources:     newData.resources,
+      predecessors:  newData.predecessors ? [newData.predecessors] : [],
     };
   } else {
     url = '/api/jobs/update/';
@@ -1569,19 +2503,44 @@ async function saveEdit() {
       saveBtn.textContent = 'Salva';
       return;
     }
-    // Update row data-* attributes
-    const colMap = { commessa:'commessa', item:'item', activity:'activity', start:'start',
-      finish:'finish', actualStart:'actualStart', actualFinish:'actualFinish',
-      plant:'plant', responsible:'responsible', resources:'resources',
-      totalCost:'totalCost', penalty:'penalty', deliveryDate:'deliveryDate',
-      nItems:'nItems', nActivities:'nActivities' };
+
+    // For tasks, normalise item to zero-padded display format.
+    if (entityType === 'task') {
+      const savedItem = json.item ?? parseInt(newData.item, 10);
+      newData.item = String(savedItem).padStart(2, '0');
+      newData.jobId = json.job_id || buildJobId(newData.commessa);
+      newData.activityId = json.activity_id || buildActivityId(newData.commessa, newData.item, newData.activity);
+    } else {
+      newData.jobId = originalData.jobId || '';
+    }
+
+    // Update row data-* attributes and visible cells.
     fields.forEach(f => {
-      const dsKey = f.key.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-      if (dsKey in tr.dataset) tr.dataset[dsKey] = newData[f.key];
-      const tdKey = f.key.replace(/([A-Z])/g, c => '-' + c.toLowerCase());
-      const td = tr.querySelector(`td[data-col="${tdKey}"]`);
-      if (td) td.textContent = newData[f.key] || '—';
+      const dsKey = f.key.replace(/([A-Z])/g, c => c).replace(/^(.)/, c => c.toLowerCase());
+      if (dsKey in tr.dataset) tr.dataset[dsKey] = newData[f.key] ?? '';
     });
+    if (entityType === 'task') {
+      tr.dataset.jobId = newData.jobId || '';
+      tr.dataset.activityId = newData.activityId || '';
+      _refreshActivityRowCells(tr);
+    }
+
+    // Visual refresh for job card meta after edit.
+    if (entityType === 'job') {
+      _refreshJobCard(tr, newData);
+      _selectedPianCommessa = newData.commessa;
+      _renderSelectedPianJob();
+    }
+
+    // Update modal title to reflect any identity changes.
+    if (entityType === 'task') {
+      document.getElementById('det-title').textContent =
+        `Attività: ${buildActivityId(newData.commessa, newData.item, newData.activity)}`;
+    } else {
+      document.getElementById('det-title').textContent =
+        `Commessa: ${newData.commessa}`;
+    }
+
     _detState.originalData = { ...newData };
     _renderPianViewMode(newData, fields);
     document.getElementById('det-view-btns').style.display = '';
@@ -1595,6 +2554,22 @@ async function saveEdit() {
   }
 }
 
+function _refreshJobCard(cardEl, data) {
+  const infoEl = cardEl.querySelector('.pian-head-meta');
+  if (infoEl) {
+    infoEl.innerHTML = _pianHeadInfoHtml({
+      delivery_date: data.deliveryDate,
+      total_cost: data.totalCost,
+      penalty: data.penalty,
+    });
+  }
+  cardEl.dataset.totalCost = data.totalCost || '';
+  cardEl.dataset.penalty = data.penalty || '';
+  cardEl.dataset.deliveryDate = data.deliveryDate || '';
+  const group = cardEl.closest('.pian-group');
+  if (group) _refreshPianJobCard(group);
+}
+
 function _showPianDetError(msg) {
   const el = document.getElementById('det-error');
   el.textContent = msg;
@@ -1606,17 +2581,6 @@ function _getCsrfToken() {
   return m ? m[1] : '';
 }
 
-// Event delegation: row click → open detail modal
-document.addEventListener('click', function(e) {
-  if (e.target.closest('#det-modal-overlay')) return;
-  if (e.target.closest('#add-modal-overlay')) return;
-  const tr = e.target.closest('#tbl-attivita tbody tr, #tbl-commesse tbody tr');
-  if (!tr) return;
-  if (e.target.closest('button')) return;
-  const inAttivita = !!tr.closest('#tbl-attivita');
-  openDetailModal(tr, inAttivita ? 'task' : 'job');
-});
-
 // Click on overlay backdrop → close detail modal
 document.getElementById('det-modal-overlay').addEventListener('click', function(e) {
   if (e.target === this) closeDetailModal();
@@ -1626,7 +2590,7 @@ async function deleteEntity() {
   if (!_detState) return;
   const { tr, entityType, originalData } = _detState;
   const label = entityType === 'task'
-    ? `l'attività "${originalData.activity}" della commessa ${originalData.commessa}`
+    ? `l'attività ${originalData.activityId || buildActivityId(originalData.commessa, originalData.item, originalData.activity)}`
     : `la commessa ${originalData.commessa} e tutte le sue attività`;
   if (!confirm(`Eliminare ${label}?\nQuesta operazione non può essere annullata.`)) return;
 
@@ -1643,8 +2607,34 @@ async function deleteEntity() {
     });
     const json = await res.json();
     if (!json.ok) { _showPianDetError(json.error || 'Errore durante l\'eliminazione.'); return; }
-    tr.remove();
+    if (entityType === 'task') {
+      // Remove the activity row; clean up empty group
+      tr.remove();
+      const group = document.querySelector(`.pian-group[data-commessa="${CSS.escape(originalData.commessa)}"]`);
+      if (group) {
+        const remaining = _pianRowsForCommessa(originalData.commessa);
+        if (!remaining.length) {
+          const actEl = _pianActivitiesByCommessa(originalData.commessa) || group.querySelector('.pian-activities');
+          if (actEl) actEl.innerHTML = '<div class="pian-no-activities">Nessuna attività</div>';
+        }
+        _refreshPianJobCard(group);
+      }
+    } else {
+      // Remove the entire commessa group (card + all its activities)
+      const group = document.querySelector(`.pian-group[data-commessa="${CSS.escape(originalData.commessa)}"]`);
+      if (_pianDetachedActivities && _pianDetachedActivities.dataset.commessa === originalData.commessa) {
+        _pianDetachedActivities.remove();
+        _pianDetachedActivities = null;
+      }
+      if (group) group.remove();
+      else tr.remove();
+      if (_selectedPianCommessa === originalData.commessa) {
+        const next = document.querySelector('.pian-group');
+        _selectedPianCommessa = next ? next.dataset.commessa || '' : '';
+      }
+    }
     closeDetailModal();
+    filterPianGroups(document.getElementById('pian-search').value);
   } catch (err) {
     _showPianDetError('Errore di rete.');
   }
@@ -1660,7 +2650,7 @@ const _PROB_LABEL = { testa:'Testa', mandrino:'Mandrino', tastatore:'Tastatore',
 
 async function openNotesModal(ormId) {
   _notesModalOrmId = ormId;
-  _notesModalTr = document.querySelector(`tr[data-orm-id="${ormId}"]`);
+  _notesModalTr = document.querySelector(`[data-orm-id="${ormId}"]`);
   const body = document.getElementById('notes-modal-body');
   body.innerHTML = '<div style="padding:.5rem 0; color:var(--text-muted); font-size:.85rem;">Caricamento…</div>';
   const ov = document.getElementById('notes-modal-overlay');
@@ -1710,6 +2700,100 @@ function _notesOverlayClick(e) {
   if (e.target === document.getElementById('notes-modal-overlay')) closeNotesModal();
 }
 
+// ── Simple commessa creation modal ───────────────────────────────────────────
+
+function openAddCommessaModal() {
+  ['jc-commessa', 'jc-deadline', 'jc-cost', 'jc-penalty'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const errEl = document.getElementById('jc-error');
+  if (errEl) errEl.style.display = 'none';
+  const btn = document.getElementById('jc-save-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Salva'; }
+  const ov = document.getElementById('job-create-overlay');
+  ov.classList.add('is-open');
+  ov.style.display = 'flex';
+  setTimeout(() => document.getElementById('jc-commessa')?.focus(), 60);
+}
+
+function closeAddCommessaModal() {
+  const ov = document.getElementById('job-create-overlay');
+  ov.classList.remove('is-open');
+  ov.style.display = 'none';
+}
+
+function _jcOverlayClick(e) {
+  if (e.target === document.getElementById('job-create-overlay')) closeAddCommessaModal();
+}
+
+async function saveNewCommessa() {
+  const commessa = (document.getElementById('jc-commessa')?.value || '').trim();
+  const errEl = document.getElementById('jc-error');
+  if (!commessa) {
+    errEl.textContent = 'Il campo Commessa è obbligatorio.';
+    errEl.style.display = '';
+    return;
+  }
+
+  const payload = {
+    commessa,
+    item: 1,
+    delivery_date: document.getElementById('jc-deadline')?.value || null,
+    total_cost: document.getElementById('jc-cost')?.value || null,
+    penalty:    document.getElementById('jc-penalty')?.value || null,
+  };
+
+  const btn = document.getElementById('jc-save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Salvataggio…';
+
+  try {
+    const resp = await fetch('/api/jobs/create/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCsrfToken() },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      closeAddCommessaModal();
+      _appendNewJobGroup(data.job);
+    } else {
+      errEl.textContent = data.error || 'Errore durante il salvataggio.';
+      errEl.style.display = '';
+      btn.disabled = false;
+      btn.textContent = 'Salva';
+    }
+  } catch (_) {
+    errEl.textContent = 'Errore di rete. Riprova.';
+    errEl.style.display = '';
+    btn.disabled = false;
+    btn.textContent = 'Salva';
+  }
+}
+
+function _appendNewJobGroup(job) {
+  const list = document.getElementById('pian-group-list');
+  if (!list) return;
+
+  const emptyState = document.getElementById('pian-empty-jobs');
+  if (emptyState) emptyState.remove();
+
+  const group = document.createElement('article');
+  group.className = 'pian-group';
+  group.dataset.commessa = job.commessa;
+  group.innerHTML = `${_pianGroupHeadHtml(job)}
+    <div class="pian-activities" data-commessa="${esc(job.commessa)}">
+      <div class="pian-no-activities">Nessuna attività</div>
+    </div>`;
+
+  list.appendChild(group);
+  refreshPianSummary();
+  filterPianGroups(document.getElementById('pian-search').value);
+  group.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+
 function _updateNavBadge(delta) {
   const badge = document.getElementById('nav-warn-badge');
   if (!badge) return;
@@ -1757,29 +2841,9 @@ async function confirmRisolvi() {
       const nc = data.note_count ?? 0;
       tr.dataset.warningCount = wc;
       tr.dataset.noteCount = nc;
-      const commTd = tr.querySelector('td[data-col="commessa"]');
-      if (commTd) {
-        commTd.querySelectorAll('.warn-badge').forEach(b => b.remove());
-        if (wc > 0) {
-          const badge = document.createElement('span');
-          badge.className = 'warn-badge';
-          badge.title = `${wc} problema/i aperto/i`;
-          badge.innerHTML = `&#9888; ${wc}`;
-          commTd.appendChild(badge);
-        }
-      }
-      // Update Note column cell
-      const noteTd = tr.querySelector('td[data-col="note"]');
-      if (noteTd) {
-        const ormId = tr.dataset.ormId;
-        if (ormId && wc > 0) {
-          noteTd.innerHTML = `<button class="btn-risolvi" onclick="event.stopPropagation();openNotesModal('${ormId}')">Risolvi</button>`;
-        } else if (ormId && nc > 0) {
-          noteTd.innerHTML = `<button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('${ormId}')">Note</button>`;
-        } else {
-          noteTd.innerHTML = '—';
-        }
-      }
+      // Refresh status pill + action button via shared helper
+      _refreshActivityRowCells(tr);
+      refreshPianSummary();
       // Update navbar badge (decrement by 1)
       _updateNavBadge(-1);
       // Reload notes modal if still open

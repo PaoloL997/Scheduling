@@ -12,8 +12,15 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from ui.services.importer import ImportStatus, get_error_detail, get_status
+from ui.services.identifiers import parse_job_id
+from ui.services.resource_display import (
+    format_activity_resources,
+    format_activity_resources_html,
+)
 from ui.services.inventory import delete_resource, insert_resource, update_resource
 from ui.models import (
+    AppSettings,
+    Attivita,
     ConfigurazioneTesta,
     GeneratoreCompatibile,
     GeneratoreItem,
@@ -51,12 +58,11 @@ def index(request: HttpRequest):
 
 @login_required
 def pianificazione(request: HttpRequest):
-    """Render the planning page with tasks and jobs tables.
+    """Render the planning page with the grouped commessa+activity layout.
 
-    Fetches data from both the ``Tasks`` and ``Jobs`` tables and passes
-    them to the template.  The active view (attività vs commesse) is
-    controlled client-side via a toggle switch; both datasets are sent
-    in one render to avoid extra round-trips.
+    Activities are grouped by commessa so the template can render the
+    card-left / activity-rows-right layout.  Wizard dropdowns are
+    populated from ORM-managed and imported sources.
 
     Args:
         request: The incoming HTTP request.
@@ -64,12 +70,14 @@ def pianificazione(request: HttpRequest):
     Returns:
         HttpResponse: The rendered pianificazione template.
     """
-    from ui.services.activity_inventory import get_responsabili, get_stabilimenti
+    from ui.services.activity_inventory import (
+        get_responsabili,
+        get_stabilimenti,
+        get_testa_models,
+    )
 
-    tasks = _fetch_tasks()
-    jobs = _fetch_jobs()
+    groups = _fetch_grouped()
 
-    # Combine ORM-managed and imported-database sources for the wizard dropdowns.
     stab_objs = list(Stabilimento.objects.values("nome", "colore"))
     stab_orm = [s["nome"] for s in stab_objs]
     resp_orm = list(Responsabile.objects.values_list("nome", flat=True))
@@ -81,12 +89,13 @@ def pianificazione(request: HttpRequest):
         request,
         "ui/pianificazione.html",
         {
-            "tasks": tasks,
-            "jobs": jobs,
+            "groups": groups,
             "stabilimenti": stabilimenti,
             "stabilimenti_json": json.dumps(stabilimenti),
             "plant_colors_json": json.dumps(plant_colors),
             "responsabili": responsabili,
+            "penale_max_json": json.dumps(float(AppSettings.load().penale_max)),
+            "testa_models_json": json.dumps(get_testa_models()),
         },
     )
 
@@ -146,6 +155,58 @@ def _fetch_inventory_table(table_name: str) -> list[dict]:
     return list(model_class.objects.order_by("uid").values())
 
 
+def _fetch_grouped() -> list[dict]:
+    """Return activities grouped by commessa, each paired with job metadata.
+
+    Each entry in the returned list is a dict::
+
+        {
+            "job": {commessa, job_id, delivery_date, total_cost, penalty,
+                    n_activities, n_items},
+            "activities": [list of task dicts from _attivita_to_task_dict],
+        }
+
+    Groups are sorted by commessa name.  Commesse that appear only in the
+    activity table (no matching Job row) are included with blank job metadata.
+
+    Returns:
+        list[dict]: One dict per commessa group.
+    """
+    from collections import defaultdict
+
+    tasks = _fetch_tasks()
+    jobs = _fetch_jobs()
+
+    job_by_commessa = {j["commessa"]: j for j in jobs}
+
+    groups_map: dict[str, list] = defaultdict(list)
+    for task in tasks:
+        groups_map[task["commessa"]].append(task)
+
+    all_commesse = sorted(set(list(groups_map.keys()) + list(job_by_commessa.keys())))
+    result = []
+    for commessa in all_commesse:
+        job = job_by_commessa.get(
+            commessa,
+            {
+                "job_id": "",
+                "commessa": commessa,
+                "total_cost": None,
+                "penalty": None,
+                "delivery_date": None,
+                "n_activities": 0,
+                "n_items": 0,
+            },
+        )
+        activities = groups_map.get(commessa, [])
+        job = {
+            **job,
+            "n_open_problems": sum(a.get("warning_count") or 0 for a in activities),
+        }
+        result.append({"job": job, "activities": activities})
+    return result
+
+
 def _fetch_tasks() -> list[dict]:
     """Return all activity rows for the pianificazione page.
 
@@ -153,18 +214,117 @@ def _fetch_tasks() -> list[dict]:
     source of truth for all activities — both those imported from the MS
     Project file and those added through the wizard.
 
+    Predecessor activity_ids are resolved to human-readable activity names.
+    Resolution priority:
+    1. In-memory lookup from the current activity set (exact match).
+    2. Parse the activity_id to extract the encoded activity component.
+    3. Fall back to the raw string if parsing fails.
+
     Returns:
         list[dict]: One dict per activity row, compatible with the
             pianificazione table template.
     """
+
     from ui.models import Attivita
 
-    return [
-        _attivita_to_task_dict(a)
-        for a in Attivita.objects.prefetch_related("risorse", "problemi").order_by(
-            "commessa", "item", "activity"
+    activities = list(
+        Attivita.objects.prefetch_related("risorse", "problemi").order_by(
+            "job_id", "activity_id"
         )
-    ]
+    )
+    id_to_name = {a.activity_id: a.activity for a in activities}
+
+    result = []
+    for a in activities:
+        task = _attivita_to_task_dict(a)
+        if a.predecessors:
+            pred_ids = [p.strip() for p in a.predecessors.split(",") if p.strip()]
+            task["predecessor_names"] = ", ".join(
+                _resolve_predecessor_name(pid, id_to_name) for pid in pred_ids
+            )
+        else:
+            task["predecessor_names"] = None
+        result.append(task)
+    return result
+
+
+def _resolve_predecessor_name(activity_id: str, id_to_name: dict) -> str:
+    """Return a short, human-readable name for a predecessor activity_id.
+
+    Tries three strategies in order:
+    1. Exact lookup in the provided id_to_name mapping (fastest, most accurate).
+    2. Parse the canonical ``commessa-item-activity`` format and URL-decode the
+       activity component.
+    3. Return the raw string unchanged as a last resort.
+
+    Args:
+        activity_id (str): The canonical activity identifier to resolve.
+        id_to_name (dict): Mapping of ``activity_id`` → ``activity`` for the
+            current activity set.
+
+    Returns:
+        str: The resolved activity name, or the raw ``activity_id`` as fallback.
+    """
+    from urllib.parse import unquote
+
+    if activity_id in id_to_name:
+        return id_to_name[activity_id]
+
+    parts = activity_id.split("-", 2)
+    if len(parts) == 3:
+        return unquote(parts[2])
+
+    return activity_id
+
+
+def _compute_activity_status(
+    data_inizio,
+    data_fine,
+    actual_start,
+    actual_finish,
+    today,
+) -> list[dict]:
+    """Compute the ordered list of status pills for an activity.
+
+    Mirrors the Gantt badge logic exactly so both views are always consistent.
+    An activity may carry two pills simultaneously (e.g. IN RITARDO + IN LAVORAZIONE).
+    When planned dates are missing the activity is considered unscheduled.
+
+    Args:
+        data_inizio: Planned start date, or None.
+        data_fine: Planned finish date, or None.
+        actual_start: Actual start date, or None.
+        actual_finish: Actual finish date, or None.
+        today: The reference date for "now" comparisons.
+
+    Returns:
+        list[dict]: Ordered list of ``{"key": str, "label": str}`` dicts,
+        where *key* is the stable CSS modifier and *label* is the Italian string.
+        Always contains at least one element.
+    """
+    if data_inizio is None or data_fine is None:
+        return [{"key": "non_pianificata", "label": "NON PIANIFICATA"}]
+
+    is_completed = bool(actual_start and actual_finish)
+    is_started = bool(actual_start and not actual_finish)
+    is_late = bool(actual_start and actual_start > data_inizio)
+    is_overdue = not actual_start and today >= data_inizio
+
+    if is_completed:
+        return [{"key": "completata", "label": "COMPLETATA"}]
+
+    pills = []
+    if is_late or is_overdue:
+        pills.append({"key": "in_ritardo", "label": "IN RITARDO"})
+
+    if is_started:
+        pills.append({"key": "in_lavorazione", "label": "IN LAVORAZIONE"})
+    elif is_overdue:
+        pills.append({"key": "da_iniziare", "label": "DA INIZIARE"})
+    else:
+        pills.append({"key": "pianificata", "label": "PIANIFICATA"})
+
+    return pills
 
 
 def _attivita_to_task_dict(a) -> dict:
@@ -176,13 +336,30 @@ def _attivita_to_task_dict(a) -> dict:
 
     Returns:
         dict: A dict with keys matching the pianificazione table columns,
-            including ``warning_count`` (count of unresolved problems).
+            including ``warning_count`` (count of unresolved problems) and
+            ``status_pills`` — an ordered list of status badge dicts for the
+            status column.
     """
-    resources = ";".join(r.risorsa_id for r in a.risorse.all())
+    from django.utils.timezone import localdate
+
+    risorse_all = list(a.risorse.all())
+    res_fmt = format_activity_resources(risorse_all)
+    resources = ";".join(res_fmt["flat_ids"])
     problemi_all = list(a.problemi.all())
     warning_count = sum(1 for p in problemi_all if not p.risolto)
     note_count = sum(1 for p in problemi_all if p.risolto)
+
+    status_pills = _compute_activity_status(
+        data_inizio=a.data_inizio,
+        data_fine=a.data_fine,
+        actual_start=a.actual_start,
+        actual_finish=a.actual_finish,
+        today=localdate(),
+    )
+
     return {
+        "activity_id": a.activity_id,
+        "job_id": a.job_id,
         "commessa": a.commessa,
         "item": str(a.item).zfill(2),
         "activity": a.activity,
@@ -196,24 +373,30 @@ def _attivita_to_task_dict(a) -> dict:
         "plant": a.stabilimento or None,
         "responsible": a.responsabile or None,
         "resources": resources or None,
+        "resources_display": res_fmt["display"],
+        "resources_tooltip": res_fmt["tooltip"] or None,
+        "resources_html": format_activity_resources_html(risorse_all),
+        "resources_by_tipo": res_fmt["by_tipo"],
+        "resources_by_tipo_json": json.dumps(res_fmt["by_tipo"]),
         "predecessors": a.predecessors,
         "source": "attivita",
         "orm_id": a.pk,
         "warning_count": warning_count,
         "note_count": note_count,
+        "status_pills": status_pills,
     }
 
 
 def _fetch_jobs() -> list[dict]:
     """Return all job rows enriched with activity counts.
 
-    Reads from :class:`~ui.models.Job` and annotates each row with
-    counts of distinct items and total activities from
+    Reads from :class:`~ui.models.Job` (one row per commessa) and annotates
+    each row with counts of distinct items and total activities from
     :class:`~ui.models.Attivita`, which is the single source of truth.
 
     Returns:
-        list[dict]: One dict per job row with keys: commessa, total_cost,
-            penalty, delivery_date, n_activities, n_items.
+        list[dict]: One dict per commessa with keys: commessa, job_id,
+            total_cost, penalty, delivery_date, n_activities, n_items.
     """
     from django.db.models import Count
     from ui.models import Attivita
@@ -226,15 +409,31 @@ def _fetch_jobs() -> list[dict]:
         )
     }
 
-    result = []
-    for job in Job.objects.order_by("commessa").values(
-        "commessa", "total_cost", "penalty", "delivery_date"
-    ):
-        job = dict(job)
-        counts = act_counts.get(job["commessa"], {})
-        job["n_activities"] = counts.get("n_act", 0)
-        job["n_items"] = counts.get("n_it", 0)
-        result.append(job)
+    jobs_by_commessa = {
+        job["commessa"]: job
+        for job in Job.objects.order_by("commessa").values(
+            "job_id", "commessa", "total_cost", "penalty", "delivery_date"
+        )
+    }
+
+    result: list[dict] = []
+    all_commesse = sorted(set(list(jobs_by_commessa.keys()) + list(act_counts.keys())))
+    for commessa in all_commesse:
+        row = jobs_by_commessa.get(
+            commessa,
+            {
+                "job_id": "",
+                "commessa": commessa,
+                "total_cost": None,
+                "penalty": None,
+                "delivery_date": None,
+            },
+        )
+        counts = act_counts.get(commessa, {})
+        row["n_activities"] = counts.get("n_act", 0)
+        row["n_items"] = counts.get("n_it", 0)
+        result.append(row)
+
     return result
 
 
@@ -447,6 +646,11 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
 
         a = Attivita.objects.get(pk=orm_id)
 
+        # Capture original identity fields for MppSyncQueue write-back.
+        old_commessa = a.commessa
+        old_item = a.item
+        old_activity = a.activity
+
         def _parse_date(val):
             """Parse an ISO date string or return None on failure."""
             if val:
@@ -455,6 +659,49 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
                 except ValueError:
                     pass
             return None
+
+        # Identity field changes (commessa, item, activity)
+        if "commessa" in data:
+            new_commessa = (data["commessa"] or "").strip()
+            if new_commessa:
+                a.commessa = new_commessa
+        if "item" in data:
+            try:
+                a.item = int(data["item"])
+            except (ValueError, TypeError):
+                return JsonResponse(
+                    {
+                        "ok": False,
+                        "error": "Il valore di item non è un numero intero valido.",
+                    },
+                    status=400,
+                )
+        if "activity" in data:
+            a.activity = (data["activity"] or "").strip()
+
+        # Uniqueness check after applying identity changes.
+        if (
+            a.commessa != old_commessa
+            or a.item != old_item
+            or a.activity != old_activity
+        ):
+            if (
+                Attivita.objects.filter(
+                    commessa=a.commessa, item=a.item, activity=a.activity
+                )
+                .exclude(pk=a.pk)
+                .exists()
+            ):
+                return JsonResponse(
+                    {
+                        "ok": False,
+                        "error": (
+                            "Esiste già un'attività con questa combinazione "
+                            "commessa/item/attività."
+                        ),
+                    },
+                    status=409,
+                )
 
         if "start" in data:
             a.data_inizio = _parse_date(data["start"])
@@ -468,6 +715,26 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
             a.stabilimento = data["plant"] or ""
         if "responsible" in data:
             a.responsabile = data["responsible"] or ""
+        if "predecessors" in data:
+            predecessor_ids = [
+                str(v).strip() for v in data["predecessors"] if str(v).strip()
+            ]
+            if predecessor_ids:
+                valid = set(
+                    Attivita.objects.filter(commessa=a.commessa, item=a.item)
+                    .exclude(pk=a.pk)
+                    .values_list("activity_id", flat=True)
+                )
+                invalid = [p for p in predecessor_ids if p not in valid]
+                if invalid:
+                    return JsonResponse(
+                        {
+                            "ok": False,
+                            "error": f"Predecessor non valido: {', '.join(invalid)}",
+                        },
+                        status=400,
+                    )
+            a.predecessors = ", ".join(predecessor_ids) if predecessor_ids else None
 
         if ("start" in data or "finish" in data) and a.data_inizio and a.data_fine:
             from ui.models import RisorsaAttivita
@@ -505,9 +772,14 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
             payload_json=json.dumps(
                 {
                     "attivita_id": orm_id,
+                    # New identity (may have changed).
                     "commessa": a.commessa,
                     "item": a.item,
                     "activity": a.activity,
+                    # Old identity so write-back can locate the MPP task by name.
+                    "old_commessa": old_commessa,
+                    "old_item": old_item,
+                    "old_activity": old_activity,
                     "start": a.data_inizio.isoformat() if a.data_inizio else None,
                     "finish": a.data_fine.isoformat() if a.data_fine else None,
                     "actual_start": a.actual_start.isoformat()
@@ -527,7 +799,96 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
         logger.error("Errore aggiornamento Attivita pk=%s: %s", orm_id, exc)
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
 
-    return JsonResponse({"ok": True})
+    return JsonResponse(
+        {
+            "ok": True,
+            "item": a.item,
+            "job_id": a.job_id,
+            "activity_id": a.activity_id,
+        }
+    )
+
+
+@login_required
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_jobs_create(request: HttpRequest) -> JsonResponse:
+    """Create a new commessa (Job) record.
+
+    Validates that the commessa name is non-empty, that the commessa does not
+    already exist, and that penalty does not exceed the configured maximum.
+
+    Args:
+        request: POST request with a JSON body containing:
+            ``commessa`` (str, required), ``delivery_date`` (str|null),
+            ``total_cost`` (float|null), ``penalty`` (float|null).
+
+    Returns:
+        JsonResponse: 201 ``{"ok": true, "job": {...}}`` on success;
+            400 for validation errors; 409 if the job already exists;
+            500 on unexpected errors.
+    """
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+
+    commessa = (data.get("commessa") or "").strip()
+    if not commessa:
+        return JsonResponse(
+            {"ok": False, "error": "Il campo Commessa è obbligatorio."}, status=400
+        )
+
+    if Job.objects.filter(commessa=commessa).exists():
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": f"La commessa «{commessa}» è già presente in archivio.",
+            },
+            status=409,
+        )
+
+    penalty_raw = data.get("penalty")
+    if penalty_raw not in (None, ""):
+        try:
+            penalty_val = float(penalty_raw)
+        except (ValueError, TypeError):
+            return JsonResponse(
+                {"ok": False, "error": "Valore penale non valido."}, status=400
+            )
+        penale_max = float(AppSettings.load().penale_max)
+        if penalty_val > penale_max:
+            return JsonResponse(
+                {"ok": False, "error": f"La penale non può superare il {penale_max}%."},
+                status=400,
+            )
+
+    try:
+        job = Job.objects.create(
+            commessa=commessa,
+            total_cost=data.get("total_cost") or None,
+            penalty=penalty_raw or None,
+            delivery_date=data.get("delivery_date") or None,
+        )
+    except Exception as exc:
+        logger.error("Errore creazione Job: %s", exc)
+        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "job": {
+                "job_id": job.job_id,
+                "commessa": job.commessa,
+                "total_cost": job.total_cost,
+                "penalty": job.penalty,
+                "delivery_date": job.delivery_date,
+                "n_activities": 0,
+                "n_items": 0,
+            },
+        },
+        status=201,
+    )
 
 
 @csrf_exempt
@@ -552,13 +913,39 @@ def api_jobs_update(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
 
     commessa = (data.get("commessa") or "").strip()
-    if not commessa:
+    job_id = (data.get("job_id") or "").strip()
+    if not commessa and not job_id:
         return JsonResponse(
-            {"ok": False, "error": "commessa è obbligatoria."}, status=400
+            {"ok": False, "error": "commessa (o job_id) è obbligatoria."},
+            status=400,
         )
 
+    # Validate penalty against the configured maximum.
+    penalty_raw = data.get("penalty")
+    if penalty_raw is not None and penalty_raw != "":
+        try:
+            penalty_val = float(penalty_raw)
+        except (ValueError, TypeError):
+            return JsonResponse(
+                {"ok": False, "error": "Valore penale non valido."}, status=400
+            )
+        penale_max = float(AppSettings.load().penale_max)
+        if penalty_val > penale_max:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": f"La penale non può superare il {penale_max}%.",
+                },
+                status=400,
+            )
+
     try:
-        updated = Job.objects.filter(commessa=commessa).update(
+        qs = (
+            Job.objects.filter(commessa=commessa)
+            if commessa
+            else Job.objects.filter(job_id=job_id)
+        )
+        updated = qs.update(
             total_cost=data.get("total_cost") or None,
             penalty=data.get("penalty") or None,
             delivery_date=data.get("delivery_date") or None,
@@ -590,12 +977,124 @@ def api_jobs_check(request: HttpRequest) -> JsonResponse:
         ``commessa`` value is already present.
     """
     commessa = (request.GET.get("commessa") or "").strip()
-    if not commessa:
+    job_id = (request.GET.get("job_id") or "").strip()
+    item_raw = request.GET.get("item") or "1"
+    if not commessa and not job_id:
         return JsonResponse(
-            {"ok": False, "error": "commessa è obbligatoria."}, status=400
+            {"ok": False, "error": "commessa (o job_id) è obbligatoria."}, status=400
         )
-    exists = Job.objects.filter(commessa=commessa).exists()
-    return JsonResponse({"ok": True, "exists": exists})
+    try:
+        item = int(item_raw)
+    except (TypeError, ValueError):
+        item = 1
+    exists = (
+        Job.objects.filter(commessa=commessa).exists()
+        if commessa
+        else Job.objects.filter(job_id=job_id).exists()
+    )
+    predecessor_qs = Attivita.objects.filter(commessa=commessa, item=item).order_by(
+        "data_inizio", "id"
+    )
+    predecessors = [
+        {
+            "id": a.pk,
+            "activity_id": a.activity_id,
+            "activity": a.activity,
+            "start": a.data_inizio.isoformat() if a.data_inizio else None,
+            "finish": a.data_fine.isoformat() if a.data_fine else None,
+        }
+        for a in predecessor_qs
+    ]
+    return JsonResponse({"ok": True, "exists": exists, "predecessors": predecessors})
+
+
+@login_required
+@csrf_exempt
+@require_http_methods(["GET", "PUT"])
+def api_app_settings(request: HttpRequest) -> JsonResponse:
+    """Read (GET) or update (PUT) the application-wide settings.
+
+    Currently manages only ``penale_max``.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        JsonResponse: ``{"ok": true, "penale_max": <value>}`` on GET/success;
+            ``{"ok": false, "error": "..."}`` on validation error.
+    """
+    settings_obj = AppSettings.load()
+
+    if request.method == "GET":
+        return JsonResponse(
+            {
+                "ok": True,
+                "penale_max": float(settings_obj.penale_max),
+                "solver_time_limit": float(settings_obj.solver_time_limit),
+            }
+        )
+
+    # PUT
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+
+    from decimal import Decimal, InvalidOperation
+
+    updated = False
+    if "penale_max" in data:
+        try:
+            penale_max_val = float(data["penale_max"])
+        except (ValueError, TypeError):
+            return JsonResponse(
+                {"ok": False, "error": "Valore penale_max non valido."}, status=400
+            )
+        if penale_max_val < 0 or penale_max_val > 100:
+            return JsonResponse(
+                {"ok": False, "error": "penale_max deve essere compreso tra 0 e 100."},
+                status=400,
+            )
+        settings_obj.penale_max = Decimal(str(penale_max_val))
+        updated = True
+
+    if "solver_time_limit" in data:
+        try:
+            limit_val = float(data["solver_time_limit"])
+        except (ValueError, TypeError):
+            return JsonResponse(
+                {"ok": False, "error": "Valore solver_time_limit non valido."},
+                status=400,
+            )
+        if limit_val < 1 or limit_val > 600:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "solver_time_limit deve essere tra 1 e 600 secondi.",
+                },
+                status=400,
+            )
+        settings_obj.solver_time_limit = limit_val
+        updated = True
+
+    if not updated:
+        return JsonResponse(
+            {"ok": False, "error": "Nessun parametro da aggiornare."}, status=400
+        )
+
+    try:
+        settings_obj.save()
+    except (InvalidOperation, Exception) as exc:
+        logger.error("Errore salvataggio AppSettings: %s", exc)
+        return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "penale_max": float(settings_obj.penale_max),
+            "solver_time_limit": float(settings_obj.solver_time_limit),
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -740,27 +1239,41 @@ def api_jobs_delete(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
 
     commessa = (data.get("commessa") or "").strip()
-    if not commessa:
+    job_id = (data.get("job_id") or "").strip()
+    if not commessa and not job_id:
         return JsonResponse(
-            {"ok": False, "error": "commessa è obbligatoria."}, status=400
+            {"ok": False, "error": "commessa (o job_id) è obbligatoria."},
+            status=400,
         )
 
     try:
         from ui.models import Attivita
 
         with transaction.atomic():
-            if not Job.objects.filter(commessa=commessa).exists():
+            job_qs = (
+                Job.objects.filter(commessa=commessa)
+                if commessa
+                else Job.objects.filter(job_id=job_id)
+            )
+            if not job_qs.exists():
                 return JsonResponse(
-                    {"ok": False, "error": "Commessa non trovata."}, status=404
+                    {"ok": False, "error": "Job non trovato."}, status=404
                 )
 
-            for a in Attivita.objects.filter(commessa=commessa):
+            att_qs = (
+                Attivita.objects.filter(commessa=commessa)
+                if commessa
+                else Attivita.objects.filter(job_id=job_id)
+            )
+            for a in att_qs:
                 _reconcile_delete(a)
 
-            Attivita.objects.filter(commessa=commessa).delete()
-            Job.objects.filter(commessa=commessa).delete()
+            att_qs.delete()
+            job_qs.delete()
     except Exception as exc:
-        logger.error("Errore eliminazione Job commessa=%s: %s", commessa, exc)
+        logger.error(
+            "Errore eliminazione Job commessa=%s job_id=%s: %s", commessa, job_id, exc
+        )
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
 
     return JsonResponse({"ok": True})
@@ -776,7 +1289,7 @@ def api_gantt(request: HttpRequest) -> JsonResponse:
           "tasks": [{commessa, item, activity, duration_min, start, finish,
                      actual_start, actual_finish, baseline_start, baseline_finish,
                      plant, plant_color, responsible, resources, predecessors}],
-          "deadlines": {"commessa": "YYYY-MM-DD"}
+          "deadlines": {"job_id": "YYYY-MM-DD"}
         }
 
     Args:
@@ -803,9 +1316,9 @@ def _load_gantt_data(plant_colors: dict) -> tuple[list, dict]:
     from ui.models import Attivita
 
     deadlines: dict[str, str] = {
-        job["commessa"]: job["delivery_date"]
+        job["job_id"]: job["delivery_date"]
         for job in Job.objects.exclude(delivery_date__isnull=True).values(
-            "commessa", "delivery_date"
+            "job_id", "delivery_date"
         )
     }
 
@@ -820,6 +1333,8 @@ def _load_gantt_data(plant_colors: dict) -> tuple[list, dict]:
             {
                 "commessa": att.commessa,
                 "item": str(att.item).zfill(2),
+                "job_id": att.job_id,
+                "activity_id": att.activity_id,
                 "activity": att.activity or "",
                 "duration_min": att.duration_min,
                 "start": att.data_inizio.isoformat() if att.data_inizio else None,
@@ -855,16 +1370,16 @@ def api_commesse_deadline(request: HttpRequest) -> JsonResponse:
 
     POST body (JSON)::
 
-        {"commessa": "25033", "deadline": "2026-12-31"}   # set
-        {"commessa": "25033", "deadline": null}            # clear
+        {"job_id": "25033", "deadline": "2026-12-31"}   # set
+        {"job_id": "25033", "deadline": null}            # clear
 
     Args:
         request: The incoming request.
     """
     if request.method == "POST":
         return _handle_deadline_update(request)
-    rows = Job.objects.values("commessa", "delivery_date")
-    return JsonResponse({r["commessa"]: r["delivery_date"] for r in rows})
+    rows = Job.objects.values("job_id", "delivery_date")
+    return JsonResponse({r["job_id"]: r["delivery_date"] for r in rows})
 
 
 def _handle_deadline_update(request: HttpRequest) -> JsonResponse:
@@ -878,16 +1393,17 @@ def _handle_deadline_update(request: HttpRequest) -> JsonResponse:
     """
     try:
         data = json.loads(request.body)
-        commessa = data.get("commessa", "").strip()
+        job_id = (data.get("job_id") or "").strip()
         deadline = data.get("deadline")
-        if commessa:
+        if job_id:
+            commessa = parse_job_id(job_id)
             if deadline:
                 Job.objects.update_or_create(
                     commessa=commessa,
-                    defaults={"delivery_date": deadline},
+                    defaults={"delivery_date": deadline, "job_id": job_id},
                 )
             else:
-                Job.objects.filter(commessa=commessa).update(delivery_date=None)
+                Job.objects.filter(job_id=job_id).update(delivery_date=None)
         return JsonResponse({"ok": True})
     except Exception as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
@@ -919,13 +1435,9 @@ def impostazioni(request: HttpRequest):
             .values_list("model", flat=True)
         )
     )
-    all_testa_models = sorted(
-        set(
-            TestaItem.objects.exclude(model__isnull=True)
-            .exclude(model="")
-            .values_list("model", flat=True)
-        )
-    )
+    from ui.services.activity_inventory import get_testa_models
+
+    all_testa_models = get_testa_models()
     cfgs = list(
         ConfigurazioneTesta.objects.prefetch_related("generatori_compatibili").all()
     )
@@ -951,6 +1463,8 @@ def impostazioni(request: HttpRequest):
             "configurazioni_teste": configurazioni_teste,
             "all_testa_models_json": json.dumps(all_testa_models),
             "all_gen_models_json": json.dumps(all_gen_models),
+            "penale_max": float(AppSettings.load().penale_max),
+            "solver_time_limit": int(AppSettings.load().solver_time_limit),
         },
     )
 

@@ -6,6 +6,8 @@ from django.test import SimpleTestCase
 
 _data_import = importlib.import_module("src.data.import")
 _parse_task_name = _data_import._parse_task_name
+_wps_parser = importlib.import_module("ui.services.wps_parser")
+parse_wps_name = _wps_parser.parse_wps_name
 
 
 class ParseTaskNameTests(SimpleTestCase):
@@ -47,4 +49,30 @@ class ParseTaskNameTests(SimpleTestCase):
         self.assertEqual(
             _parse_task_name("AB_01_sal-d"),
             ("AB", "01", "sal-d"),
+        )
+
+
+class ParseWpsNameTests(SimpleTestCase):
+    """Tests for WPS filename parsing."""
+
+    def test_full_model_commessa_item_activity_format(self):
+        self.assertEqual(
+            parse_wps_name("HT200_25033_02_qualifica.pdf"),
+            {
+                "modello_testa": "HT200",
+                "commessa": "25033",
+                "item": 2,
+                "attivita": "qualifica",
+            },
+        )
+
+    def test_item_and_activity_are_optional(self):
+        self.assertEqual(
+            parse_wps_name("HT200_25033.pdf"),
+            {
+                "modello_testa": "HT200",
+                "commessa": "25033",
+                "item": 1,
+                "attivita": "",
+            },
         )

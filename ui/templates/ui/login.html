@@ -23,34 +23,33 @@
 </script>
 
 <div class="auth-page">
-    <div class="auth-card">
-        <div class="auth-logo">
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-                <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-            </svg>
+    <div class="auth-wrapper">
+        <div class="auth-logo-above">
+            <img src="{% static 'img/logo.png' %}" alt="B&amp;R Logo" width="72" height="72">
         </div>
-        <h1 class="auth-title">Accedi</h1>
-        <p class="auth-subtitle">Programmazione Produzione</p>
+        <div class="auth-card">
+            <h1 class="auth-title">Bentornato</h1>
+            <p class="auth-subtitle">Accedi al tuo account Workflow</p>
 
-        {% if error %}
-        <div class="auth-error" role="alert">{{ error }}</div>
-        {% endif %}
+            {% if error %}
+            <div class="auth-error" role="alert">{{ error }}</div>
+            {% endif %}
 
-        <form method="post" action="{% url 'login' %}{% if request.GET.next %}?next={{ request.GET.next }}{% endif %}" class="auth-form" novalidate>
-            {% csrf_token %}
-            <div class="auth-field">
-                <label for="id_username">Username</label>
-                <input type="text" id="id_username" name="username" autocomplete="username" required autofocus>
-            </div>
-            <div class="auth-field">
-                <label for="id_password">Password</label>
-                <input type="password" id="id_password" name="password" autocomplete="current-password" required>
-            </div>
-            <button type="submit" class="auth-btn">Accedi</button>
-        </form>
+            <form method="post" action="{% url 'login' %}{% if request.GET.next %}?next={{ request.GET.next }}{% endif %}" class="auth-form" novalidate>
+                {% csrf_token %}
+                <div class="auth-field">
+                    <label for="id_username">Username</label>
+                    <input type="text" id="id_username" name="username" autocomplete="username" placeholder="Il tuo username" required autofocus>
+                </div>
+                <div class="auth-field">
+                    <label for="id_password">Password</label>
+                    <input type="password" id="id_password" name="password" autocomplete="current-password" placeholder="••••••••" required>
+                </div>
+                <button type="submit" class="auth-btn">Accedi</button>
+            </form>
 
-        <p class="auth-link">Non hai un account? <a href="{% url 'register' %}">Registrati</a></p>
+            <p class="auth-link">Non hai un account? <a href="{% url 'register' %}">Registrati</a></p>
+        </div>
     </div>
 </div>
 

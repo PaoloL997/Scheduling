@@ -152,8 +152,10 @@
   /* ── Bars area ── */
   #bars-scroll {
     flex: 1;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     min-height: 0;
+    scrollbar-gutter: stable;
   }
   #bars-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
   #bars-scroll::-webkit-scrollbar-track { background: transparent; }
@@ -192,28 +194,13 @@
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
   #gantt-tip {
-    position: fixed;
-    z-index: 600;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 16px;
     padding: 0;
     pointer-events: auto;
-    display: none;
-    width: 300px;
-    box-shadow: 0 4px 16px rgba(0,0,0,.4), 0 16px 48px rgba(0,0,0,.55);
     animation: ganttTipIn 0.15s ease-out both;
-    overflow: hidden;
   }
   #gantt-tip-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 14px 16px 10px;
-    border-bottom: 1px solid var(--border);
+    justify-content: flex-start;
   }
-  #gantt-tip-header-text { min-width: 0; flex: 1; }
   .tip-commessa {
     font-size: 11px;
     font-weight: 700;
@@ -228,19 +215,7 @@
     color: var(--text);
     line-height: 1.3;
   }
-  #gantt-tip-close {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 14px;
-    line-height: 1;
-    padding: 0 2px;
-    flex-shrink: 0;
-  }
-  #gantt-tip-close:hover { color: var(--text); }
   #gantt-tip-body {
-    padding: 10px 16px 14px;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -303,7 +278,7 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
-  #dl-commessa-name { color: hsl(38, 95%, 60%); }
+  #dl-job-id-name { color: hsl(38, 95%, 60%); }
   #dl-close-btn {
     background: none;
     border: none;
@@ -376,6 +351,23 @@
     font-weight: 500;
   }
   body.light .gl-txt { color: hsl(220,15%,45%); }
+  body.light #gantt-legend .gl-bar-sample {
+    fill: hsl(211,84%,40%);
+    stroke: hsl(211,84%,40%);
+  }
+  body.light #gantt-legend .gl-bar-sample--planned {
+    fill-opacity: 0.44;
+    stroke-opacity: 1;
+  }
+  body.light #gantt-legend .gl-bar-sample--actual {
+    opacity: 0.95;
+  }
+  body.light #gantt-legend .gl-today-sample {
+    fill: hsl(0,82%,48%);
+    stroke: hsl(0,88%,42%);
+  }
+  body.light #gantt-legend .gl-today-sample--fill { opacity: 0.22; }
+  body.light #gantt-legend .gl-today-sample--line { opacity: 0.85; stroke-width: 2; }
 </style>
 {% endblock %}
 
@@ -449,7 +441,7 @@
     <!-- Finestra prevista -->
     <div class="gl-item">
       <svg width="38" height="14" viewBox="0 0 38 14" fill="none">
-        <rect x="1" y="3" width="36" height="8" rx="3"
+        <rect x="1" y="3" width="36" height="8" rx="3" class="gl-bar-sample gl-bar-sample--planned"
               fill="hsl(211,90%,60%)" fill-opacity="0.10"
               stroke="hsl(211,90%,60%)" stroke-opacity="0.45" stroke-width="1.2"/>
       </svg>
@@ -459,13 +451,13 @@
     <div class="gl-item">
       <svg width="38" height="14" viewBox="0 0 38 14" fill="none">
         <!-- thin horizontal tail -->
-        <rect x="1" y="5.5" width="36" height="3" rx="1.5"
+        <rect x="1" y="5.5" width="36" height="3" rx="1.5" class="gl-bar-sample gl-bar-sample--actual"
               fill="hsl(211,90%,60%)" opacity="0.90"/>
         <!-- left tick -->
-        <rect x="0" y="1" width="3" height="12" rx="1.5"
+        <rect x="0" y="1" width="3" height="12" rx="1.5" class="gl-bar-sample gl-bar-sample--actual"
               fill="hsl(211,90%,60%)" opacity="0.95"/>
         <!-- right tick -->
-        <rect x="35" y="1" width="3" height="12" rx="1.5"
+        <rect x="35" y="1" width="3" height="12" rx="1.5" class="gl-bar-sample gl-bar-sample--actual"
               fill="hsl(211,90%,60%)" opacity="0.95"/>
       </svg>
       <span class="gl-txt">Finestra effettiva (inizio effettivo + durata stimata)</span>
@@ -484,9 +476,9 @@
     <!-- Oggi -->
     <div class="gl-item">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-        <rect x="4" y="0" width="6" height="14" rx="1.5"
+        <rect x="4" y="0" width="6" height="14" rx="1.5" class="gl-today-sample gl-today-sample--fill"
               fill="hsl(0,80%,50%)" opacity="0.22"/>
-        <line x1="7" y1="0" x2="7" y2="14"
+        <line x1="7" y1="0" x2="7" y2="14" class="gl-today-sample gl-today-sample--line"
               stroke="hsl(0,80%,60%)" stroke-width="1.2" opacity="0.55"/>
       </svg>
       <span class="gl-txt">Oggi</span>
@@ -500,7 +492,7 @@
 <!-- Deadline editor popover -->
 <div id="dl-popover" hidden>
   <div id="dl-popover-header">
-    <span id="dl-popover-title">CONSEGNA — <span id="dl-commessa-name"></span></span>
+    <span id="dl-popover-title">CONSEGNA — <span id="dl-job-id-name"></span></span>
     <button id="dl-close-btn" onclick="closeDeadlineEditor()" type="button">&#x2715;</button>
   </div>
   <input type="date" id="dl-input">
@@ -512,754 +504,17 @@
 {% endblock %}
 
 {% block extra_js %}
+{% load static %}
+<script src="{% static 'ui/gantt.js' %}"></script>
 <script>
-// ── Gantt globals ──────────────────────────────────────────────────────────
-const AXIS_H    = 44;
-const NS        = 'http://www.w3.org/2000/svg';
-const ROW_H     = 38;
-const HEADER_H  = 36;
-const BAR_H     = 22;
-const GROUP_GAP = 16;
-
-const PALETTE = [
-  'hsl(211,90%,60%)', 'hsl(38,95%,58%)',  'hsl(160,55%,50%)', 'hsl(280,60%,68%)',
-  'hsl(0,75%,62%)',   'hsl(190,65%,52%)', 'hsl(48,90%,55%)',  'hsl(320,60%,65%)',
-  'hsl(100,50%,55%)', 'hsl(230,75%,65%)', 'hsl(15,80%,60%)',  'hsl(170,55%,50%)',
-];
-
-let _view      = 'year';
-let _offset    = 0;          // offset in days from the "natural" window start
-let _tasks     = [];
-let _deadlines = {};
-
-// ── Date helpers ──────────────────────────────────────────────────────────
-function parseDate(s) {
-  if (!s) return new Date(NaN);
-  const [y, m, d] = s.split('-').map(Number);
-  return new Date(y, m - 1, d);
-}
-function startOfWeek(d) {
-  const r = new Date(d);
-  const day = r.getDay() || 7;
-  r.setDate(r.getDate() - (day - 1));
-  r.setHours(0, 0, 0, 0);
-  return r;
-}
-function floorMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
-function floorYear(d)  { return new Date(d.getFullYear(), 0, 1); }
-function addDays(d, n)   { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
-function addMonths(d, n) { const r = new Date(d); r.setMonth(r.getMonth() + n); return r; }
-function addYears(d, n)  { const r = new Date(d); r.setFullYear(r.getFullYear() + n); return r; }
-function buildTicks(minD, maxD, view) {
-  const ticks = [];
-  let cur = new Date(minD);
-  const step = (view === 'year') ? addMonths : addDays;
-  while (cur < maxD) { ticks.push(new Date(cur)); cur = step(cur, 1); }
-  return ticks;
-}
-function fmtLabel(d, view) {
-  if (view === 'week')  return d.toLocaleDateString('it-IT', {weekday:'short', day:'numeric'});
-  if (view === 'month') return d.toLocaleDateString('it-IT', {day:'numeric', month:'short'});
-  return d.toLocaleDateString('it-IT', {month:'short', year:'2-digit'});
-}
-function fmtDate(s) {
-  if (!s) return '—';
-  return new Date(s + 'T00:00:00').toLocaleDateString('it-IT', {day:'2-digit', month:'short', year:'numeric'});
-}
-
-// ── Tooltip HTML builder ──────────────────────────────────────────────────
-function buildTipHtml(t) {
-  const durMs   = parseDate(t.finish) - parseDate(t.start);
-  const durDays = Math.round(durMs / 86400000);
-  const dur     = durDays > 0 ? durDays + (durDays === 1 ? ' giorno' : ' giorni') : '—';
-  const activityLabel = (t.item ? t.item + ' · ' : '') + (t.activity || '—');
-  const commessa = t.commessa || '—';
-  let rows = '';
-  const row = (lbl, val, cls='') =>
-    `<div class="tip-row"><span class="tip-lbl">${lbl}</span><span class="tip-val${cls ? ' ' + cls : ''}">${val}</span></div>`;
-  rows += row('Inizio previsto', fmtDate(t.start));
-  rows += row('Fine prevista',   fmtDate(t.finish));
-  rows += row('Durata stimata',  dur);
-  const hasActual = t.actual_start || t.actual_finish;
-  if (hasActual) {
-    rows += '<div class="tip-divider"></div>';
-    if (t.actual_start)  rows += row('Inizio effettivo', fmtDate(t.actual_start),  'tip-highlight');
-    if (t.actual_finish) rows += row('Fine effettiva',   fmtDate(t.actual_finish), 'tip-highlight');
-  }
-  rows += '<div class="tip-divider"></div>';
-  rows += row('Stabilimento', t.plant
-    ? `<span class="stab-badge"${t.plant_color ? ` style="--stab-c:${t.plant_color}"` : ''}>${t.plant}</span>`
-    : '—');
-  rows += row('Responsabile', t.responsible || '—');
-  if (t.resources) {
-    const chips = t.resources.split(/[;,]/).map(r => r.trim()).filter(Boolean)
-      .map(r => `<span class="tip-chip">${r}</span>`).join('');
-    rows += `<div class="tip-row"><span class="tip-lbl">Risorse</span><span class="tip-val"><div class="tip-chips">${chips}</div></span></div>`;
-  }
-  return `
-    <div id="gantt-tip-header">
-      <div id="gantt-tip-header-text">
-        <div class="tip-commessa">${commessa}</div>
-        <div class="tip-activity">${activityLabel}</div>
-      </div>
-      <button id="gantt-tip-close" onclick="document.getElementById('gantt-tip').style.display='none'" type="button" aria-label="Chiudi">&#x2715;</button>
-    </div>
-    <div id="gantt-tip-body">${rows}</div>
-  `;
-}
-
-// ── Navigation helpers ─────────────────────────────────────────────────────
-// Returns the step size in days for the prev/next buttons per view
-function offsetStep(view) {
-  if (view === 'week')  return 1;
-  if (view === 'month') return 7;
-  return 31;  // ~1 month for year view (addDays is fine; render snaps to month boundary)
-}
-
-function updateNavState() {
-  const todayBtn = document.getElementById('nav-today');
-  if (_offset === 0) todayBtn.classList.add('at-today');
-  else               todayBtn.classList.remove('at-today');
-}
-
-// ── render() ──────────────────────────────────────────────────────────────
-function render(tasks, view) {
-  if (!tasks.length) return;
-
-  const isLight = document.body.classList.contains('light');
-  const gridLineColor = isLight ? 'hsl(220,12%,82%)' : 'hsl(220,10%,15%)';
-
-  // Group by commessa
-  const groups = [];
-  const gmap   = {};
-  tasks.forEach(t => {
-    if (!gmap[t.commessa]) { gmap[t.commessa] = {commessa: t.commessa, tasks: []}; groups.push(gmap[t.commessa]); }
-    gmap[t.commessa].tasks.push(t);
-  });
-  const colourOf = {};
-  groups.forEach((g, i) => { colourOf[g.commessa] = PALETTE[i % PALETTE.length]; });
-
-  // Time window — shifted by _offset days from the natural window start
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  let minD, maxD;
-  if (view === 'week') {
-    minD = addDays(startOfWeek(today), _offset);
-    maxD = addDays(minD, 7);
-  } else if (view === 'month') {
-    minD = addDays(floorMonth(today), _offset);
-    maxD = addMonths(minD, 1);
-  } else {
-    // For year view keep boundaries on month edges
-    const baseMin = floorYear(today);
-    minD = addMonths(baseMin, _offset);
-    maxD = addYears(minD, 1);
-  }
-
-  updateNavState();
-
-  const ticks   = buildTicks(minD, maxD, view);
-  const barsEl  = document.getElementById('bars-scroll');
-  const totalW  = barsEl.clientWidth || 800;
-  const pxPerMs = totalW / (maxD - minD);
-  const dateToX = d => Math.round((d - minD) * pxPerMs);
-
-  // Build grouped row layout
-  const groupRows = [];
-  let yOffset = 8;
-  groups.forEach(g => {
-    const colour = colourOf[g.commessa];
-    const visibleTasks = g.tasks.map(t => {
-      const s = parseDate(t.start), f = parseDate(t.finish);
-      const durMs = f - s;
-      const barStart = t.actual_start ? parseDate(t.actual_start) : s;
-      const barEnd   = t.actual_finish ? parseDate(t.actual_finish)
-                     : (t.actual_start ? new Date(barStart.getTime() + durMs) : f);
-      const visStart = new Date(Math.min(s, barStart));
-      const visEnd   = new Date(Math.max(f, barEnd));
-      if (visStart >= maxD || visEnd <= minD) return null;
-      return { ...t, colour, x1: Math.max(dateToX(s), 0), x2: Math.min(dateToX(f), totalW) };
-    }).filter(Boolean);
-
-    const allStarts = g.tasks.map(t => parseDate(t.start));
-    const allFinish = g.tasks.map(t => {
-      const s = parseDate(t.start), f = parseDate(t.finish);
-      const durMs = f - s;
-      const actS = t.actual_start ? parseDate(t.actual_start) : null;
-      const actEnd = t.actual_finish ? parseDate(t.actual_finish)
-                   : (actS ? new Date(actS.getTime() + durMs) : f);
-      return new Date(Math.max(f.getTime(), actEnd.getTime()));
-    });
-    const groupMinD = new Date(Math.min(...allStarts));
-    const groupMaxD = new Date(Math.max(...allFinish));
-    const summaryX1 = Math.max(dateToX(groupMinD), 0);
-    const summaryX2 = Math.min(dateToX(groupMaxD), totalW);
-
-    const headerY = yOffset;
-    yOffset += HEADER_H;
-    const taskEntries = visibleTasks.map(row => {
-      const y = yOffset;
-      yOffset += ROW_H;
-      return { ...row, y };
-    });
-    groupRows.push({ colour, commessa: g.commessa, headerY, summaryX1, summaryX2,
-                     tasks: taskEntries, allTasks: g.tasks });
-    yOffset += GROUP_GAP;
-  });
-
-  const totalH = Math.max(yOffset + 8, barsEl.clientHeight || 200);
-
-  // ── Axis SVG ──────────────────────────────────────────────────────────
-  const axisSvg = document.getElementById('axis-svg');
-  axisSvg.setAttribute('width', totalW);
-  axisSvg.setAttribute('height', AXIS_H);
-  axisSvg.innerHTML = '';
-  ticks.forEach((tick, i) => {
-    const x = dateToX(tick);
-    const ln = document.createElementNS(NS, 'line');
-    ln.setAttribute('x1', x); ln.setAttribute('y1', 0);
-    ln.setAttribute('x2', x); ln.setAttribute('y2', AXIS_H);
-    ln.setAttribute('stroke', gridLineColor); ln.setAttribute('stroke-width', '1');
-    axisSvg.appendChild(ln);
-    const nextX = ticks[i + 1] ? dateToX(ticks[i + 1]) : totalW;
-    const cellW = nextX - x;
-    if (x >= 0 && cellW > 18) {
-      const txt = document.createElementNS(NS, 'text');
-      txt.setAttribute('x', x + 8);
-      txt.setAttribute('y', AXIS_H / 2 + 5);
-      const isWeekend = (view === 'week' || view === 'month') && (tick.getDay() === 0 || tick.getDay() === 6);
-      txt.setAttribute('fill', isWeekend ? 'hsl(220,10%,32%)' : 'hsl(220,10%,46%)');
-      txt.setAttribute('font-size', '12');
-      txt.setAttribute('font-family', '-apple-system,BlinkMacSystemFont,sans-serif');
-      txt.textContent = fmtLabel(tick, view);
-      axisSvg.appendChild(txt);
-    }
-  });
-
-  // ── Bars SVG ──────────────────────────────────────────────────────────
-  const barsSvg = document.getElementById('bars-svg');
-  barsSvg.setAttribute('width', totalW);
-  barsSvg.setAttribute('height', totalH);
-  barsSvg.innerHTML = '';
-
-  // Weekend highlights
-  if (view === 'week' || view === 'month') {
-    ticks.forEach((tick, i) => {
-      const dow = tick.getDay();
-      if (dow !== 0 && dow !== 6) return;
-      const x  = dateToX(tick);
-      const x2 = ticks[i + 1] ? dateToX(ticks[i + 1]) : totalW;
-      if (x >= totalW || x2 <= 0) return;
-      const wk = document.createElementNS(NS, 'rect');
-      wk.setAttribute('x',      Math.max(x, 0));
-      wk.setAttribute('y',      0);
-      wk.setAttribute('width',  Math.min(x2, totalW) - Math.max(x, 0));
-      wk.setAttribute('height', totalH);
-      wk.setAttribute('fill',   'hsl(220,30%,80%)');
-      wk.setAttribute('opacity', '0.06');
-      barsSvg.appendChild(wk);
-    });
-  }
-
-  // Vertical grid lines
-  ticks.forEach(tick => {
-    const x = dateToX(tick);
-    if (x < 0) return;
-    const ln = document.createElementNS(NS, 'line');
-    ln.setAttribute('x1', x); ln.setAttribute('y1', 0);
-    ln.setAttribute('x2', x); ln.setAttribute('y2', totalH);
-    ln.setAttribute('stroke', gridLineColor); ln.setAttribute('stroke-width', '1');
-    barsSvg.appendChild(ln);
-  });
-
-  // Today indicator
-  if (today >= minD && today < maxD) {
-    const x = dateToX(today);
-    const pxPerDay = totalW / ((maxD - minD) / 86400000);
-    const stripW = Math.max(pxPerDay, 3);
-    const strip = document.createElementNS(NS, 'rect');
-    strip.setAttribute('x', x); strip.setAttribute('y', 0);
-    strip.setAttribute('width', stripW); strip.setAttribute('height', totalH);
-    strip.setAttribute('fill', 'hsl(0,80%,50%)'); strip.setAttribute('opacity', '0.10');
-    barsSvg.appendChild(strip);
-    const edge = document.createElementNS(NS, 'line');
-    edge.setAttribute('x1', x); edge.setAttribute('y1', 0);
-    edge.setAttribute('x2', x); edge.setAttribute('y2', totalH);
-    edge.setAttribute('stroke', 'hsl(0,80%,60%)'); edge.setAttribute('stroke-width', '1');
-    edge.setAttribute('opacity', '0.45');
-    barsSvg.appendChild(edge);
-  }
-
-  // Groups
-  const defs = document.createElementNS(NS, 'defs');
-  barsSvg.appendChild(defs);
-  const taskPosMap = {};
-
-  groupRows.forEach((g, gi) => {
-    if (g.summaryX2 > g.summaryX1) {
-      const SUMBAR_H = 6;
-      const sumY = g.headerY + HEADER_H - SUMBAR_H - 4;
-      const sumW = Math.max(g.summaryX2 - g.summaryX1, 20);
-
-      const dtStart = new Date(Math.min(...g.allTasks.map(t => parseDate(t.start))));
-      const dtEnd   = new Date(Math.max(...g.allTasks.map(t => {
-        const s = parseDate(t.start), f = parseDate(t.finish);
-        const durMs = f - s;
-        const actS  = t.actual_start ? parseDate(t.actual_start) : null;
-        const actEnd = t.actual_finish ? parseDate(t.actual_finish)
-                     : (actS ? new Date(actS.getTime() + durMs) : f);
-        return Math.max(f.getTime(), actEnd.getTime());
-      })));
-      const spanDays = Math.round((dtEnd - dtStart) / 86400000);
-
-      // Commessa label — clickable to set deadline
-      const lbl = document.createElementNS(NS, 'text');
-      lbl.setAttribute('x', g.summaryX1 + 2); lbl.setAttribute('y', sumY - 5);
-      lbl.setAttribute('fill', g.colour); lbl.setAttribute('font-size', '12');
-      lbl.setAttribute('font-weight', '700');
-      lbl.setAttribute('font-family', '-apple-system,BlinkMacSystemFont,sans-serif');
-      lbl.setAttribute('letter-spacing', '0.04em'); lbl.setAttribute('cursor', 'pointer');
-      lbl.setAttribute('data-dl-commessa', g.commessa);
-      lbl.setAttribute('title', 'Clicca per impostare la data di consegna');
-      lbl.textContent = g.commessa;
-      barsSvg.appendChild(lbl);
-
-      if (sumW > 70) {
-        const durLbl = document.createElementNS(NS, 'text');
-        durLbl.setAttribute('x', Math.min(g.summaryX2 - 2, totalW - 2)); durLbl.setAttribute('y', sumY - 5);
-        durLbl.setAttribute('fill', g.colour); durLbl.setAttribute('font-size', '11');
-        durLbl.setAttribute('font-weight', '600');
-        durLbl.setAttribute('font-family', '-apple-system,BlinkMacSystemFont,sans-serif');
-        durLbl.setAttribute('text-anchor', 'end'); durLbl.setAttribute('opacity', '0.75');
-        durLbl.textContent = spanDays + ' gg';
-        barsSvg.appendChild(durLbl);
-      }
-
-      const sumBar = document.createElementNS(NS, 'rect');
-      sumBar.setAttribute('x', g.summaryX1); sumBar.setAttribute('y', sumY);
-      sumBar.setAttribute('width', sumW); sumBar.setAttribute('height', SUMBAR_H);
-      sumBar.setAttribute('rx', SUMBAR_H / 2); sumBar.setAttribute('fill', g.colour);
-      sumBar.setAttribute('opacity', '0.45');
-      barsSvg.appendChild(sumBar);
-    }
-
-    // Deadline marker
-    const dlStr = _deadlines[g.commessa];
-    if (dlStr) {
-      const dlDate = parseDate(dlStr);
-      if (dlDate >= minD && dlDate <= maxD) {
-        const dlX    = dateToX(dlDate);
-        const dlTop  = g.headerY;
-        const dlBot  = g.tasks.length ? g.tasks[g.tasks.length - 1].y + ROW_H : g.headerY + HEADER_H;
-        const dlColor = 'hsl(0,80%,60%)';
-
-        const dlLine = document.createElementNS(NS, 'line');
-        dlLine.setAttribute('x1', dlX); dlLine.setAttribute('y1', dlTop + HEADER_H);
-        dlLine.setAttribute('x2', dlX); dlLine.setAttribute('y2', dlBot);
-        dlLine.setAttribute('stroke', dlColor); dlLine.setAttribute('stroke-width', '1.5');
-        dlLine.setAttribute('stroke-dasharray', '4,3'); dlLine.setAttribute('opacity', '0.80');
-        barsSvg.appendChild(dlLine);
-
-        const tickTop = document.createElementNS(NS, 'line');
-        tickTop.setAttribute('x1', dlX - 5); tickTop.setAttribute('y1', dlTop + HEADER_H);
-        tickTop.setAttribute('x2', dlX + 5); tickTop.setAttribute('y2', dlTop + HEADER_H);
-        tickTop.setAttribute('stroke', dlColor); tickTop.setAttribute('stroke-width', '2');
-        tickTop.setAttribute('opacity', '0.85');
-        barsSvg.appendChild(tickTop);
-
-        const DIA = 5, labelY = dlBot + 4;
-        const poly = document.createElementNS(NS, 'polygon');
-        poly.setAttribute('points',
-          `${dlX},${labelY} ${dlX + DIA},${labelY + DIA} ${dlX},${labelY + DIA * 2} ${dlX - DIA},${labelY + DIA}`);
-        poly.setAttribute('fill', dlColor); poly.setAttribute('opacity', '0.9');
-        barsSvg.appendChild(poly);
-
-        const dlFmt = dlDate.toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit', year:'2-digit'});
-        const dlLbl = document.createElementNS(NS, 'text');
-        dlLbl.setAttribute('x', dlX + DIA + 4); dlLbl.setAttribute('y', labelY + DIA + 3.5);
-        dlLbl.setAttribute('fill', dlColor); dlLbl.setAttribute('font-size', '9');
-        dlLbl.setAttribute('font-weight', '700');
-        dlLbl.setAttribute('font-family', '-apple-system,BlinkMacSystemFont,sans-serif');
-        dlLbl.setAttribute('letter-spacing', '0.04em'); dlLbl.setAttribute('opacity', '0.9');
-        dlLbl.textContent = dlFmt;
-        barsSvg.appendChild(dlLbl);
-      }
-    }
-
-    // Task bars
-    g.tasks.forEach((row, ti) => {
-      const barY = row.y + Math.floor((ROW_H - BAR_H) / 2);
-      const midY = barY + BAR_H / 2;
-      const _tkey = row.commessa + (row.item ? '-' + row.item : '') + (row.activity ? '-' + row.activity : '');
-      taskPosMap[_tkey] = { x1: null, x2: null, midY, barBotY: barY + BAR_H, row };
-
-      const planS = parseDate(row.start);
-      const planF = parseDate(row.finish);
-      const durMs = planF - planS;
-      const actS  = row.actual_start  ? parseDate(row.actual_start)  : null;
-      const actF  = row.actual_finish ? parseDate(row.actual_finish) : null;
-      const actEnd = actF || (actS ? new Date(actS.getTime() + durMs) : null);
-
-      const boxX1 = Math.max(dateToX(planS), 0);
-      const boxX2 = Math.min(dateToX(planF), totalW);
-      const boxW  = Math.max(boxX2 - boxX1, 4);
-      taskPosMap[_tkey].x1 = boxX1;
-      taskPosMap[_tkey].x2 = boxX2;
-
-      const actX1raw = actS   ? dateToX(actS)   : null;
-      const actX2raw = actEnd ? dateToX(actEnd) : null;
-      const isStarted   = !!actS;
-      const isCompleted = !!(actS && actF);
-      const isOverdue   = !actS && today >= planS;
-      const isLate      = !!(actS && actS > planS);
-
-      const C   = colourOf[row.commessa] || 'hsl(220,12%,52%)';
-      const RED = 'hsl(4,90%,62%)';
-      const boxStrokeW  = isOverdue ? '1.5' : '1';
-      const boxStrokeOp = isOverdue ? '0.70' : '0.40';
-
-      // Actual window tails
-      if (actS && actX1raw !== null && actX2raw !== null) {
-        const TAIL_H = 3, TICK_H = BAR_H + 2, TICK_W = 3;
-        const tx1 = Math.max(actX1raw, 0), tx2 = Math.min(actX2raw, totalW);
-        if (tx2 > tx1) {
-          const tl = document.createElementNS(NS, 'rect');
-          tl.setAttribute('x', tx1); tl.setAttribute('y', midY - TAIL_H / 2);
-          tl.setAttribute('width', tx2 - tx1); tl.setAttribute('height', TAIL_H);
-          tl.setAttribute('fill', C); tl.setAttribute('opacity', '0.90');
-          tl.setAttribute('pointer-events', 'none');
-          barsSvg.appendChild(tl);
-          [tx1, tx2].forEach(tx => {
-            const tk = document.createElementNS(NS, 'rect');
-            tk.setAttribute('x', tx - TICK_W / 2); tk.setAttribute('y', midY - TICK_H / 2);
-            tk.setAttribute('width', TICK_W); tk.setAttribute('height', TICK_H);
-            tk.setAttribute('rx', '1.5'); tk.setAttribute('fill', C);
-            tk.setAttribute('opacity', '0.95'); tk.setAttribute('pointer-events', 'none');
-            barsSvg.appendChild(tk);
-          });
-        }
-      }
-
-      // Status badges + main bar
-      {
-        const BADGE_H = 16, BADGE_RX = 5, BADGE_PAD = 10, GAP = 6, BADGE_FONT = 9;
-        const GREEN_B = 'hsl(142,55%,40%)';
-        const SLATE   = 'hsl(220,14%,38%)';
-        const AMBER   = 'hsl(38,90%,48%)';
-        const charW   = BADGE_FONT * 0.60;
-        const hasWarning = !isCompleted && (row.warning_count > 0);
-        const badges  = [];
-        if (isCompleted) {
-          badges.push({ text: '✓ COMPLETATA', color: GREEN_B });
-        } else {
-          if (isLate || isOverdue) badges.push({ text: 'IN RITARDO', color: RED });
-          if (isStarted)           badges.push({ text: 'IN LAVORAZIONE', color: SLATE });
-          else if (isOverdue)      badges.push({ text: 'DA INIZIARE', color: SLATE });
-          else                     badges.push({ text: 'PIANIFICATA', color: SLATE });
-        }
-
-        const rightEdge = Math.max(boxX2, (actX2raw !== null) ? Math.min(actX2raw, totalW) : 0);
-        let bx = rightEdge + BADGE_PAD;
-
-        const clipId = `clip-${gi}-${ti}`;
-        const cp = document.createElementNS(NS, 'clipPath'); cp.setAttribute('id', clipId);
-        const cpRect = document.createElementNS(NS, 'rect');
-        cpRect.setAttribute('x', boxX1 + 2); cpRect.setAttribute('y', barY - 14);
-        // Short bars: allow label to overflow right so it's always readable
-        cpRect.setAttribute('width', Math.max(boxW < 40 ? 200 : boxW - 16, 0));
-        cpRect.setAttribute('height', 14);
-        cp.appendChild(cpRect); defs.appendChild(cp);
-
-        const rect = document.createElementNS(NS, 'rect');
-        rect.setAttribute('x', boxX1); rect.setAttribute('y', barY);
-        rect.setAttribute('width', boxW); rect.setAttribute('height', BAR_H);
-        rect.setAttribute('rx', '5'); rect.setAttribute('fill', C);
-        rect.setAttribute('fill-opacity', '0.08');
-        rect.setAttribute('stroke', C); rect.setAttribute('stroke-width', boxStrokeW);
-        rect.setAttribute('stroke-opacity', boxStrokeOp);
-        rect.setAttribute('data-task', JSON.stringify({
-          commessa: row.commessa, item: row.item, activity: row.activity,
-          start: row.start, finish: row.finish,
-          actual_start: row.actual_start, actual_finish: row.actual_finish,
-          plant: row.plant, responsible: row.responsible,
-          duration_min: row.duration_min, resources: row.resources,
-          orm_id: row.orm_id, warning_count: row.warning_count,
-        }));
-        rect.style.cursor = 'pointer';
-        barsSvg.appendChild(rect);
-
-        if (boxW > 0) {
-          const txt = document.createElementNS(NS, 'text');
-          txt.setAttribute('x', boxX1 + (boxW < 40 ? 2 : 10)); txt.setAttribute('y', barY - 4);
-          txt.setAttribute('fill', C); txt.setAttribute('opacity', '0.90');
-          txt.setAttribute('font-size', '10'); txt.setAttribute('font-weight', '700');
-          txt.setAttribute('font-family', '-apple-system,BlinkMacSystemFont,sans-serif');
-          txt.setAttribute('clip-path', `url(#${clipId})`); txt.setAttribute('pointer-events', 'none');
-          txt.textContent = (row.item ? row.item + ' · ' : '') + (row.activity || '');
-          barsSvg.appendChild(txt);
-        }
-
-        badges.forEach(({ text, color }) => {
-          const bw = Math.ceil(text.length * charW) + 14;
-          if (bx + bw > totalW + 100) return;
-          const by = midY - BADGE_H / 2;
-          const bg = document.createElementNS(NS, 'rect');
-          bg.setAttribute('x', bx); bg.setAttribute('y', by);
-          bg.setAttribute('width', bw); bg.setAttribute('height', BADGE_H);
-          bg.setAttribute('rx', BADGE_RX); bg.setAttribute('fill', color);
-          bg.setAttribute('opacity', '0.92'); bg.setAttribute('pointer-events', 'none');
-          barsSvg.appendChild(bg);
-          const bt = document.createElementNS(NS, 'text');
-          bt.setAttribute('x', bx + bw / 2); bt.setAttribute('y', by + BADGE_H / 2 + 3.5);
-          bt.setAttribute('fill', 'white'); bt.setAttribute('font-size', BADGE_FONT);
-          bt.setAttribute('font-weight', '700');
-          bt.setAttribute('font-family', '-apple-system,BlinkMacSystemFont,sans-serif');
-          bt.setAttribute('text-anchor', 'middle'); bt.setAttribute('letter-spacing', '0.04em');
-          bt.setAttribute('pointer-events', 'none');
-          bt.textContent = text;
-          barsSvg.appendChild(bt);
-          bx += bw + GAP;
-        });
-
-        // Clickable warning badge (navigates to pianificazione to resolve)
-        if (hasWarning) {
-          const warnText = `⚠ ${row.warning_count}`;
-          const bw = Math.ceil(warnText.length * charW) + 14;
-          if (bx + bw <= totalW + 100) {
-            const by = midY - BADGE_H / 2;
-            const bg = document.createElementNS(NS, 'rect');
-            bg.setAttribute('x', bx); bg.setAttribute('y', by);
-            bg.setAttribute('width', bw); bg.setAttribute('height', BADGE_H);
-            bg.setAttribute('rx', BADGE_RX); bg.setAttribute('fill', AMBER);
-            bg.setAttribute('opacity', '0.92');
-            bg.setAttribute('data-warn-ormid', row.orm_id);
-            bg.style.cursor = 'pointer';
-            barsSvg.appendChild(bg);
-            const bt = document.createElementNS(NS, 'text');
-            bt.setAttribute('x', bx + bw / 2); bt.setAttribute('y', by + BADGE_H / 2 + 3.5);
-            bt.setAttribute('fill', 'white'); bt.setAttribute('font-size', BADGE_FONT);
-            bt.setAttribute('font-weight', '700');
-            bt.setAttribute('font-family', '-apple-system,BlinkMacSystemFont,sans-serif');
-            bt.setAttribute('text-anchor', 'middle'); bt.setAttribute('letter-spacing', '0.04em');
-            bt.setAttribute('pointer-events', 'none');
-            bt.textContent = warnText;
-            barsSvg.appendChild(bt);
-          }
-        }
-      }
-    });
-  });
-
-  // Dependency arrows
-  Object.values(taskPosMap).forEach(pos => {
-    const { row } = pos;
-    if (!row.predecessors) return;
-    row.predecessors.split(';').forEach(predName => {
-      if (!predName) return;
-      const predPos = taskPosMap[predName.trim()];
-      if (!predPos || predPos.x1 === null || pos.x1 === null) return;
-      const fx = predPos.x1 + (predPos.x2 - predPos.x1) / 2;
-      const fy = predPos.barBotY;
-      const tx = pos.x1, ty = pos.midY;
-      const R = Math.min(8, Math.abs(tx - fx) * 0.5, Math.abs(ty - fy) * 0.5);
-      const signY = ty >= fy ? 1 : -1, signX = tx >= fx ? 1 : -1;
-      const d = [`M ${fx} ${fy}`, `L ${fx} ${ty - signY * R}`,
-                 `Q ${fx} ${ty} ${fx + signX * R} ${ty}`, `L ${tx} ${ty}`].join(' ');
-      const path = document.createElementNS(NS, 'path');
-      path.setAttribute('d', d); path.setAttribute('fill', 'none');
-      path.setAttribute('stroke', colourOf[row.commessa] || 'hsl(0,0%,100%)');
-      path.setAttribute('stroke-width', '1.5'); path.setAttribute('stroke-dasharray', '5,4');
-      path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
-      path.setAttribute('opacity', '0.55'); path.setAttribute('pointer-events', 'none');
-      barsSvg.appendChild(path);
-    });
-  });
-
-  // Scroll sync (axis follows bars horizontally)
-  document.getElementById('axis-scroll').style.overflowX = 'hidden';
-  barsSvg.addEventListener('click', e => {
-    const dlEl = e.target.closest('[data-dl-commessa]');
-    if (dlEl) { openDeadlineEditor(dlEl.dataset.dlCommessa, e.clientX, e.clientY); return; }
-    const warnEl = e.target.closest('[data-warn-ormid]');
-    if (warnEl) { window.location.href = `/pianificazione/?focus=${warnEl.dataset.warnOrmid}`; return; }
-    const taskEl = e.target.closest('[data-task]');
-    if (taskEl) {
-      try { showTip(JSON.parse(taskEl.dataset.task), e.clientX, e.clientY); } catch(err) {}
-    }
-  });
-}
-
-// ── updateStats() ─────────────────────────────────────────────────────────
-function updateStats(tasks) {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  let total = 0, late = 0, wip = 0;
-  tasks.forEach(t => {
-    total++;
-    const actS  = t.actual_start  ? new Date(t.actual_start  + 'T00:00:00') : null;
-    const actF  = t.actual_finish ? new Date(t.actual_finish + 'T00:00:00') : null;
-    const planS = t.start         ? new Date(t.start         + 'T00:00:00') : null;
-    const planF = t.finish        ? new Date(t.finish        + 'T00:00:00') : null;
-    if (actS && actF) return; // completata, non conta
-    if (actS && !actF) { wip++; }
-    // in ritardo: iniziata dopo la data pianificata
-    const isLate    = !!(actS && planS && actS > planS);
-    // in ritardo: non ancora iniziata ma la data di inizio pianificata è già passata
-    const isOverdue = !!((!actS) && planS && today > planS);
-    if (isLate || isOverdue) late++;
-  });
-  document.getElementById('stat-total').textContent = total;
-  document.getElementById('stat-late').textContent  = late;
-  document.getElementById('stat-wip').textContent   = wip;
-}
-
-// ── Tooltip show ──────────────────────────────────────────────────────────
-function showTip(taskData, clientX, clientY) {
-  const tipEl = document.getElementById('gantt-tip');
-  tipEl.innerHTML = buildTipHtml(taskData);
-  tipEl.style.display = 'block';
-  tipEl.style.animation = 'none'; tipEl.offsetHeight; tipEl.style.animation = '';
-  const tipW = 308, tipH = tipEl.offsetHeight || 280;
-  let left = clientX + 16;
-  if (left + tipW + 10 > window.innerWidth) left = clientX - tipW - 10;
-  let top = clientY - 20;
-  if (top + tipH + 10 > window.innerHeight) top = window.innerHeight - tipH - 16;
-  tipEl.style.left = left + 'px'; tipEl.style.top = top + 'px';
-}
-
-async function _loadTipProblems(ormId) {
-  const tipEl = document.getElementById('gantt-tip');
-  try {
-    const resp = await fetch(`/api/attivita/${ormId}/problemi/`);
-    if (!resp.ok) return;
-    const data = await resp.json();
-    const placeholder = document.getElementById('tip-problems-placeholder');
-    if (!placeholder) return;  // tooltip was closed or re-used
-    const problemi = data.problemi || [];
-    if (!problemi.length) { placeholder.remove(); return; }
-    const open     = problemi.filter(p => !p.risolto);
-    const resolved = problemi.filter(p =>  p.risolto);
-    let html = '<div class="tip-divider"></div><div class="tip-problems">';
-    if (open.length)
-      html += `<div class="tip-prob-open">⚠ ${open.length} probl${open.length === 1 ? 'ema' : 'emi'} aperto/i</div>`;
-    resolved.forEach(p => {
-      if (p.note_risoluzione)
-        html += `<div class="tip-prob-note">✓ ${p.note_risoluzione.length > 60 ? p.note_risoluzione.slice(0, 60) + '…' : p.note_risoluzione}</div>`;
-    });
-    html += '</div>';
-    placeholder.outerHTML = html;
-  } catch (_) {
-    const ph = document.getElementById('tip-problems-placeholder');
-    if (ph) ph.remove();
-  }
-}
-
-// ── CSRF helper ───────────────────────────────────────────────────────────
-function getCookie(name) {
-  const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
-  return m ? m.pop() : '';
-}
-
-// ── Deadline editor ───────────────────────────────────────────────────────
-function openDeadlineEditor(commessa, cx, cy) {
-  const pop = document.getElementById('dl-popover');
-  document.getElementById('dl-commessa-name').textContent = commessa;
-  document.getElementById('dl-input').value = _deadlines[commessa] || '';
-  pop.dataset.commessa = commessa;
-  const W = 240, H = 120;
-  const left = Math.min(cx + 8, window.innerWidth  - W - 12);
-  const top  = Math.min(cy + 8, window.innerHeight - H - 12);
-  pop.style.left = left + 'px'; pop.style.top = top + 'px';
-  pop.removeAttribute('hidden');
-  document.getElementById('dl-input').focus();
-}
-
-function saveDeadline() {
-  const pop      = document.getElementById('dl-popover');
-  const commessa = pop.dataset.commessa;
-  const deadline = document.getElementById('dl-input').value || null;
-  fetch('/api/commesse/deadline/', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
-    body: JSON.stringify({commessa, deadline}),
-  }).then(r => r.json()).then(() => {
-    if (deadline) _deadlines[commessa] = deadline;
-    else delete _deadlines[commessa];
-    closeDeadlineEditor();
-    render(_tasks, _view);
-  });
-}
-
-function closeDeadlineEditor() {
-  document.getElementById('dl-popover').setAttribute('hidden', '');
-}
-
-// ── Global keyboard shortcuts ─────────────────────────────────────────────
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') {
-    closeDeadlineEditor();
-    document.getElementById('gantt-tip').style.display = 'none';
-  }
-  // Arrow keys navigate the Gantt (skip if focus is on an input)
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-  if (e.key === 'ArrowLeft') {
-    _offset -= (_view === 'year') ? 1 : offsetStep(_view);
-    render(_tasks, _view);
-  } else if (e.key === 'ArrowRight') {
-    _offset += (_view === 'year') ? 1 : offsetStep(_view);
-    render(_tasks, _view);
-  }
+const _homeGantt = new GanttChart({
+  prefix: '',
+  enableStats: true,
+  enableDeadlineEditor: true,
+  enableWarningNav: true,
 });
-
-// ── Click outside gantt-tip closes it ────────────────────────────────────
-document.addEventListener('click', e => {
-  const tip = document.getElementById('gantt-tip');
-  if (tip.style.display === 'none') return;
-  if (!tip.contains(e.target) && !e.target.closest('[data-task]')) {
-    tip.style.display = 'none';
-  }
-});
-
-// ── Scroll sync ───────────────────────────────────────────────────────────
-document.getElementById('bars-scroll').addEventListener('scroll', () => {
-  document.getElementById('axis-scroll').scrollLeft =
-    document.getElementById('bars-scroll').scrollLeft;
-}, {passive: true});
-
-// ── Toggle buttons ────────────────────────────────────────────────────────
-document.querySelectorAll('.tbtn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tbtn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    _view   = btn.dataset.view;
-    _offset = 0;          // reset to current period when switching view
-    render(_tasks, _view);
-  });
-});
-
-// ── Navigation buttons ────────────────────────────────────────────────────
-document.getElementById('nav-prev').addEventListener('click', () => {
-  _offset -= (_view === 'year') ? 1 : offsetStep(_view);
-  render(_tasks, _view);
-});
-document.getElementById('nav-next').addEventListener('click', () => {
-  _offset += (_view === 'year') ? 1 : offsetStep(_view);
-  render(_tasks, _view);
-});
-document.getElementById('nav-today').addEventListener('click', () => {
-  if (_offset === 0) return;
-  _offset = 0;
-  render(_tasks, _view);
-});
-
-// ── Load Gantt data ───────────────────────────────────────────────────────
-fetch('/api/gantt/', {cache: 'no-store'})
-  .then(r => r.json())
-  .then(({tasks, deadlines}) => {
-    _tasks     = tasks     || [];
-    _deadlines = deadlines || {};
-    updateStats(_tasks);
-    render(_tasks, _view);
-  });
-
-window.addEventListener('resize', () => render(_tasks, _view));
+_homeGantt.bindIndexPage();
+_homeGantt.bindControls();
+_homeGantt.loadFromUrl('/api/gantt/');
 </script>
 {% endblock %}

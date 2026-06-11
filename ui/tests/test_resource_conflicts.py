@@ -6,7 +6,7 @@ from datetime import date
 from django.contrib.auth.models import User
 from django.test import Client, RequestFactory, TestCase
 
-from ui.models import Attivita, MppSyncQueue, RisorsaAttivita
+from ui.models import Attivita, Job, MppSyncQueue, RisorsaAttivita
 from ui.services.resource_conflicts import (
     ResourceAssignment,
     ResourceConflictError,
@@ -215,6 +215,7 @@ class ApiSalvaAttivitaConflictTest(TestCase):
         self.client.force_login(self.user)
         self.existing = _make_activity("X001", 1, "2026-06-01", "2026-06-10")
         _book(self.existing, "testa", "t1")
+        Job.objects.create(commessa="Y001")
 
     def _post(self, payload: dict):
         """POST a JSON body to the wizard save endpoint."""

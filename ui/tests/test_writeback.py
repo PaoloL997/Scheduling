@@ -106,6 +106,50 @@ class ApplyAddTaskTests(TestCase):
         task_arg = wrapper.add_task.call_args[0][0]
         self.assertEqual(task_arg.name, "25033_01_saldatura")
 
+    def test_add_task_bore_testa_fields_propagated(self):
+        """Bore and testa fields are passed through to the Task passed to add_task."""
+        wrapper = MagicMock()
+        payload = {
+            "commessa": "25033",
+            "item": 1,
+            "activity": "saldatura",
+            "data_inizio": "2025-01-01",
+            "data_fine": "2025-02-01",
+            "stabilimento": "Stab A",
+            "responsabile": "Mario",
+            "resources": [],
+            "modello_testa": "ModelX",
+            "bore_min": 10.5,
+            "bore_mid": 11.0,
+            "bore_max": 11.5,
+            "tube_pitch": 25.0,
+        }
+        _apply_add_task(wrapper, payload)
+        task_arg = wrapper.add_task.call_args[0][0]
+        self.assertEqual(task_arg.modello_testa, "ModelX")
+        self.assertEqual(task_arg.bore_min, 10.5)
+        self.assertEqual(task_arg.bore_mid, 11.0)
+        self.assertEqual(task_arg.bore_max, 11.5)
+        self.assertEqual(task_arg.tube_pitch, 25.0)
+
+    def test_add_task_bore_testa_absent_when_not_in_payload(self):
+        """bore/testa fields default to None when absent from payload."""
+        wrapper = MagicMock()
+        payload = {
+            "commessa": "25033",
+            "item": 1,
+            "activity": "saldatura",
+            "data_inizio": "2025-01-01",
+            "data_fine": "2025-02-01",
+        }
+        _apply_add_task(wrapper, payload)
+        task_arg = wrapper.add_task.call_args[0][0]
+        self.assertIsNone(task_arg.modello_testa)
+        self.assertIsNone(task_arg.bore_min)
+        self.assertIsNone(task_arg.bore_mid)
+        self.assertIsNone(task_arg.bore_max)
+        self.assertIsNone(task_arg.tube_pitch)
+
     def test_synced_to_mpp_updated(self):
         """``Attivita.synced_to_mpp`` is set to True after add."""
         wrapper = MagicMock()
@@ -154,6 +198,8 @@ class ApplyUpdateTaskTests(TestCase):
             new_name=None,
             start=date(2025, 3, 1),
             end=date(2025, 4, 1),
+            actual_start=None,
+            actual_end=None,
             plant="Stab B",
             owner="Luigi",
         )

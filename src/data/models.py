@@ -37,6 +37,17 @@ class Task(BaseModel):
     resources: list[str] = Field(
         default_factory=list, description="Names of assigned resources"
     )
+    modello_testa: Optional[str] = Field(None, description="Text3 — testa model name")
+    bore_min: Optional[float] = Field(
+        None, description="Number1 — minimum bore diameter"
+    )
+    bore_mid: Optional[float] = Field(None, description="Number2 — mean bore diameter")
+    bore_max: Optional[float] = Field(
+        None, description="Number3 — maximum bore diameter"
+    )
+    tube_pitch: Optional[float] = Field(
+        None, description="Number4 — tube pitch (distanza interasse)"
+    )
 
     @field_validator("name")
     @classmethod

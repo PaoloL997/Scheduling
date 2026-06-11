@@ -4,7 +4,7 @@ from django import forms
 
 
 class AttivitaBaseForm(forms.Form):
-    """Step 1 — basic job metadata: plant, responsible, cost and penalty.
+    """Step 1 — basic job metadata: plant and responsible.
 
     ``stabilimento`` and ``responsabile`` are free-text choice fields whose
     options are populated dynamically from the imported ``database.db`` via
@@ -19,20 +19,6 @@ class AttivitaBaseForm(forms.Form):
     responsabile = forms.ChoiceField(
         label="Responsabile",
         choices=[],
-    )
-    costo = forms.DecimalField(
-        label="Totale commessa (€)",
-        required=False,
-        max_digits=12,
-        decimal_places=2,
-        widget=forms.NumberInput(attrs={"step": "0.01", "placeholder": "Es. 15000.00"}),
-    )
-    penale_percentuale = forms.DecimalField(
-        label="Penalità (%)",
-        required=False,
-        max_digits=5,
-        decimal_places=2,
-        widget=forms.NumberInput(attrs={"step": "0.01", "placeholder": "Es. 5.00"}),
     )
 
     def __init__(
