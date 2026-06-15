@@ -147,6 +147,112 @@ class GanttResultsPageTest(TestCase):
             )
         self.assertIn("ok", proc.stdout)
 
+    def test_gantt_badges_follow_latest_end_rule(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("Node.js not available")
+        script = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "gantt_badge_anchor_rules_test.mjs"
+        )
+        if not script.is_file():
+            self.fail(f"Missing gantt test script: {script}")
+        root = Path(__file__).resolve().parents[2]
+        if not (root / "node_modules" / "jsdom").is_dir():
+            self.skipTest("Run `npm install --no-save jsdom` to enable Gantt JS tests")
+        proc = subprocess.run(
+            ["node", str(script)],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            check=False,
+        )
+        if proc.returncode != 0:
+            self.fail(
+                "gantt_badge_anchor_rules_test.mjs failed:\n"
+                + (proc.stderr or proc.stdout or "unknown error")
+            )
+        self.assertIn("ok", proc.stdout)
+
+    def test_gantt_badges_anchor_after_in_progress_actual_window(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("Node.js not available")
+        script = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "gantt_badge_inprogress_test.mjs"
+        )
+        if not script.is_file():
+            self.fail(f"Missing gantt test script: {script}")
+        root = Path(__file__).resolve().parents[2]
+        if not (root / "node_modules" / "jsdom").is_dir():
+            self.skipTest("Run `npm install --no-save jsdom` to enable Gantt JS tests")
+        proc = subprocess.run(
+            ["node", str(script)],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            check=False,
+        )
+        if proc.returncode != 0:
+            self.fail(
+                "gantt_badge_inprogress_test.mjs failed:\n"
+                + (proc.stderr or proc.stdout or "unknown error")
+            )
+        self.assertIn("ok", proc.stdout)
+
+    def test_gantt_badges_anchor_after_actual_finish(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("Node.js not available")
+        script = (
+            Path(__file__).resolve().parent / "fixtures" / "gantt_badge_anchor_test.mjs"
+        )
+        if not script.is_file():
+            self.fail(f"Missing gantt test script: {script}")
+        root = Path(__file__).resolve().parents[2]
+        if not (root / "node_modules" / "jsdom").is_dir():
+            self.skipTest("Run `npm install --no-save jsdom` to enable Gantt JS tests")
+        proc = subprocess.run(
+            ["node", str(script)],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            check=False,
+        )
+        if proc.returncode != 0:
+            self.fail(
+                "gantt_badge_anchor_test.mjs failed:\n"
+                + (proc.stderr or proc.stdout or "unknown error")
+            )
+        self.assertIn("ok", proc.stdout)
+
+    def test_gantt_badges_anchor_after_completed_early(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("Node.js not available")
+        script = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "gantt_badge_completed_test.mjs"
+        )
+        if not script.is_file():
+            self.fail(f"Missing gantt test script: {script}")
+        root = Path(__file__).resolve().parents[2]
+        if not (root / "node_modules" / "jsdom").is_dir():
+            self.skipTest("Run `npm install --no-save jsdom` to enable Gantt JS tests")
+        proc = subprocess.run(
+            ["node", str(script)],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            check=False,
+        )
+        if proc.returncode != 0:
+            self.fail(
+                "gantt_badge_completed_test.mjs failed:\n"
+                + (proc.stderr or proc.stdout or "unknown error")
+            )
+        self.assertIn("ok", proc.stdout)
+
     def test_gantt_width_stable_with_scrollbar(self) -> None:
         if not shutil.which("node"):
             self.skipTest("Node.js not available")

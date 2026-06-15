@@ -470,6 +470,27 @@
       return { start: s, finish: f };
     }
 
+    _executionEndDate(row, planS, planF) {
+      if (!row.actual_start) return null;
+      const actS = parseDate(row.actual_start);
+      if (row.actual_finish) return parseDate(row.actual_finish);
+      return new Date(actS.getTime() + (planF - planS));
+    }
+
+    _badgeAnchorX(plannedEndX, executionEnd, dateToX, totalW) {
+      // Badge always after the later of planned finish and actual/estimated finish.
+      const TICK_W = 3;
+      const endXraw = dateToX(executionEnd);
+      let executionEndX = Math.min(Math.max(endXraw, 0), totalW);
+      if (endXraw >= 0 && endXraw - TICK_W <= totalW) {
+        executionEndX = Math.max(
+          executionEndX,
+          Math.min(endXraw + Math.ceil(TICK_W / 2), totalW)
+        );
+      }
+      return Math.max(plannedEndX, executionEndX);
+    }
+
     _drawCompareBar(barsSvg, opts) {
       const {
         taskData, variant, barY, boxX1, boxW, colour, changed, theme,
@@ -952,11 +973,12 @@
           rect.style.cursor = 'pointer';
           barsSvg.appendChild(rect);
 
+          const plannedEndX = boxX1 + boxW;
+          let badgeAnchorX = plannedEndX;
           if (!self.simplified && isStarted) {
-            const durMs = planF - planS;
+            const actEnd = self._executionEndDate(row, planS, planF);
+            badgeAnchorX = self._badgeAnchorX(plannedEndX, actEnd, dateToX, totalW);
             const actS = parseDate(row.actual_start);
-            const actF = row.actual_finish ? parseDate(row.actual_finish) : null;
-            const actEnd = actF || new Date(actS.getTime() + durMs);
             const TAIL_H = 3, TICK_H = BAR_H + 6, TICK_W = 3;
             const actX1raw = dateToX(actS);
             const actX2raw = dateToX(actEnd);
@@ -1013,7 +1035,7 @@
               if (isStarted) badges.push({ text: 'IN LAVORAZIONE', color: SLATE });
               else badges.push({ text: isOverdue ? 'DA INIZIARE' : 'PIANIFICATA', color: SLATE });
             }
-            let bx = Math.max(boxX2, 0) + BADGE_PAD;
+            let bx = Math.max(badgeAnchorX, 0) + BADGE_PAD;
             badges.forEach(({ text, color }) => {
               const bw = Math.ceil(text.length * charW) + 14;
               if (bx + bw > totalW + 100) return;
