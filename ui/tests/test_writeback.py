@@ -198,11 +198,23 @@ class ApplyUpdateTaskTests(TestCase):
             new_name=None,
             start=date(2025, 3, 1),
             end=date(2025, 4, 1),
-            actual_start=None,
-            actual_end=None,
             plant="Stab B",
             owner="Luigi",
         )
+
+    def test_clears_actual_finish_when_payload_sets_null(self):
+        """``actual_finish: null`` clears Finish1 in MS Project."""
+        wrapper = self._wrapper_with("25033_01_qualifica")
+        payload = {
+            "commessa": "25033",
+            "item": 1,
+            "activity": "qualifica",
+            "actual_finish": None,
+        }
+        _apply_update_task(wrapper, payload)
+        kwargs = wrapper.update_task.call_args[1]
+        self.assertIsNone(kwargs["actual_end"])
+        self.assertNotIn("actual_start", kwargs)
 
     def test_renames_legacy_task_to_canonical(self):
         """When the task exists only under the legacy name it is renamed."""

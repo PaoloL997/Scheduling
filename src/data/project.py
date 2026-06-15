@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 # MS Project sentinel date used for "not set" optional date fields.
 _MSP_SENTINEL_YEAR = 1990
+_MSP_CLEAR_DATE = date(1989, 1, 1)
+_UNSET = object()
 
 # COM HRESULT for "server process could not be started" (0x80080005).
 _CO_E_SERVER_EXEC_FAILURE = -2146959355
@@ -221,8 +223,8 @@ class Project:
         start: date | None = None,
         end: date | None = None,
         predecessors: str | None = None,
-        actual_start: date | None = None,
-        actual_end: date | None = None,
+        actual_start: date | None = _UNSET,
+        actual_end: date | None = _UNSET,
         plant: str | None = None,
         owner: str | None = None,
         modello_testa: str | None = None,
@@ -242,8 +244,10 @@ class Project:
             start: New start date.
             end: New end date.
             predecessors: New predecessors string (e.g. ``'1,2FS+5d'``).
-            actual_start: New actual start date (Start1).
-            actual_end: New actual end date (Finish1).
+            actual_start: New actual start date (Start1), or ``None`` to clear.
+                Omit (default) to leave the field unchanged.
+            actual_end: New actual end date (Finish1), or ``None`` to clear.
+                Omit (default) to leave the field unchanged.
             plant: New plant name (Text1).
             owner: New responsible person (Text2).
             modello_testa: New testa model name (Text3).
@@ -264,10 +268,18 @@ class Project:
             t.Finish = _to_msp_date(end)
         if predecessors is not None:
             t.Predecessors = predecessors
-        if actual_start is not None:
-            t.Start1 = _to_msp_date(actual_start)
-        if actual_end is not None:
-            t.Finish1 = _to_msp_date(actual_end)
+        if actual_start is not _UNSET:
+            t.Start1 = (
+                _to_msp_date(actual_start)
+                if actual_start is not None
+                else _to_msp_date(_MSP_CLEAR_DATE)
+            )
+        if actual_end is not _UNSET:
+            t.Finish1 = (
+                _to_msp_date(actual_end)
+                if actual_end is not None
+                else _to_msp_date(_MSP_CLEAR_DATE)
+            )
         if plant is not None:
             t.Text1 = plant
         if owner is not None:

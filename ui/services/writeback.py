@@ -289,16 +289,6 @@ def _apply_update_task(project_wrapper, payload: dict) -> None:
 
     start = date.fromisoformat(payload["start"]) if payload.get("start") else None
     finish = date.fromisoformat(payload["finish"]) if payload.get("finish") else None
-    actual_start = (
-        date.fromisoformat(payload["actual_start"])
-        if payload.get("actual_start")
-        else None
-    )
-    actual_finish = (
-        date.fromisoformat(payload["actual_finish"])
-        if payload.get("actual_finish")
-        else None
-    )
     plant = payload.get("plant")
     owner = payload.get("responsible")
 
@@ -306,16 +296,27 @@ def _apply_update_task(project_wrapper, payload: dict) -> None:
     canonical_name = _task_mpp_name(commessa, item, activity)
     rename_to = canonical_name if current_name != canonical_name else None
 
-    project_wrapper.update_task(
-        current_name,
-        new_name=rename_to,
-        start=start,
-        end=finish,
-        actual_start=actual_start,
-        actual_end=actual_finish,
-        plant=plant,
-        owner=owner,
-    )
+    update_kwargs = {
+        "new_name": rename_to,
+        "start": start,
+        "end": finish,
+        "plant": plant,
+        "owner": owner,
+    }
+    if "actual_start" in payload:
+        update_kwargs["actual_start"] = (
+            date.fromisoformat(payload["actual_start"])
+            if payload.get("actual_start")
+            else None
+        )
+    if "actual_finish" in payload:
+        update_kwargs["actual_end"] = (
+            date.fromisoformat(payload["actual_finish"])
+            if payload.get("actual_finish")
+            else None
+        )
+
+    project_wrapper.update_task(current_name, **update_kwargs)
     logger.debug("Task aggiornato nel .mpp: %s → %s", current_name, canonical_name)
 
 

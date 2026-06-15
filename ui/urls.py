@@ -4,7 +4,14 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path
 
-from ui import views, views_attivita, views_auth, views_import, views_ottimizzazione
+from ui import (
+    views,
+    views_attivita,
+    views_auth,
+    views_bridge,
+    views_import,
+    views_ottimizzazione,
+)
 
 urlpatterns = [
     path("", views.index, name="index"),
@@ -51,6 +58,142 @@ urlpatterns = [
         name="api_ottimizzazione_accetta",
     ),
     path("api/status/", views.api_status, name="api_status"),
+    path(
+        "api/bridge/auth/login/",
+        views_bridge.api_bridge_auth_login,
+        name="api_bridge_auth_login",
+    ),
+    path(
+        "api/bridge/auth/logout/",
+        views_bridge.api_bridge_auth_logout,
+        name="api_bridge_auth_logout",
+    ),
+    path(
+        "api/bridge/auth/me/",
+        views_bridge.api_bridge_auth_me,
+        name="api_bridge_auth_me",
+    ),
+    path(
+        "api/bridge/status/",
+        views_bridge.api_bridge_status,
+        name="api_bridge_status",
+    ),
+    path(
+        "api/bridge/import/",
+        views_bridge.api_bridge_import,
+        name="api_bridge_import",
+    ),
+    path(
+        "api/bridge/dataset/",
+        views_bridge.api_bridge_dataset,
+        name="api_bridge_dataset",
+    ),
+    path(
+        "api/bridge/attivita/",
+        views_bridge.api_bridge_attivita_list,
+        name="api_bridge_attivita_list",
+    ),
+    path(
+        "api/bridge/attivita/create/",
+        views_bridge.api_bridge_attivita_create,
+        name="api_bridge_attivita_create",
+    ),
+    path(
+        "api/bridge/attivita/<int:pk>/",
+        views_bridge.api_bridge_attivita_detail,
+        name="api_bridge_attivita_detail",
+    ),
+    path(
+        "api/bridge/attivita/<int:pk>/update/",
+        views_bridge.api_bridge_attivita_update,
+        name="api_bridge_attivita_update",
+    ),
+    path(
+        "api/bridge/attivita/<int:pk>/delete/",
+        views_bridge.api_bridge_attivita_delete,
+        name="api_bridge_attivita_delete",
+    ),
+    path("api/bridge/jobs/", views_bridge.api_bridge_jobs, name="api_bridge_jobs"),
+    path(
+        "api/bridge/jobs/create/",
+        views_bridge.api_bridge_jobs_create,
+        name="api_bridge_jobs_create",
+    ),
+    path(
+        "api/bridge/jobs/update/",
+        views_bridge.api_bridge_jobs_update,
+        name="api_bridge_jobs_update",
+    ),
+    path(
+        "api/bridge/jobs/delete/",
+        views_bridge.api_bridge_jobs_delete,
+        name="api_bridge_jobs_delete",
+    ),
+    path(
+        "api/bridge/inventario/",
+        views_bridge.api_bridge_inventario,
+        name="api_bridge_inventario",
+    ),
+    path(
+        "api/bridge/inventario/<str:table>/",
+        views_bridge.api_bridge_inventario_create,
+        name="api_bridge_inventario_create",
+    ),
+    path(
+        "api/bridge/inventario/<str:table>/<str:uid>/",
+        views_bridge.api_bridge_inventario_detail,
+        name="api_bridge_inventario_detail",
+    ),
+    path(
+        "api/bridge/stabilimenti/",
+        views_bridge.api_bridge_stabilimenti,
+        name="api_bridge_stabilimenti",
+    ),
+    path(
+        "api/bridge/stabilimenti/create/",
+        views_bridge.api_bridge_stabilimenti_create,
+        name="api_bridge_stabilimenti_create",
+    ),
+    path(
+        "api/bridge/stabilimenti/<int:pk>/",
+        views_bridge.api_bridge_stabilimenti_detail,
+        name="api_bridge_stabilimenti_detail",
+    ),
+    path(
+        "api/bridge/responsabili/",
+        views_bridge.api_bridge_responsabili,
+        name="api_bridge_responsabili",
+    ),
+    path(
+        "api/bridge/responsabili/create/",
+        views_bridge.api_bridge_responsabili_create,
+        name="api_bridge_responsabili_create",
+    ),
+    path(
+        "api/bridge/responsabili/<int:pk>/",
+        views_bridge.api_bridge_responsabili_detail,
+        name="api_bridge_responsabili_detail",
+    ),
+    path(
+        "api/bridge/problemi/",
+        views_bridge.api_bridge_problemi,
+        name="api_bridge_problemi",
+    ),
+    path(
+        "api/bridge/problemi/<int:pk>/risolvi/",
+        views_bridge.api_bridge_problema_risolvi,
+        name="api_bridge_problema_risolvi",
+    ),
+    path(
+        "api/bridge/app-settings/",
+        views_bridge.api_bridge_app_settings,
+        name="api_bridge_app_settings",
+    ),
+    path(
+        "api/bridge/config-testa/",
+        views_bridge.api_bridge_config_testa,
+        name="api_bridge_config_testa",
+    ),
     path("api/heartbeat/", views.api_heartbeat, name="api_heartbeat"),
     path(
         "api/inventario/import-excel/",

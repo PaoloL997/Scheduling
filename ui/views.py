@@ -11,6 +11,12 @@ from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from ui.services.bridge_write import (
+    BridgeWriteError,
+    delete_attivita,
+    reconcile_delete,
+    update_attivita,
+)
 from ui.services.importer import ImportStatus, get_error_detail, get_status
 from ui.services.identifiers import parse_job_id
 from ui.services.resource_display import (
@@ -680,8 +686,6 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
     Returns:
         JsonResponse: 200 ``{"ok": true}`` on success; 400/404/500 on error.
     """
-    import datetime
-
     try:
         data = json.loads(request.body)
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -692,171 +696,17 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"ok": False, "error": "orm_id mancante."}, status=400)
 
     try:
-        from ui.models import Attivita, MppSyncQueue
-
-        a = Attivita.objects.get(pk=orm_id)
-
-        # Capture original identity fields for MppSyncQueue write-back.
-        old_commessa = a.commessa
-        old_item = a.item
-        old_activity = a.activity
-
-        def _parse_date(val):
-            """Parse an ISO date string or return None on failure."""
-            if val:
-                try:
-                    return datetime.date.fromisoformat(val)
-                except ValueError:
-                    pass
-            return None
-
-        # Identity field changes (commessa, item, activity)
-        if "commessa" in data:
-            new_commessa = (data["commessa"] or "").strip()
-            if new_commessa:
-                a.commessa = new_commessa
-        if "item" in data:
-            try:
-                a.item = int(data["item"])
-            except (ValueError, TypeError):
-                return JsonResponse(
-                    {
-                        "ok": False,
-                        "error": "Il valore di item non è un numero intero valido.",
-                    },
-                    status=400,
-                )
-        if "activity" in data:
-            a.activity = (data["activity"] or "").strip()
-
-        # Uniqueness check after applying identity changes.
-        if (
-            a.commessa != old_commessa
-            or a.item != old_item
-            or a.activity != old_activity
-        ):
-            if (
-                Attivita.objects.filter(
-                    commessa=a.commessa, item=a.item, activity=a.activity
-                )
-                .exclude(pk=a.pk)
-                .exists()
-            ):
-                return JsonResponse(
-                    {
-                        "ok": False,
-                        "error": (
-                            "Esiste già un'attività con questa combinazione "
-                            "commessa/item/attività."
-                        ),
-                    },
-                    status=409,
-                )
-
-        if "start" in data:
-            a.data_inizio = _parse_date(data["start"])
-        if "finish" in data:
-            a.data_fine = _parse_date(data["finish"])
-        if "actual_start" in data:
-            a.actual_start = _parse_date(data["actual_start"])
-        if "actual_finish" in data:
-            a.actual_finish = _parse_date(data["actual_finish"])
-        if "plant" in data:
-            a.stabilimento = data["plant"] or ""
-        if "responsible" in data:
-            a.responsabile = data["responsible"] or ""
-        if "predecessors" in data:
-            predecessor_ids = [
-                str(v).strip() for v in data["predecessors"] if str(v).strip()
-            ]
-            if predecessor_ids:
-                valid = set(
-                    Attivita.objects.filter(commessa=a.commessa, item=a.item)
-                    .exclude(pk=a.pk)
-                    .values_list("activity_id", flat=True)
-                )
-                invalid = [p for p in predecessor_ids if p not in valid]
-                if invalid:
-                    return JsonResponse(
-                        {
-                            "ok": False,
-                            "error": f"Predecessor non valido: {', '.join(invalid)}",
-                        },
-                        status=400,
-                    )
-            a.predecessors = ", ".join(predecessor_ids) if predecessor_ids else None
-
-        if ("start" in data or "finish" in data) and a.data_inizio and a.data_fine:
-            from ui.models import RisorsaAttivita
-            from ui.services.resource_conflicts import (
-                ResourceConflictError,
-                validate_no_conflicts,
-            )
-
-            existing_pairs = list(
-                RisorsaAttivita.objects.filter(attivita_id=a.pk).values_list(
-                    "tipo", "risorsa_id"
-                )
-            )
-            try:
-                validate_no_conflicts(
-                    existing_pairs,
-                    a.data_inizio,
-                    a.data_fine,
-                    exclude_activity_id=a.pk,
-                )
-            except ResourceConflictError as exc:
-                return JsonResponse(
-                    {
-                        "ok": False,
-                        "error": "Conflitto risorse",
-                        "conflicts": exc.conflicts,
-                    },
-                    status=409,
-                )
-
-        a.save()
-
-        MppSyncQueue.objects.create(
-            operation="update_task",
-            payload_json=json.dumps(
-                {
-                    "attivita_id": orm_id,
-                    # New identity (may have changed).
-                    "commessa": a.commessa,
-                    "item": a.item,
-                    "activity": a.activity,
-                    # Old identity so write-back can locate the MPP task by name.
-                    "old_commessa": old_commessa,
-                    "old_item": old_item,
-                    "old_activity": old_activity,
-                    "start": a.data_inizio.isoformat() if a.data_inizio else None,
-                    "finish": a.data_fine.isoformat() if a.data_fine else None,
-                    "actual_start": a.actual_start.isoformat()
-                    if a.actual_start
-                    else None,
-                    "actual_finish": a.actual_finish.isoformat()
-                    if a.actual_finish
-                    else None,
-                    "plant": a.stabilimento or None,
-                    "responsible": a.responsabile or None,
-                }
-            ),
-        )
-    except Attivita.DoesNotExist:
-        return JsonResponse({"ok": False, "error": "Attività non trovata."}, status=404)
+        result = update_attivita(int(orm_id), data)
+    except BridgeWriteError as exc:
+        payload = {"ok": False, "error": exc.message}
+        if exc.conflicts is not None:
+            payload["conflicts"] = exc.conflicts
+        return JsonResponse(payload, status=exc.status_code)
     except Exception as exc:
         logger.error("Errore aggiornamento Attivita pk=%s: %s", orm_id, exc)
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
 
-    return JsonResponse(
-        {
-            "ok": True,
-            "item": a.item,
-            "job_id": a.job_id,
-            "activity_id": a.activity_id,
-        }
-    )
+    return JsonResponse({"ok": True, **result})
 
 
 @login_required
@@ -1168,66 +1018,7 @@ def api_app_settings(request: HttpRequest) -> JsonResponse:
     )
 
 
-# ---------------------------------------------------------------------------
-# Queue reconciliation helpers
-# ---------------------------------------------------------------------------
-
-
-def _cancel_pending_task_ops(attivita_id: int) -> None:
-    """Remove ``add_task`` and ``update_task`` queue entries for an activity.
-
-    Called when an activity is deleted before its pending write-back has been
-    applied to the ``.mpp`` file.  Prevents ghost tasks from being created or
-    updated at the next logout.
-
-    Args:
-        attivita_id: Primary key of the :class:`~ui.models.Attivita` whose
-            pending queue entries should be removed.
-    """
-    from ui.models import MppSyncQueue
-
-    for entry in MppSyncQueue.objects.filter(operation__in=["add_task", "update_task"]):
-        try:
-            payload = json.loads(entry.payload_json)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if payload.get("attivita_id") == attivita_id:
-            entry.delete()
-
-
-def _reconcile_delete(attivita) -> None:
-    """Reconcile :class:`~ui.models.MppSyncQueue` when an activity is about to be deleted.
-
-    Applies the following rules based on the activity's current sync state:
-
-    * ``synced_to_mpp=True``: the task exists in the ``.mpp`` file.  Cancel any
-      pending ``add_task`` / ``update_task`` entries and enqueue ``delete_task``
-      so the task is removed at the next logout.
-    * ``synced_to_mpp=False``: the task has never been written to the ``.mpp``
-      file.  Cancel any pending ``add_task`` / ``update_task`` entries so no
-      ghost task is created at logout.  No ``delete_task`` is enqueued.
-
-    Must be called **before** the activity is deleted from the database, and
-    within the same ``transaction.atomic()`` block as the deletion.
-
-    Args:
-        attivita: The :class:`~ui.models.Attivita` instance about to be deleted.
-    """
-    from ui.models import MppSyncQueue
-
-    _cancel_pending_task_ops(attivita.pk)
-
-    if attivita.synced_to_mpp:
-        MppSyncQueue.objects.create(
-            operation="delete_task",
-            payload_json=json.dumps(
-                {
-                    "commessa": attivita.commessa,
-                    "item": attivita.item,
-                    "activity": attivita.activity,
-                }
-            ),
-        )
+_reconcile_delete = reconcile_delete
 
 
 @csrf_exempt
@@ -1265,14 +1056,9 @@ def api_attivita_delete(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"ok": False, "error": "orm_id mancante."}, status=400)
 
     try:
-        from ui.models import Attivita
-
-        a = Attivita.objects.get(pk=orm_id)
-        with transaction.atomic():
-            _reconcile_delete(a)
-            a.delete()
-    except Attivita.DoesNotExist:
-        return JsonResponse({"ok": False, "error": "Attività non trovata."}, status=404)
+        delete_attivita(int(orm_id))
+    except BridgeWriteError as exc:
+        return JsonResponse({"ok": False, "error": exc.message}, status=exc.status_code)
     except Exception as exc:
         logger.error("Errore eliminazione Attivita pk=%s: %s", orm_id, exc)
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)

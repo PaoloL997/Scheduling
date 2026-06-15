@@ -1,0 +1,169 @@
+"""ORM → JSON serializers for the tablet bridge API."""
+
+from __future__ import annotations
+
+from ui.models import (
+    AppSettings,
+    Attivita,
+    ConfigurazioneTesta,
+    GeneratoreItem,
+    MandrinoItem,
+    MascheraItem,
+    ProblemaAttivita,
+    Responsabile,
+    Stabilimento,
+    TastatoreItem,
+    TestaItem,
+)
+from ui.views import _attivita_to_task_dict, _fetch_jobs
+
+
+def serialize_attivita_list() -> list[dict]:
+    """Return all activities with prefetched relations."""
+    qs = Attivita.objects.prefetch_related("risorse", "problemi").order_by(
+        "commessa", "item", "activity"
+    )
+    return [_attivita_to_task_dict(a) for a in qs]
+
+
+def serialize_attivita(pk: int) -> dict | None:
+    """Return a single activity dict, or ``None`` if not found."""
+    try:
+        att = Attivita.objects.prefetch_related("risorse", "problemi").get(pk=pk)
+    except Attivita.DoesNotExist:
+        return None
+    return _attivita_to_task_dict(att)
+
+
+def serialize_jobs() -> list[dict]:
+    """Return all commesse with activity counts."""
+    return _fetch_jobs()
+
+
+def _inventory_rows(model, fields: list[str]) -> list[dict]:
+    return [dict(row) for row in model.objects.order_by("uid").values(*fields)]
+
+
+def serialize_inventario() -> dict[str, list[dict]]:
+    """Return all five inventory tables in one payload."""
+    return {
+        "Testa": _inventory_rows(TestaItem, ["uid", "model", "plant", "notes"]),
+        "Mandrino": _inventory_rows(
+            MandrinoItem, ["uid", "diameter", "plant", "notes"]
+        ),
+        "Tastatore": _inventory_rows(
+            TastatoreItem, ["uid", "diameter", "plant", "notes"]
+        ),
+        "Maschera": _inventory_rows(
+            MascheraItem, ["uid", "pitch", "plant", "center_distance"]
+        ),
+        "Generatore": _inventory_rows(
+            GeneratoreItem, ["uid", "model", "plant", "notes"]
+        ),
+    }
+
+
+def serialize_stabilimenti() -> list[dict]:
+    return list(Stabilimento.objects.order_by("nome").values("id", "nome", "colore"))
+
+
+def serialize_responsabili() -> list[dict]:
+    return list(Responsabile.objects.order_by("nome").values("id", "nome"))
+
+
+def serialize_problemi() -> list[dict]:
+    """Return all problems with activity reference fields."""
+    rows = (
+        ProblemaAttivita.objects.select_related("attivita")
+        .order_by("created_at")
+        .values(
+            "id",
+            "attivita_id",
+            "tipo",
+            "risorsa_tipo",
+            "risorsa_uid",
+            "stabilimento_origine",
+            "descrizione",
+            "risolto",
+            "note_risoluzione",
+            "data_risoluzione",
+            "created_at",
+            "attivita__commessa",
+            "attivita__item",
+            "attivita__activity",
+            "attivita__activity_id",
+            "attivita__stabilimento",
+        )
+    )
+    result = []
+    for row in rows:
+        result.append(
+            {
+                "id": row["id"],
+                "attivita_id": row["attivita_id"],
+                "activity_id": row["attivita__activity_id"],
+                "commessa": row["attivita__commessa"],
+                "item": row["attivita__item"],
+                "activity": row["attivita__activity"],
+                "stabilimento_attivita": row["attivita__stabilimento"] or "",
+                "tipo": row["tipo"],
+                "risorsa_tipo": row["risorsa_tipo"],
+                "risorsa_uid": row["risorsa_uid"],
+                "stabilimento_origine": row["stabilimento_origine"],
+                "descrizione": row["descrizione"],
+                "risolto": row["risolto"],
+                "note_risoluzione": row["note_risoluzione"],
+                "data_risoluzione": row["data_risoluzione"].isoformat()
+                if row["data_risoluzione"]
+                else None,
+                "created_at": row["created_at"].isoformat()
+                if row["created_at"]
+                else None,
+            }
+        )
+    return result
+
+
+def serialize_app_settings() -> dict:
+    obj = AppSettings.load()
+    return {
+        "penale_max": float(obj.penale_max),
+        "solver_time_limit": float(obj.solver_time_limit),
+    }
+
+
+def serialize_config_testa() -> list[dict]:
+    configs = ConfigurazioneTesta.objects.prefetch_related(
+        "generatori_compatibili"
+    ).order_by("modello_testa")
+    result = []
+    for cfg in configs:
+        result.append(
+            {
+                "id": cfg.pk,
+                "modello_testa": cfg.modello_testa,
+                "min_mandrini": cfg.min_mandrini,
+                "min_tastatori": cfg.min_tastatori,
+                "min_maschere": cfg.min_maschere,
+                "min_generatori": cfg.min_generatori,
+                "generatori_compatibili": [
+                    {"id": g.pk, "modello_generatore": g.modello_generatore}
+                    for g in cfg.generatori_compatibili.all()
+                ],
+            }
+        )
+    return result
+
+
+def serialize_dataset() -> dict:
+    """Full dataset snapshot for offline-friendly tablet sync."""
+    return {
+        "attivita": serialize_attivita_list(),
+        "jobs": serialize_jobs(),
+        "inventario": serialize_inventario(),
+        "stabilimenti": serialize_stabilimenti(),
+        "responsabili": serialize_responsabili(),
+        "problemi": serialize_problemi(),
+        "app_settings": serialize_app_settings(),
+        "config_testa": serialize_config_testa(),
+    }
