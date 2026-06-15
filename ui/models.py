@@ -136,6 +136,33 @@ class Responsabile(models.Model):
         return self.nome
 
 
+class UserProfile(models.Model):
+    """Extended profile data for a Django auth user."""
+
+    user = models.OneToOneField(
+        "auth.User",
+        on_delete=models.CASCADE,
+        related_name="profile",
+    )
+    stabilimento = models.ForeignKey(
+        Stabilimento,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="utenti",
+    )
+
+    class Meta:
+        """Table metadata for UserProfile."""
+
+        db_table = "user_profile"
+
+    def __str__(self) -> str:
+        """Return a readable profile identifier."""
+        stab = self.stabilimento.nome if self.stabilimento_id else "—"
+        return f"{self.user.username} ({stab})"
+
+
 class RisorsaAttivita(models.Model):
     """A single inventory resource assigned to an activity.
 

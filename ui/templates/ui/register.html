@@ -23,79 +23,96 @@
 </script>
 
 <div class="auth-page">
-    <div class="auth-card">
-        <div class="auth-logo">
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-                <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-            </svg>
+    <div class="auth-wrapper">
+        <div class="auth-logo-above">
+            <img src="{% static 'img/logo.png' %}" alt="B&amp;R Logo" width="72" height="72">
         </div>
-        <h1 class="auth-title">Crea account</h1>
-        <p class="auth-subtitle">Programmazione Produzione</p>
+        <div class="auth-card">
+            <h1 class="auth-title">Crea account</h1>
+            <p class="auth-subtitle">Programmazione Produzione</p>
 
-        <form method="post" action="{% url 'register' %}" class="auth-form" novalidate>
-            {% csrf_token %}
+            <form method="post" action="{% url 'register' %}" class="auth-form" novalidate>
+                {% csrf_token %}
 
-            <div class="auth-field">
-                <label for="id_first_name">Nome</label>
-                <input type="text" id="id_first_name" name="first_name"
-                       value="{{ form.first_name.value|default:'' }}"
-                       autocomplete="given-name" required autofocus>
-                {% if form.first_name.errors %}
-                <span class="auth-field-error">{{ form.first_name.errors|join:", " }}</span>
+                <div class="auth-field">
+                    <label for="id_first_name">Nome</label>
+                    <input type="text" id="id_first_name" name="first_name"
+                           value="{{ form.first_name.value|default:'' }}"
+                           placeholder="Mario"
+                           autocomplete="given-name" required autofocus>
+                    {% if form.first_name.errors %}
+                    <span class="auth-field-error">{{ form.first_name.errors|join:", " }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="auth-field">
+                    <label for="id_last_name">Cognome</label>
+                    <input type="text" id="id_last_name" name="last_name"
+                           value="{{ form.last_name.value|default:'' }}"
+                           placeholder="Rossi"
+                           autocomplete="family-name" required>
+                    {% if form.last_name.errors %}
+                    <span class="auth-field-error">{{ form.last_name.errors|join:", " }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="auth-field">
+                    <label for="id_username">Username</label>
+                    <input type="text" id="id_username" name="username"
+                           value="{{ form.username.value|default:'' }}"
+                           placeholder="mario.rossi"
+                           autocomplete="username" required>
+                    {% if form.username.errors %}
+                    <span class="auth-field-error">{{ form.username.errors|join:", " }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="auth-field">
+                    <label for="id_email">Email</label>
+                    <input type="email" id="id_email" name="email"
+                           value="{{ form.email.value|default:'' }}"
+                           placeholder="mario@esempio.it"
+                           autocomplete="email" required>
+                    {% if form.email.errors %}
+                    <span class="auth-field-error">{{ form.email.errors|join:", " }}</span>
+                    {% endif %}
+                </div>
+
+                {% if has_stabilimenti %}
+                <div class="auth-field">
+                    <label for="id_stabilimento">Stabilimento</label>
+                    <select id="id_stabilimento" name="stabilimento" autocomplete="organization" required>
+                        {% for val, lbl in form.stabilimento.field.choices %}
+                        <option value="{{ val }}" {% if form.stabilimento.value == val %}selected{% endif %}>{{ lbl }}</option>
+                        {% endfor %}
+                    </select>
+                    {% if form.stabilimento.errors %}
+                    <span class="auth-field-error">{{ form.stabilimento.errors|join:", " }}</span>
+                    {% endif %}
+                </div>
                 {% endif %}
-            </div>
 
-            <div class="auth-field">
-                <label for="id_last_name">Cognome</label>
-                <input type="text" id="id_last_name" name="last_name"
-                       value="{{ form.last_name.value|default:'' }}"
-                       autocomplete="family-name" required>
-                {% if form.last_name.errors %}
-                <span class="auth-field-error">{{ form.last_name.errors|join:", " }}</span>
-                {% endif %}
-            </div>
+                <div class="auth-field">
+                    <label for="id_password1">Password</label>
+                    <input type="password" id="id_password1" name="password1" autocomplete="new-password" required>
+                    {% if form.password1.errors %}
+                    <span class="auth-field-error">{{ form.password1.errors|join:", " }}</span>
+                    {% endif %}
+                </div>
 
-            <div class="auth-field">
-                <label for="id_username">Username</label>
-                <input type="text" id="id_username" name="username"
-                       value="{{ form.username.value|default:'' }}"
-                       autocomplete="username" required>
-                {% if form.username.errors %}
-                <span class="auth-field-error">{{ form.username.errors|join:", " }}</span>
-                {% endif %}
-            </div>
+                <div class="auth-field">
+                    <label for="id_password2">Conferma password</label>
+                    <input type="password" id="id_password2" name="password2" autocomplete="new-password" required>
+                    {% if form.password2.errors %}
+                    <span class="auth-field-error">{{ form.password2.errors|join:", " }}</span>
+                    {% endif %}
+                </div>
 
-            <div class="auth-field">
-                <label for="id_email">Email</label>
-                <input type="email" id="id_email" name="email"
-                       value="{{ form.email.value|default:'' }}"
-                       autocomplete="email" required>
-                {% if form.email.errors %}
-                <span class="auth-field-error">{{ form.email.errors|join:", " }}</span>
-                {% endif %}
-            </div>
+                <button type="submit" class="auth-btn">Registrati</button>
+            </form>
 
-            <div class="auth-field">
-                <label for="id_password1">Password</label>
-                <input type="password" id="id_password1" name="password1" autocomplete="new-password" required>
-                {% if form.password1.errors %}
-                <span class="auth-field-error">{{ form.password1.errors|join:", " }}</span>
-                {% endif %}
-            </div>
-
-            <div class="auth-field">
-                <label for="id_password2">Conferma password</label>
-                <input type="password" id="id_password2" name="password2" autocomplete="new-password" required>
-                {% if form.password2.errors %}
-                <span class="auth-field-error">{{ form.password2.errors|join:", " }}</span>
-                {% endif %}
-            </div>
-
-            <button type="submit" class="auth-btn">Registrati</button>
-        </form>
-
-        <p class="auth-link">Hai già un account? <a href="{% url 'login' %}">Accedi</a></p>
+            <p class="auth-link">Hai già un account? <a href="{% url 'login' %}">Accedi</a></p>
+        </div>
     </div>
 </div>
 

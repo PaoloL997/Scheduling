@@ -26,11 +26,24 @@ from ui.services.bridge_serializers import (
     serialize_stabilimenti,
 )
 from ui.services.bridge_write import BridgeWriteError, delete_attivita, update_attivita
+from ui.views_auth import user_stabilimento_name
 from ui.services.importer import ImportStatus, get_error_detail, get_status
 from ui import views
 from ui import views_attivita
 
 _factory = RequestFactory()
+
+
+def _user_payload(user) -> dict:
+    """Serialize core user fields for bridge auth responses."""
+    return {
+        "id": user.pk,
+        "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "email": user.email,
+        "stabilimento": user_stabilimento_name(user),
+    }
 
 
 def _ok(data=None, *, status: int = 200) -> JsonResponse:
@@ -128,15 +141,7 @@ def api_bridge_auth_login(request: HttpRequest) -> JsonResponse:
         return _err("Username o password non corretti.", status=401)
 
     login(request, user)
-    return _ok(
-        {
-            "id": user.pk,
-            "username": user.username,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "email": user.email,
-        }
-    )
+    return _ok(_user_payload(user))
 
 
 @csrf_exempt
@@ -158,15 +163,7 @@ def api_bridge_auth_logout(request: HttpRequest) -> JsonResponse:
 def api_bridge_auth_me(request: HttpRequest) -> JsonResponse:
     """Return the authenticated user profile."""
     user = request.user
-    return _ok(
-        {
-            "id": user.pk,
-            "username": user.username,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "email": user.email,
-        }
-    )
+    return _ok(_user_payload(user))
 
 
 # ── Status / import ───────────────────────────────────────────────────────────
@@ -375,7 +372,7 @@ def api_bridge_inventario_create(request: HttpRequest, table: str) -> JsonRespon
 
 
 @bridge_write_guard
-@require_http_methods(["PUT", "DELETE"])
+@require_http_methods(["PUT", "PATCH", "DELETE"])
 def api_bridge_inventario_detail(
     request: HttpRequest, table: str, uid: str
 ) -> JsonResponse:
@@ -397,7 +394,7 @@ def api_bridge_inventario_detail(
         _delegate(
             views.api_inventario_detail,
             request,
-            "PUT",
+            request.method,
             f"/api/bridge/inventario/{table}/{uid}/",
             data=parsed,
             table=table,

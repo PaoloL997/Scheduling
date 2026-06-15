@@ -23,7 +23,12 @@ from ui.services.resource_display import (
     format_activity_resources,
     format_activity_resources_html,
 )
-from ui.services.inventory import delete_resource, insert_resource, update_resource
+from ui.services.inventory import (
+    delete_resource,
+    insert_resource,
+    patch_resource,
+    update_resource,
+)
 from ui.models import (
     AppSettings,
     Attivita,
@@ -603,17 +608,22 @@ def api_inventario_add(request: HttpRequest, table: str) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(["PUT", "DELETE"])
+@require_http_methods(["PUT", "PATCH", "DELETE"])
 def api_inventario_detail(request: HttpRequest, table: str, uid: str) -> JsonResponse:
-    """Update (PUT) or delete (DELETE) a resource by its uid.
+    """Update (PUT/PATCH) or delete (DELETE) a resource by its uid.
 
     PUT accepts a JSON body whose keys correspond to the columns of the target
     table.  The ``uid`` field is required; it may differ from the URL ``uid``
-    parameter to support renaming the primary key.
+    parameter to support renaming the primary key.  Omitted fields are stored
+    as ``null``.
+
+    PATCH accepts a JSON body with only the fields to change.  Omitted fields
+    keep their current values.  ``uid`` is optional and can be used to rename
+    the resource.
 
     Response schema (success)::
 
-        {"ok": true, "uid": "<new_uid>"}   # PUT
+        {"ok": true, "uid": "<new_uid>"}   # PUT / PATCH
         {"ok": true}                        # DELETE
 
     Response schema (error)::
@@ -644,12 +654,32 @@ def api_inventario_detail(request: HttpRequest, table: str, uid: str) -> JsonRes
             return JsonResponse({"ok": False, "error": str(exc)}, status=503)
         return JsonResponse({"ok": True})
 
-    # PUT
     try:
         data = json.loads(request.body)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
 
+    if not isinstance(data, dict):
+        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+
+    if request.method == "PATCH":
+        try:
+            new_uid = patch_resource(table, uid, data)
+        except ValueError as exc:
+            msg = str(exc)
+            if "già presente" in msg:
+                status_code = 409
+            elif "non trovato" in msg:
+                status_code = 404
+            else:
+                status_code = 400
+            return JsonResponse({"ok": False, "error": msg}, status=status_code)
+        except RuntimeError as exc:
+            return JsonResponse({"ok": False, "error": str(exc)}, status=503)
+
+        return JsonResponse({"ok": True, "uid": new_uid})
+
+    # PUT
     new_uid = (data.get("uid") or "").strip()
     if not new_uid:
         return JsonResponse(

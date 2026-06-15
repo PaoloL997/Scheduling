@@ -7,12 +7,27 @@ from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 
+from ui.models import Stabilimento, UserProfile
+from ui.services.activity_inventory import get_stabilimenti
+
+
+def user_stabilimento_name(user: User) -> str | None:
+    """Return the configured plant name for a user, if any."""
+    try:
+        profile = user.profile
+    except UserProfile.DoesNotExist:
+        return None
+    if profile.stabilimento_id is None:
+        return None
+    return profile.stabilimento.nome
+
 
 class RegistrationForm(UserCreationForm):
-    """Extended user creation form that collects nome, cognome and email.
+    """Extended user creation form that collects nome, cognome, email and plant.
 
     Inherits password1/password2 validation from :class:`UserCreationForm`
-    and adds first_name, last_name and email as required fields.
+    and adds first_name, last_name, email and stabilimento as required fields
+    when plants are configured in settings.
     """
 
     first_name = forms.CharField(
@@ -35,6 +50,11 @@ class RegistrationForm(UserCreationForm):
             attrs={"placeholder": "mario@esempio.it", "autocomplete": "email"}
         ),
     )
+    stabilimento = forms.ChoiceField(
+        label="Stabilimento",
+        choices=[],
+        widget=forms.Select(attrs={"autocomplete": "organization"}),
+    )
 
     class Meta:
         """Form metadata linking to the built-in User model."""
@@ -45,6 +65,7 @@ class RegistrationForm(UserCreationForm):
             "last_name",
             "username",
             "email",
+            "stabilimento",
             "password1",
             "password2",
         )
@@ -54,8 +75,27 @@ class RegistrationForm(UserCreationForm):
             ),
         }
 
+    def __init__(self, *args, stabilimenti: list[str] | None = None, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        names = stabilimenti if stabilimenti is not None else get_stabilimenti()
+        self.fields["stabilimento"].choices = [("", "Seleziona")] + [
+            (name, name) for name in names
+        ]
+        self.fields["stabilimento"].required = bool(names)
+
+    def clean_stabilimento(self) -> str:
+        """Validate that the selected plant exists in settings."""
+        value = self.cleaned_data.get("stabilimento", "")
+        if not value:
+            if self.fields["stabilimento"].required:
+                raise forms.ValidationError("Seleziona uno stabilimento.")
+            return ""
+        if not Stabilimento.objects.filter(nome=value).exists():
+            raise forms.ValidationError("Stabilimento non valido.")
+        return value
+
     def save(self, commit: bool = True) -> User:
-        """Save the user with first_name, last_name and email populated.
+        """Save the user with profile fields populated.
 
         Args:
             commit (bool): Whether to persist the instance immediately.
@@ -67,8 +107,13 @@ class RegistrationForm(UserCreationForm):
         user.first_name = self.cleaned_data["first_name"]
         user.last_name = self.cleaned_data["last_name"]
         user.email = self.cleaned_data["email"]
+        stabilimento_name = self.cleaned_data.get("stabilimento", "")
         if commit:
             user.save()
+            stabilimento = None
+            if stabilimento_name:
+                stabilimento = Stabilimento.objects.get(nome=stabilimento_name)
+            UserProfile.objects.create(user=user, stabilimento=stabilimento)
         return user
 
 
@@ -87,13 +132,18 @@ def register_view(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
         return redirect("/")
 
-    form = RegistrationForm(request.POST or None)
+    stabilimenti = get_stabilimenti()
+    form = RegistrationForm(request.POST or None, stabilimenti=stabilimenti)
     if request.method == "POST" and form.is_valid():
         user = form.save()
         login(request, user)
         return redirect("/")
 
-    return render(request, "ui/register.html", {"form": form})
+    return render(
+        request,
+        "ui/register.html",
+        {"form": form, "has_stabilimenti": bool(stabilimenti)},
+    )
 
 
 def login_view(request: HttpRequest) -> HttpResponse:

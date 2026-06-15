@@ -1,7 +1,8 @@
 """Inventory persistence service for adding and removing resources.
 
-Provides three public functions — :func:`insert_resource`,
-:func:`update_resource`, :func:`delete_resource` — that operate on the Django
+Provides four public functions — :func:`insert_resource`,
+:func:`update_resource`, :func:`patch_resource`, :func:`delete_resource` —
+that operate on the Django
 ORM inventory models.  After each successful mutation a corresponding entry is
 added to :class:`~ui.models.MppSyncQueue` so the change is written back to the
 ``.mpp`` source file when the last user logs out.
@@ -106,6 +107,59 @@ def insert_resource(table: str, data: dict) -> None:
 
     measure_col = _TABLE_MEASURE_COL.get(table)
     _enqueue_add_resource(table, data, measure_col)
+
+
+def _normalize_field_value(val) -> str | None:
+    """Normalize an inventory field value from API input."""
+    if val is None:
+        return None
+    if isinstance(val, str):
+        return val.strip() or None
+    return str(val).strip() or None
+
+
+def patch_resource(table: str, original_uid: str, data: dict) -> str:
+    """Partially update an existing resource row.
+
+    Only keys present in ``data`` that match allowed columns are written;
+    omitted fields keep their current values.
+
+    Args:
+        table: One of ``Generatore``, ``Mandrino``, ``Maschera``,
+            ``Tastatore``, ``Testa``.
+        original_uid: The current primary-key value of the row to update.
+        data: Dictionary mapping column names to new values.
+
+    Returns:
+        str: The ``uid`` of the row after the update (may differ when renamed).
+
+    Raises:
+        ValueError: When ``table`` is not in the whitelist, when no valid
+            column is supplied, when ``uid`` is empty, when no row with
+            ``original_uid`` exists, or when the new ``uid`` already belongs
+            to a different row.
+    """
+    _validated_table(table)
+    model_class = _get_model(table)
+    columns = _TABLE_COLUMNS[table]
+    updates = {key: _normalize_field_value(data[key]) for key in data if key in columns}
+    if not updates:
+        raise ValueError("Nessun campo valido da aggiornare.")
+
+    if "uid" in updates and not updates["uid"]:
+        raise ValueError("Il campo 'uid' non può essere vuoto.")
+
+    if not model_class.objects.filter(uid=original_uid).exists():
+        raise ValueError(f"uid '{original_uid}' non trovato in {table}.")
+
+    try:
+        model_class.objects.filter(uid=original_uid).update(**updates)
+    except IntegrityError as exc:
+        new_uid = updates.get("uid", original_uid)
+        raise ValueError(f"uid '{new_uid}' già presente in {table}.") from exc
+
+    _enqueue_patch_resource(table, original_uid, updates)
+    return updates.get("uid", original_uid)
 
 
 def update_resource(table: str, original_uid: str, data: dict) -> None:
@@ -214,23 +268,44 @@ def _enqueue_delete_resource(table: str, uid: str) -> None:
 
 def _enqueue_update_resource(table: str, original_uid: str, data: dict) -> None:
     """Add an ``update_resource`` entry to :class:`~ui.models.MppSyncQueue`."""
+    measure_col = _TABLE_MEASURE_COL.get(table)
+    notes_col = _TABLE_NOTES_COL.get(table, "notes")
+    payload: dict = {
+        "table": table,
+        "original_uid": original_uid,
+        "uid": data.get("uid"),
+        "plant": data.get("plant"),
+        "notes": data.get(notes_col),
+    }
+    if measure_col:
+        payload["measure"] = data.get(measure_col)
+    _enqueue_update_resource_payload(payload)
+
+
+def _enqueue_patch_resource(table: str, original_uid: str, patched: dict) -> None:
+    """Add an ``update_resource`` queue entry with only the changed fields."""
+    payload: dict = {"table": table, "original_uid": original_uid}
+    if "uid" in patched:
+        payload["uid"] = patched["uid"]
+    measure_col = _TABLE_MEASURE_COL.get(table)
+    if measure_col and measure_col in patched:
+        payload["measure"] = patched[measure_col]
+    if "plant" in patched:
+        payload["plant"] = patched["plant"]
+    notes_col = _TABLE_NOTES_COL.get(table, "notes")
+    if notes_col in patched:
+        payload["notes"] = patched[notes_col]
+    _enqueue_update_resource_payload(payload)
+
+
+def _enqueue_update_resource_payload(payload: dict) -> None:
+    """Persist an ``update_resource`` entry to :class:`~ui.models.MppSyncQueue`."""
     try:
         from ui.models import MppSyncQueue
 
-        measure_col = _TABLE_MEASURE_COL.get(table)
-        notes_col = _TABLE_NOTES_COL.get(table, "notes")
         MppSyncQueue.objects.create(
             operation="update_resource",
-            payload_json=json.dumps(
-                {
-                    "table": table,
-                    "original_uid": original_uid,
-                    "uid": data.get("uid"),
-                    "measure": data.get(measure_col) if measure_col else None,
-                    "plant": data.get("plant"),
-                    "notes": data.get(notes_col),
-                }
-            ),
+            payload_json=json.dumps(payload),
         )
     except Exception as exc:  # noqa: BLE001
         import logging
