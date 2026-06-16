@@ -41,8 +41,8 @@ import time
 
 logger = logging.getLogger(__name__)
 
-_HEARTBEAT_INTERVAL: int = 15
-_HEARTBEAT_TIMEOUT: int = 30
+_HEARTBEAT_INTERVAL: int = 30
+_HEARTBEAT_TIMEOUT: int = 90
 
 
 class ProjectSession:
