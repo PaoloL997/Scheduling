@@ -41,8 +41,17 @@ import time
 
 logger = logging.getLogger(__name__)
 
-_HEARTBEAT_INTERVAL: int = 30
-_HEARTBEAT_TIMEOUT: int = 90
+
+def _heartbeat_interval_seconds() -> int:
+    from ui.services.runtime_config import load_runtime_config
+
+    return load_runtime_config().heartbeat_interval_seconds
+
+
+def _heartbeat_timeout_seconds() -> int:
+    from ui.services.runtime_config import load_runtime_config
+
+    return load_runtime_config().heartbeat_timeout_seconds
 
 
 class ProjectSession:
@@ -134,12 +143,14 @@ class ProjectSession:
             expired = [
                 key
                 for key, ts in list(self._session_last_seen.items())
-                if key in self._active_sessions and now - ts > _HEARTBEAT_TIMEOUT
+                if key in self._active_sessions
+                and now - ts > _heartbeat_timeout_seconds()
             ]
             for key in expired:
+                timeout_seconds = _heartbeat_timeout_seconds()
                 logger.info(
                     "Sessione scaduta per inattività (%ds senza heartbeat): %s...",
-                    _HEARTBEAT_TIMEOUT,
+                    timeout_seconds,
                     key[:8],
                 )
                 self._active_sessions.discard(key)
@@ -187,7 +198,6 @@ class ProjectSession:
         """
         import pythoncom
 
-        from django.conf import settings
         from ui.services.importer import (
             ImportStatus,
             begin_writeback,
@@ -235,7 +245,7 @@ class ProjectSession:
             # Files are read-only (set by the import pipeline).
             # No COM session is held during this phase.
             while not self._release_event.is_set():
-                self._release_event.wait(timeout=_HEARTBEAT_INTERVAL)
+                self._release_event.wait(timeout=_heartbeat_interval_seconds())
                 if not self._release_event.is_set():
                     self._expire_stale_sessions()
 
@@ -248,8 +258,11 @@ class ProjectSession:
             )
             set_files_writable()
 
-            mpp_path = settings.MPP_PATH
-            xlsx_path = settings.XLSX_PATH
+            from ui.services.runtime_config import load_runtime_config
+
+            config = load_runtime_config()
+            mpp_path = config.mpp_path
+            xlsx_path = config.xlsx_path
 
             app = None
             try:

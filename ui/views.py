@@ -2,6 +2,7 @@
 
 import json
 import logging
+from pathlib import Path
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
@@ -23,6 +24,7 @@ from ui.services.resource_display import (
     format_activity_resources,
     format_activity_resources_html,
 )
+from ui.services.runtime_config import load_runtime_config
 from ui.services.inventory import (
     delete_resource,
     insert_resource,
@@ -977,11 +979,23 @@ def api_app_settings(request: HttpRequest) -> JsonResponse:
     settings_obj = AppSettings.load()
 
     if request.method == "GET":
+        runtime = load_runtime_config()
         return JsonResponse(
             {
                 "ok": True,
                 "penale_max": float(settings_obj.penale_max),
                 "solver_time_limit": float(settings_obj.solver_time_limit),
+                "mpp_path": runtime.mpp_path,
+                "xlsx_path": runtime.xlsx_path,
+                "server_dir": runtime.server_dir,
+                "heartbeat_interval_seconds": runtime.heartbeat_interval_seconds,
+                "heartbeat_timeout_seconds": runtime.heartbeat_timeout_seconds,
+                "msp_dispatch_retry_interval_seconds": runtime.msp_dispatch_retry_interval_seconds,
+                "msp_dispatch_retry_max_wait_seconds": runtime.msp_dispatch_retry_max_wait_seconds,
+                "gemini_model": runtime.gemini_model,
+                "gemini_thinking_level": runtime.gemini_thinking_level,
+                "gemini_thinking_budget": runtime.gemini_thinking_budget,
+                "auto_import_on_startup": runtime.auto_import_on_startup,
             }
         )
 
@@ -1028,6 +1042,181 @@ def api_app_settings(request: HttpRequest) -> JsonResponse:
         settings_obj.solver_time_limit = limit_val
         updated = True
 
+    if "mpp_path" in data:
+        mpp_path = str(data.get("mpp_path") or "").strip()
+        if not mpp_path:
+            return JsonResponse(
+                {"ok": False, "error": "mpp_path è obbligatorio."}, status=400
+            )
+        if not mpp_path.lower().endswith(".mpp"):
+            return JsonResponse(
+                {"ok": False, "error": "mpp_path deve puntare a un file .mpp."},
+                status=400,
+            )
+        settings_obj.mpp_path = mpp_path
+        updated = True
+
+    if "xlsx_path" in data:
+        xlsx_path = str(data.get("xlsx_path") or "").strip()
+        if not xlsx_path:
+            return JsonResponse(
+                {"ok": False, "error": "xlsx_path è obbligatorio."}, status=400
+            )
+        if not xlsx_path.lower().endswith(".xlsx"):
+            return JsonResponse(
+                {"ok": False, "error": "xlsx_path deve puntare a un file .xlsx."},
+                status=400,
+            )
+        settings_obj.xlsx_path = xlsx_path
+        updated = True
+
+    if "server_dir" in data:
+        settings_obj.server_dir = str(data.get("server_dir") or "").strip()
+        updated = True
+
+    if "heartbeat_interval_seconds" in data:
+        try:
+            heartbeat_interval = int(data["heartbeat_interval_seconds"])
+        except (ValueError, TypeError):
+            return JsonResponse(
+                {"ok": False, "error": "heartbeat_interval_seconds non valido."},
+                status=400,
+            )
+        if heartbeat_interval < 5 or heartbeat_interval > 300:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "heartbeat_interval_seconds deve essere tra 5 e 300.",
+                },
+                status=400,
+            )
+        settings_obj.heartbeat_interval_seconds = heartbeat_interval
+        updated = True
+
+    next_heartbeat_interval = (
+        int(data["heartbeat_interval_seconds"])
+        if "heartbeat_interval_seconds" in data
+        else settings_obj.heartbeat_interval_seconds
+    )
+    if "heartbeat_timeout_seconds" in data:
+        try:
+            heartbeat_timeout = int(data["heartbeat_timeout_seconds"])
+        except (ValueError, TypeError):
+            return JsonResponse(
+                {"ok": False, "error": "heartbeat_timeout_seconds non valido."},
+                status=400,
+            )
+        min_timeout = max(10, next_heartbeat_interval * 2)
+        if heartbeat_timeout < min_timeout or heartbeat_timeout > 1800:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": (
+                        "heartbeat_timeout_seconds deve essere >= 2x interval "
+                        f"({min_timeout}) e <= 1800."
+                    ),
+                },
+                status=400,
+            )
+        settings_obj.heartbeat_timeout_seconds = heartbeat_timeout
+        updated = True
+
+    if "msp_dispatch_retry_interval_seconds" in data:
+        try:
+            retry_interval = float(data["msp_dispatch_retry_interval_seconds"])
+        except (ValueError, TypeError):
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "msp_dispatch_retry_interval_seconds non valido.",
+                },
+                status=400,
+            )
+        if retry_interval < 0.1 or retry_interval > 5:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "msp_dispatch_retry_interval_seconds deve essere tra 0.1 e 5.",
+                },
+                status=400,
+            )
+        settings_obj.msp_dispatch_retry_interval_seconds = retry_interval
+        updated = True
+
+    next_retry_interval = (
+        float(data["msp_dispatch_retry_interval_seconds"])
+        if "msp_dispatch_retry_interval_seconds" in data
+        else settings_obj.msp_dispatch_retry_interval_seconds
+    )
+    if "msp_dispatch_retry_max_wait_seconds" in data:
+        try:
+            retry_max_wait = float(data["msp_dispatch_retry_max_wait_seconds"])
+        except (ValueError, TypeError):
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "msp_dispatch_retry_max_wait_seconds non valido.",
+                },
+                status=400,
+            )
+        if retry_max_wait < next_retry_interval or retry_max_wait > 120:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": (
+                        "msp_dispatch_retry_max_wait_seconds deve essere >= retry_interval "
+                        f"({next_retry_interval}) e <= 120."
+                    ),
+                },
+                status=400,
+            )
+        settings_obj.msp_dispatch_retry_max_wait_seconds = retry_max_wait
+        updated = True
+
+    if "gemini_model" in data:
+        gemini_model = str(data.get("gemini_model") or "").strip()
+        if not gemini_model:
+            return JsonResponse(
+                {"ok": False, "error": "gemini_model è obbligatorio."}, status=400
+            )
+        settings_obj.gemini_model = gemini_model
+        updated = True
+
+    if "gemini_thinking_level" in data:
+        thinking_level = str(data.get("gemini_thinking_level") or "").strip().lower()
+        if thinking_level not in {"none", "low", "medium", "high"}:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "gemini_thinking_level deve essere none/low/medium/high.",
+                },
+                status=400,
+            )
+        settings_obj.gemini_thinking_level = thinking_level
+        updated = True
+
+    if "gemini_thinking_budget" in data:
+        try:
+            thinking_budget = int(data["gemini_thinking_budget"])
+        except (ValueError, TypeError):
+            return JsonResponse(
+                {"ok": False, "error": "gemini_thinking_budget non valido."}, status=400
+            )
+        if thinking_budget < 0 or thinking_budget > 8192:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "gemini_thinking_budget deve essere tra 0 e 8192.",
+                },
+                status=400,
+            )
+        settings_obj.gemini_thinking_budget = thinking_budget
+        updated = True
+
+    if "auto_import_on_startup" in data:
+        settings_obj.auto_import_on_startup = bool(data["auto_import_on_startup"])
+        updated = True
+
     if not updated:
         return JsonResponse(
             {"ok": False, "error": "Nessun parametro da aggiornare."}, status=400
@@ -1044,6 +1233,17 @@ def api_app_settings(request: HttpRequest) -> JsonResponse:
             "ok": True,
             "penale_max": float(settings_obj.penale_max),
             "solver_time_limit": float(settings_obj.solver_time_limit),
+            "mpp_path": str(Path(settings_obj.mpp_path)),
+            "xlsx_path": str(Path(settings_obj.xlsx_path)),
+            "server_dir": settings_obj.server_dir,
+            "heartbeat_interval_seconds": settings_obj.heartbeat_interval_seconds,
+            "heartbeat_timeout_seconds": settings_obj.heartbeat_timeout_seconds,
+            "msp_dispatch_retry_interval_seconds": settings_obj.msp_dispatch_retry_interval_seconds,
+            "msp_dispatch_retry_max_wait_seconds": settings_obj.msp_dispatch_retry_max_wait_seconds,
+            "gemini_model": settings_obj.gemini_model,
+            "gemini_thinking_level": settings_obj.gemini_thinking_level,
+            "gemini_thinking_budget": settings_obj.gemini_thinking_budget,
+            "auto_import_on_startup": settings_obj.auto_import_on_startup,
         }
     )
 
@@ -1352,6 +1552,7 @@ def impostazioni(request: HttpRequest):
             "all_gen_models_json": json.dumps(all_gen_models),
             "penale_max": float(AppSettings.load().penale_max),
             "solver_time_limit": int(AppSettings.load().solver_time_limit),
+            "runtime": load_runtime_config(),
         },
     )
 

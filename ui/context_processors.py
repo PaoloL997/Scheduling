@@ -14,7 +14,11 @@ def open_problems(request: HttpRequest) -> dict:
             :class:`~ui.models.ProblemaAttivita` records.
     """
     from ui.models import ProblemaAttivita
+    from ui.services.runtime_config import load_runtime_config
+
+    runtime = load_runtime_config()
 
     return {
-        "global_open_problems": ProblemaAttivita.objects.filter(risolto=False).count()
+        "global_open_problems": ProblemaAttivita.objects.filter(risolto=False).count(),
+        "heartbeat_interval_ms": runtime.heartbeat_interval_seconds * 1000,
     }

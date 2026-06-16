@@ -17,8 +17,22 @@ _UNSET = object()
 
 # COM HRESULT for "server process could not be started" (0x80080005).
 _CO_E_SERVER_EXEC_FAILURE = -2146959355
-_DISPATCH_RETRY_INTERVAL = 0.5  # seconds between retry attempts
-_DISPATCH_RETRY_MAX_WAIT = 5.0  # maximum total wait before giving up
+_DISPATCH_RETRY_INTERVAL = 0.5  # default seconds between retry attempts
+_DISPATCH_RETRY_MAX_WAIT = 5.0  # default maximum total wait before giving up
+
+
+def _dispatch_retry_config() -> tuple[float, float]:
+    """Return (interval, max_wait) with DB overrides when available."""
+    try:
+        from ui.services.runtime_config import load_runtime_config
+
+        cfg = load_runtime_config()
+        return (
+            cfg.msp_dispatch_retry_interval_seconds,
+            cfg.msp_dispatch_retry_max_wait_seconds,
+        )
+    except Exception:
+        return (_DISPATCH_RETRY_INTERVAL, _DISPATCH_RETRY_MAX_WAIT)
 
 
 def _dispatch_msp() -> object:
@@ -52,11 +66,12 @@ def _dispatch_msp() -> object:
         )
 
     # Poll until the retry window expires, retrying DispatchEx each interval.
+    retry_interval, retry_max_wait = _dispatch_retry_config()
     elapsed = 0.0
     last_exc: Optional[Exception] = None
-    while elapsed < _DISPATCH_RETRY_MAX_WAIT:
-        time.sleep(_DISPATCH_RETRY_INTERVAL)
-        elapsed += _DISPATCH_RETRY_INTERVAL
+    while elapsed < retry_max_wait:
+        time.sleep(retry_interval)
+        elapsed += retry_interval
         try:
             return win32com.client.DispatchEx("MSProject.Application")
         except pywintypes.com_error as retry_exc:
@@ -66,7 +81,7 @@ def _dispatch_msp() -> object:
 
     raise RuntimeError(
         "MSProject.Application non risponde dopo il retry "
-        f"({_DISPATCH_RETRY_MAX_WAIT:.0f}s). "
+        f"({retry_max_wait:.0f}s). "
         "Verificare che MS Project sia installato, non bloccato da finestre di dialogo "
         f"e che non ci siano processi WINPROJ.EXE bloccati. Errore COM: {last_exc}"
     )

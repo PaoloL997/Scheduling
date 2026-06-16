@@ -259,7 +259,7 @@
             }).catch(function () {});
         }
         sendHeartbeat();
-        setInterval(sendHeartbeat, 30000);
+        setInterval(sendHeartbeat, {{ heartbeat_interval_ms|default:30000 }});
     })();
 </script>
 {% endif %}

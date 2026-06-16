@@ -5,6 +5,7 @@ import os
 from google import genai
 from google.genai import types
 
+from ui.services.runtime_config import gemini_api_key, load_runtime_config
 
 READ_WPS = """You are a precise data extraction assistant. Your task is to extract specific values from a technical table called "dimensions".
 
@@ -45,10 +46,13 @@ class ReadWPS:
 
     def __init__(self) -> None:
         """Initialise the Gemini client using the API key from the environment."""
-        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY", ""))
+        runtime = load_runtime_config()
+        self.MODEL = runtime.gemini_model
+        self.THINKING_LEVEL = runtime.gemini_thinking_level
+        self.client = genai.Client(api_key=gemini_api_key())
         self.config = types.GenerateContentConfig(
             thinking_config=types.ThinkingConfig(
-                thinking_budget=512,
+                thinking_budget=runtime.gemini_thinking_budget,
             ),
             media_resolution=self.MEDIA_RESOLUTION,
         )

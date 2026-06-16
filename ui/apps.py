@@ -30,13 +30,15 @@ class UiConfig(AppConfig):
         """
         import sys
 
-        from django.conf import settings
-
         if "runserver" in sys.argv and os.environ.get("RUN_MAIN") != "true":
             return
 
+        from django.conf import settings
         from ui.services.importer import configure
 
+        # Avoid DB access in AppConfig.ready(): Django warns against queries here.
+        # Bootstrap importer with settings/env paths; runtime DB overrides are
+        # consumed in the operational services during normal request lifecycle.
         configure(
             mpp_path=settings.MPP_PATH,
             xlsx_path=settings.XLSX_PATH,

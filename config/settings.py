@@ -10,10 +10,15 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = "django-insecure-programmazione-produzione-dev-key-change-in-production"
+SECRET_KEY = os.getenv(
+    "DJANGO_SECRET_KEY",
+    SECRET_KEY,
+)
 
-DEBUG = True
+DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() in {"1", "true", "yes", "on"}
 
-ALLOWED_HOSTS = ["*"]
+_allowed_hosts = os.getenv("DJANGO_ALLOWED_HOSTS", "*")
+ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts.split(",") if h.strip()]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -124,11 +129,9 @@ LOGGING = {
 # Application-specific paths
 # ---------------------------------------------------------------------------
 
-SERVER_DIR = Path(
-    r"Z:\how_to_AI\dataset"
-)  # Server dir è quello con la programmazione di Fede
-MPP_PATH = str(BASE_DIR / "dataset.mpp")
-XLSX_PATH = str(BASE_DIR / "jobs.xlsx")
+SERVER_DIR = os.getenv("SERVER_DIR", "")
+MPP_PATH = os.getenv("MPP_PATH", str(BASE_DIR / "dataset.mpp"))
+XLSX_PATH = os.getenv("XLSX_PATH", str(BASE_DIR / "jobs.xlsx"))
 
 # ---------------------------------------------------------------------------
 # Media files (WPS PDF uploads)

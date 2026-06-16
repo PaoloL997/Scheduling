@@ -129,6 +129,17 @@ def serialize_app_settings() -> dict:
     return {
         "penale_max": float(obj.penale_max),
         "solver_time_limit": float(obj.solver_time_limit),
+        "mpp_path": obj.mpp_path,
+        "xlsx_path": obj.xlsx_path,
+        "server_dir": obj.server_dir,
+        "heartbeat_interval_seconds": obj.heartbeat_interval_seconds,
+        "heartbeat_timeout_seconds": obj.heartbeat_timeout_seconds,
+        "msp_dispatch_retry_interval_seconds": obj.msp_dispatch_retry_interval_seconds,
+        "msp_dispatch_retry_max_wait_seconds": obj.msp_dispatch_retry_max_wait_seconds,
+        "gemini_model": obj.gemini_model,
+        "gemini_thinking_level": obj.gemini_thinking_level,
+        "gemini_thinking_budget": obj.gemini_thinking_budget,
+        "auto_import_on_startup": obj.auto_import_on_startup,
     }
 
 
