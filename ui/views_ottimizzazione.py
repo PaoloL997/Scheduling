@@ -17,7 +17,8 @@ from django.views.decorators.http import require_http_methods
 from src.optimization.feasibility import check_feasibility
 from src.optimization.solver import schedule
 
-from ui.models import AppSettings, Stabilimento
+from ui.models import Stabilimento
+from ui.services.runtime_config import load_runtime_config
 from ui.services.optimization_problem import (
     OptimizationProblemError,
     activities_for_job_ids,
@@ -175,7 +176,7 @@ def _run_optimization(
     except OptimizationProblemError as exc:
         return {"ok": False, "feasible": False, "error": str(exc)}
 
-    time_limit = float(AppSettings.load().solver_time_limit)
+    time_limit = load_runtime_config().solver_time_limit
     feasibility = check_feasibility(problem)
     colors = _plant_colors()
     attivita = activities_for_job_ids(job_ids)
@@ -288,7 +289,7 @@ def ottimizzazione(request: HttpRequest) -> HttpResponse:
             "groups_json": json.dumps(_fetch_grouped()),
             "draft_json": json.dumps(draft),
             "horizon_default": horizon,
-            "solver_time_limit": AppSettings.load().solver_time_limit,
+            "solver_time_limit": load_runtime_config().solver_time_limit,
         },
     )
 

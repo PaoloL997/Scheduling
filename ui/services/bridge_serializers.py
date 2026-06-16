@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from ui.models import (
-    AppSettings,
     Attivita,
     ConfigurazioneTesta,
     GeneratoreItem,
@@ -15,6 +14,7 @@ from ui.models import (
     TastatoreItem,
     TestaItem,
 )
+from ui.services.runtime_config import load_runtime_config
 from ui.views import _attivita_to_task_dict, _fetch_jobs
 
 
@@ -125,21 +125,21 @@ def serialize_problemi() -> list[dict]:
 
 
 def serialize_app_settings() -> dict:
-    obj = AppSettings.load()
+    cfg = load_runtime_config()
     return {
-        "penale_max": float(obj.penale_max),
-        "solver_time_limit": float(obj.solver_time_limit),
-        "mpp_path": obj.mpp_path,
-        "xlsx_path": obj.xlsx_path,
-        "server_dir": obj.server_dir,
-        "heartbeat_interval_seconds": obj.heartbeat_interval_seconds,
-        "heartbeat_timeout_seconds": obj.heartbeat_timeout_seconds,
-        "msp_dispatch_retry_interval_seconds": obj.msp_dispatch_retry_interval_seconds,
-        "msp_dispatch_retry_max_wait_seconds": obj.msp_dispatch_retry_max_wait_seconds,
-        "gemini_model": obj.gemini_model,
-        "gemini_thinking_level": obj.gemini_thinking_level,
-        "gemini_thinking_budget": obj.gemini_thinking_budget,
-        "auto_import_on_startup": obj.auto_import_on_startup,
+        "penale_max": cfg.penale_max,
+        "solver_time_limit": cfg.solver_time_limit,
+        "mpp_path": cfg.mpp_path,
+        "xlsx_path": cfg.xlsx_path,
+        "server_dir": cfg.server_dir,
+        "heartbeat_interval_seconds": cfg.heartbeat_interval_seconds,
+        "heartbeat_timeout_seconds": cfg.heartbeat_timeout_seconds,
+        "msp_dispatch_retry_interval_seconds": cfg.msp_dispatch_retry_interval_seconds,
+        "msp_dispatch_retry_max_wait_seconds": cfg.msp_dispatch_retry_max_wait_seconds,
+        "gemini_model": cfg.gemini_model,
+        "gemini_thinking_level": cfg.gemini_thinking_level,
+        "gemini_thinking_budget": cfg.gemini_thinking_budget,
+        "auto_import_on_startup": cfg.auto_import_on_startup,
     }
 
 

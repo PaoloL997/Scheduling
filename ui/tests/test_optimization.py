@@ -7,18 +7,11 @@ from datetime import date, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils.timezone import localdate
 
-from ui.models import (
-    AppSettings,
-    Attivita,
-    Job,
-    MandrinoItem,
-    RisorsaAttivita,
-    TastatoreItem,
-)
+from ui.models import Attivita, Job, MandrinoItem, RisorsaAttivita, TastatoreItem
 from ui.services.optimization_problem import (
     OptimizationProblemError,
     _duration_days,
@@ -377,8 +370,22 @@ class OptimizationWizardTest(TestCase):
         self.assertEqual(resp.url, reverse("ottimizzazione"))
 
     def test_run_stores_draft_from_post(self) -> None:
-        AppSettings.load().solver_time_limit = 5
-        AppSettings.load().save()
+        # speed up test by lowering solver time limit via env-backed setting
+        with override_settings(SOLVER_TIME_LIMIT="5"):
+            horizon = (localdate() + timedelta(days=1)).isoformat()
+            payload = {
+                **self.draft,
+                "horizon_start": horizon,
+            }
+            resp = self.client.post(
+                reverse("ottimizzazione_run"),
+                data={"draft_json": json.dumps(payload)},
+            )
+        if resp.status_code == 302 and resp.url == reverse("ottimizzazione"):
+            self.skipTest("Solver did not find a feasible solution in test env.")
+        session_draft = self.client.session.get(SESSION_DRAFT_KEY)
+        self.assertEqual(session_draft["job_ids"], [self.job_id])
+        self.assertEqual(session_draft["horizon_start"], horizon)
         horizon = (localdate() + timedelta(days=1)).isoformat()
         payload = {
             **self.draft,
@@ -399,17 +406,16 @@ class OptimizationWizardTest(TestCase):
         return_value=_MOCK_EXPLANATION,
     )
     def test_run_solve_redirects_to_results(self, _mock_explain) -> None:
-        AppSettings.load().solver_time_limit = 5
-        AppSettings.load().save()
-        horizon = (localdate() + timedelta(days=1)).isoformat()
-        payload = {
-            **self.draft,
-            "horizon_start": horizon,
-        }
-        resp = self.client.post(
-            reverse("ottimizzazione_run"),
-            data={"draft_json": json.dumps(payload)},
-        )
+        with override_settings(SOLVER_TIME_LIMIT="5"):
+            horizon = (localdate() + timedelta(days=1)).isoformat()
+            payload = {
+                **self.draft,
+                "horizon_start": horizon,
+            }
+            resp = self.client.post(
+                reverse("ottimizzazione_run"),
+                data={"draft_json": json.dumps(payload)},
+            )
         if resp.status_code == 302 and resp.url == reverse("ottimizzazione"):
             self.skipTest("Solver did not find a feasible solution in test env.")
         self.assertEqual(resp.status_code, 302)
@@ -463,13 +469,12 @@ class OptimizationWizardTest(TestCase):
         return_value=_MOCK_EXPLANATION,
     )
     def test_api_solve_still_works(self, _mock_explain) -> None:
-        AppSettings.load().solver_time_limit = 5
-        AppSettings.load().save()
-        resp = self.client.post(
-            reverse("api_ottimizzazione_solve"),
-            data=json.dumps({"job_ids": [self.job_id]}),
-            content_type="application/json",
-        )
+        with override_settings(SOLVER_TIME_LIMIT="5"):
+            resp = self.client.post(
+                reverse("api_ottimizzazione_solve"),
+                data=json.dumps({"job_ids": [self.job_id]}),
+                content_type="application/json",
+            )
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertTrue(data["ok"])

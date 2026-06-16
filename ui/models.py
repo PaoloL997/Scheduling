@@ -1,7 +1,5 @@
 """Django ORM models for production planning activities and resource assignments."""
 
-from decimal import Decimal
-
 from django.db import models
 from django.db.models import UniqueConstraint
 
@@ -303,121 +301,6 @@ class GeneratoreItem(models.Model):
 
     def __str__(self) -> str:
         return self.uid
-
-
-class AppSettings(models.Model):
-    """Application-wide configurable settings (singleton row, pk=1).
-
-    Access via ``AppSettings.load()`` — never instantiate directly.
-    """
-
-    penale_max = models.DecimalField(
-        max_digits=5,
-        decimal_places=2,
-        default=5,
-        help_text="Percentuale massima di penale applicabile.",
-    )
-    solver_time_limit = models.FloatField(
-        default=10.0,
-        help_text="Timeout massimo del solver di ottimizzazione (secondi).",
-    )
-    mpp_path = models.CharField(
-        max_length=500,
-        default="dataset.mpp",
-        help_text="Path file MS Project sorgente (.mpp).",
-    )
-    xlsx_path = models.CharField(
-        max_length=500,
-        default="jobs.xlsx",
-        help_text="Path file Excel sorgente (.xlsx).",
-    )
-    server_dir = models.CharField(
-        max_length=500,
-        default="",
-        blank=True,
-        help_text="Directory server per dataset condiviso (opzionale).",
-    )
-    heartbeat_interval_seconds = models.PositiveIntegerField(
-        default=30,
-        help_text="Intervallo heartbeat client in secondi.",
-    )
-    heartbeat_timeout_seconds = models.PositiveIntegerField(
-        default=90,
-        help_text="Timeout heartbeat sessione in secondi.",
-    )
-    msp_dispatch_retry_interval_seconds = models.FloatField(
-        default=0.5,
-        help_text="Intervallo retry COM MS Project (secondi).",
-    )
-    msp_dispatch_retry_max_wait_seconds = models.FloatField(
-        default=5.0,
-        help_text="Attesa massima totale retry COM MS Project (secondi).",
-    )
-    gemini_model = models.CharField(
-        max_length=120,
-        default="gemini-2.5-flash",
-        help_text="Modello Gemini usato per analisi WPS.",
-    )
-    gemini_thinking_level = models.CharField(
-        max_length=20,
-        default="low",
-        help_text="Livello thinking Gemini: none/low/medium/high.",
-    )
-    gemini_thinking_budget = models.PositiveIntegerField(
-        default=512,
-        help_text="Budget thinking Gemini.",
-    )
-    auto_import_on_startup = models.BooleanField(
-        default=True,
-        help_text="Abilita configurazione import automatica all'avvio app.",
-    )
-
-    class Meta:
-        """Table metadata for AppSettings."""
-
-        db_table = "app_settings"
-
-    def save(self, *args, **kwargs):
-        """Force singleton: always write to pk=1."""
-        self.pk = 1
-        super().save(*args, **kwargs)
-
-    @classmethod
-    def load(cls) -> "AppSettings":
-        """Return the singleton settings row, creating it on first access.
-
-        Returns:
-            AppSettings: The singleton row.
-        """
-        obj, _ = cls.objects.get_or_create(
-            pk=1,
-            defaults={
-                "penale_max": Decimal("5"),
-                "solver_time_limit": 10.0,
-                "mpp_path": "dataset.mpp",
-                "xlsx_path": "jobs.xlsx",
-                "server_dir": "",
-                "heartbeat_interval_seconds": 30,
-                "heartbeat_timeout_seconds": 90,
-                "msp_dispatch_retry_interval_seconds": 0.5,
-                "msp_dispatch_retry_max_wait_seconds": 5.0,
-                "gemini_model": "gemini-2.5-flash",
-                "gemini_thinking_level": "low",
-                "gemini_thinking_budget": 512,
-                "auto_import_on_startup": True,
-            },
-        )
-        return obj
-
-    def __str__(self) -> str:
-        return (
-            f"AppSettings(penale_max={self.penale_max}, "
-            f"solver_time_limit={self.solver_time_limit}, "
-            f"mpp_path={self.mpp_path}, "
-            f"xlsx_path={self.xlsx_path}, "
-            f"heartbeat={self.heartbeat_interval_seconds}/{self.heartbeat_timeout_seconds}, "
-            f"gemini_model={self.gemini_model})"
-        )
 
 
 class MppSyncQueue(models.Model):

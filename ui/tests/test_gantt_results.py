@@ -14,7 +14,9 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils.timezone import localdate
 
-from ui.models import AppSettings, Attivita, Job, MandrinoItem, TastatoreItem
+from django.test import override_settings
+
+from ui.models import Attivita, Job, MandrinoItem, TastatoreItem
 from ui.views_ottimizzazione import SESSION_RESULT_KEY
 
 
@@ -55,8 +57,6 @@ class GanttResultsPageTest(TestCase):
         self.client = Client()
         self.client.force_login(self.user)
         self.att = _seed()
-        AppSettings.load().solver_time_limit = 5
-        AppSettings.load().save()
 
     def _run_to_results(self) -> dict | None:
         horizon = (localdate() + timedelta(days=1)).isoformat()
@@ -77,6 +77,7 @@ class GanttResultsPageTest(TestCase):
             return None
         return self.client.session.get(SESSION_RESULT_KEY)
 
+    @override_settings(SOLVER_TIME_LIMIT="5")
     def test_results_page_includes_gantt_tasks_json(self) -> None:
         result = self._run_to_results()
         if result is None:

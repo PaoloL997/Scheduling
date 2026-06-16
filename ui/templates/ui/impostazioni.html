@@ -83,7 +83,7 @@
                        {% if runtime.auto_import_on_startup %}checked{% endif %}>
             </div>
             <div class="settings-generali-actions">
-                <button class="btn btn-primary" onclick="saveGenerali()">Salva</button>
+                <button class="btn btn-primary" onclick="saveGenerali()">Info</button>
                 <span id="generali-feedback" style="display:none;"></span>
             </div>
         </div>
@@ -603,116 +603,11 @@ function toggleSettingsAccordion(btn) {
     /* Parametri generali                                                   */
     /* ------------------------------------------------------------------ */
     window.saveGenerali = function () {
-        const penale = parseFloat(document.getElementById("input-penale-max").value);
-        const limit = parseFloat(document.getElementById("input-solver-time-limit").value);
-        const mppPath = document.getElementById("input-mpp-path").value.trim();
-        const xlsxPath = document.getElementById("input-xlsx-path").value.trim();
-        const serverDir = document.getElementById("input-server-dir").value.trim();
-        const heartbeatInterval = parseInt(document.getElementById("input-heartbeat-interval").value, 10);
-        const heartbeatTimeout = parseInt(document.getElementById("input-heartbeat-timeout").value, 10);
-        const retryInterval = parseFloat(document.getElementById("input-retry-interval").value);
-        const retryMaxWait = parseFloat(document.getElementById("input-retry-max-wait").value);
-        const geminiModel = document.getElementById("input-gemini-model").value.trim();
-        const geminiThinkingLevel = document.getElementById("input-gemini-thinking-level").value;
-        const geminiThinkingBudget = parseInt(document.getElementById("input-gemini-thinking-budget").value, 10);
-        const autoImportOnStartup = document.getElementById("input-auto-import-on-startup").checked;
         const fb  = document.getElementById("generali-feedback");
-        if (isNaN(penale) || penale < 0) {
-            fb.textContent = "Penale massima non valida.";
-            fb.style.color = "var(--color-danger, #c00)";
-            fb.style.display = "";
-            return;
-        }
-        if (isNaN(limit) || limit < 1 || limit > 600) {
-            fb.textContent = "Timeout solver deve essere tra 1 e 600 secondi.";
-            fb.style.color = "var(--color-danger, #c00)";
-            fb.style.display = "";
-            return;
-        }
-        if (!mppPath || !/\.mpp$/i.test(mppPath)) {
-            fb.textContent = "Path MPP non valido (deve finire con .mpp).";
-            fb.style.color = "var(--color-danger, #c00)";
-            fb.style.display = "";
-            return;
-        }
-        if (!xlsxPath || !/\.xlsx$/i.test(xlsxPath)) {
-            fb.textContent = "Path Excel non valido (deve finire con .xlsx).";
-            fb.style.color = "var(--color-danger, #c00)";
-            fb.style.display = "";
-            return;
-        }
-        if (isNaN(heartbeatInterval) || heartbeatInterval < 5 || heartbeatInterval > 300) {
-            fb.textContent = "Heartbeat interval deve essere tra 5 e 300 secondi.";
-            fb.style.color = "var(--color-danger, #c00)";
-            fb.style.display = "";
-            return;
-        }
-        if (isNaN(heartbeatTimeout) || heartbeatTimeout < Math.max(10, heartbeatInterval * 2) || heartbeatTimeout > 1800) {
-            fb.textContent = "Heartbeat timeout non valido (>= 2x interval, <= 1800).";
-            fb.style.color = "var(--color-danger, #c00)";
-            fb.style.display = "";
-            return;
-        }
-        if (isNaN(retryInterval) || retryInterval < 0.1 || retryInterval > 5) {
-            fb.textContent = "MSP retry interval deve essere tra 0.1 e 5 secondi.";
-            fb.style.color = "var(--color-danger, #c00)";
-            fb.style.display = "";
-            return;
-        }
-        if (isNaN(retryMaxWait) || retryMaxWait < retryInterval || retryMaxWait > 120) {
-            fb.textContent = "MSP retry max wait non valido (>= retry interval, <= 120).";
-            fb.style.color = "var(--color-danger, #c00)";
-            fb.style.display = "";
-            return;
-        }
-        if (!geminiModel) {
-            fb.textContent = "Gemini model obbligatorio.";
-            fb.style.color = "var(--color-danger, #c00)";
-            fb.style.display = "";
-            return;
-        }
-        if (isNaN(geminiThinkingBudget) || geminiThinkingBudget < 0 || geminiThinkingBudget > 8192) {
-            fb.textContent = "Gemini thinking budget deve essere tra 0 e 8192.";
-            fb.style.color = "var(--color-danger, #c00)";
-            fb.style.display = "";
-            return;
-        }
-        fetch("/api/app-settings/", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json", "X-CSRFToken": getCsrfToken() },
-            body: JSON.stringify({
-                penale_max: penale,
-                solver_time_limit: limit,
-                mpp_path: mppPath,
-                xlsx_path: xlsxPath,
-                server_dir: serverDir,
-                heartbeat_interval_seconds: heartbeatInterval,
-                heartbeat_timeout_seconds: heartbeatTimeout,
-                msp_dispatch_retry_interval_seconds: retryInterval,
-                msp_dispatch_retry_max_wait_seconds: retryMaxWait,
-                gemini_model: geminiModel,
-                gemini_thinking_level: geminiThinkingLevel,
-                gemini_thinking_budget: geminiThinkingBudget,
-                auto_import_on_startup: autoImportOnStartup,
-            }),
-        })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-            if (data.ok) {
-                fb.textContent = "Salvato.";
-                fb.style.color = "var(--color-success, #1a7a4a)";
-            } else {
-                fb.textContent = data.error || "Errore durante il salvataggio.";
-                fb.style.color = "var(--color-danger, #c00)";
-            }
-            fb.style.display = "";
-            setTimeout(function () { fb.style.display = "none"; }, 3000);
-        })
-        .catch(function () {
-            fb.textContent = "Errore di rete.";
-            fb.style.color = "var(--color-danger, #c00)";
-            fb.style.display = "";
-        });
+        fb.textContent = "Parametri letti da .env: modifica il file .env e riavvia il server.";
+        fb.style.color = "var(--color-warning, #9a6f00)";
+        fb.style.display = "";
+        setTimeout(function () { fb.style.display = "none"; }, 5000);
     };
 
     function getCsrfToken() {

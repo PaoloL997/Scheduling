@@ -9,11 +9,12 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = "django-insecure-programmazione-produzione-dev-key-change-in-production"
-SECRET_KEY = os.getenv(
-    "DJANGO_SECRET_KEY",
-    SECRET_KEY,
-)
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "DJANGO_SECRET_KEY non impostata. Configurala nel file .env "
+        "o come variabile d'ambiente."
+    )
 
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() in {"1", "true", "yes", "on"}
 
@@ -132,6 +133,20 @@ LOGGING = {
 SERVER_DIR = os.getenv("SERVER_DIR", "")
 MPP_PATH = os.getenv("MPP_PATH", str(BASE_DIR / "dataset.mpp"))
 XLSX_PATH = os.getenv("XLSX_PATH", str(BASE_DIR / "jobs.xlsx"))
+PENALE_MAX = os.getenv("PENALE_MAX", "5")
+SOLVER_TIME_LIMIT = os.getenv("SOLVER_TIME_LIMIT", "10")
+HEARTBEAT_INTERVAL_SECONDS = os.getenv("HEARTBEAT_INTERVAL_SECONDS", "30")
+HEARTBEAT_TIMEOUT_SECONDS = os.getenv("HEARTBEAT_TIMEOUT_SECONDS", "90")
+MSP_DISPATCH_RETRY_INTERVAL_SECONDS = os.getenv(
+    "MSP_DISPATCH_RETRY_INTERVAL_SECONDS", "0.5"
+)
+MSP_DISPATCH_RETRY_MAX_WAIT_SECONDS = os.getenv(
+    "MSP_DISPATCH_RETRY_MAX_WAIT_SECONDS", "5.0"
+)
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "low")
+GEMINI_THINKING_BUDGET = os.getenv("GEMINI_THINKING_BUDGET", "512")
+AUTO_IMPORT_ON_STARTUP = os.getenv("AUTO_IMPORT_ON_STARTUP", "true")
 
 # ---------------------------------------------------------------------------
 # Media files (WPS PDF uploads)

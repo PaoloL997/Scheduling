@@ -1,18 +1,17 @@
-"""Centralized runtime configuration with DB-backed overrides."""
+"""Centralized runtime configuration loaded from environment variables."""
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from django.conf import settings
 
-from ui.models import AppSettings
-
 
 @dataclass(frozen=True)
 class RuntimeConfig:
+    penale_max: float
+    solver_time_limit: float
     mpp_path: str
     xlsx_path: str
     server_dir: str
@@ -56,35 +55,80 @@ def _normalize_optional_dir(value: str, fallback: str) -> str:
     return str(path)
 
 
+def _env_str(name: str, default: str) -> str:
+    return str(getattr(settings, name, "")).strip() or default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = str(getattr(settings, name, default)).strip()
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = str(getattr(settings, name, default)).strip()
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(getattr(settings, name, default)).strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def load_runtime_config() -> RuntimeConfig:
-    """Load runtime configuration from DB with safe fallbacks."""
-    obj = AppSettings.load()
+    """Load runtime configuration from env with safe bounds."""
+    penale_max = _env_float("PENALE_MAX", 5.0)
+    if penale_max < 0:
+        penale_max = 0.0
+    if penale_max > 100:
+        penale_max = 100.0
 
-    heartbeat_interval = max(5, int(obj.heartbeat_interval_seconds or 30))
+    solver_time_limit = _env_float("SOLVER_TIME_LIMIT", 10.0)
+    if solver_time_limit < 1:
+        solver_time_limit = 1.0
+    if solver_time_limit > 600:
+        solver_time_limit = 600.0
+
+    heartbeat_interval = max(5, _env_int("HEARTBEAT_INTERVAL_SECONDS", 30))
     heartbeat_timeout = max(
-        heartbeat_interval * 2, int(obj.heartbeat_timeout_seconds or 90)
+        heartbeat_interval * 2, _env_int("HEARTBEAT_TIMEOUT_SECONDS", 90)
     )
-    retry_interval = max(0.1, float(obj.msp_dispatch_retry_interval_seconds or 0.5))
+    retry_interval = max(0.1, _env_float("MSP_DISPATCH_RETRY_INTERVAL_SECONDS", 0.5))
     retry_max_wait = max(
-        retry_interval, float(obj.msp_dispatch_retry_max_wait_seconds or 5.0)
+        retry_interval, _env_float("MSP_DISPATCH_RETRY_MAX_WAIT_SECONDS", 5.0)
     )
 
-    thinking_level = (obj.gemini_thinking_level or "low").strip().lower()
+    thinking_level = _env_str("GEMINI_THINKING_LEVEL", "low").lower()
     if thinking_level not in {"none", "low", "medium", "high"}:
         thinking_level = "low"
 
-    model = (obj.gemini_model or "").strip() or "gemini-2.5-flash"
-    thinking_budget = int(obj.gemini_thinking_budget or 512)
+    model = _env_str("GEMINI_MODEL", "gemini-2.5-flash")
+    thinking_budget = _env_int("GEMINI_THINKING_BUDGET", 512)
     if thinking_budget < 0:
         thinking_budget = 0
     if thinking_budget > 8192:
         thinking_budget = 8192
 
     return RuntimeConfig(
-        mpp_path=_normalize_optional_path(obj.mpp_path, _default_mpp_path()),
-        xlsx_path=_normalize_optional_path(obj.xlsx_path, _default_xlsx_path()),
+        penale_max=penale_max,
+        solver_time_limit=solver_time_limit,
+        mpp_path=_normalize_optional_path(
+            _env_str("MPP_PATH", ""), _default_mpp_path()
+        ),
+        xlsx_path=_normalize_optional_path(
+            _env_str("XLSX_PATH", ""), _default_xlsx_path()
+        ),
         server_dir=_normalize_optional_dir(
-            obj.server_dir,
+            _env_str("SERVER_DIR", ""),
             getattr(settings, "SERVER_DIR", ""),
         ),
         heartbeat_interval_seconds=heartbeat_interval,
@@ -94,9 +138,9 @@ def load_runtime_config() -> RuntimeConfig:
         gemini_model=model,
         gemini_thinking_level=thinking_level,
         gemini_thinking_budget=thinking_budget,
-        auto_import_on_startup=bool(obj.auto_import_on_startup),
+        auto_import_on_startup=_env_bool("AUTO_IMPORT_ON_STARTUP", True),
     )
 
 
 def gemini_api_key() -> str:
-    return os.getenv("GEMINI_API_KEY", "")
+    return _env_str("GEMINI_API_KEY", "")
