@@ -8,6 +8,15 @@
 
     <div class="pian-topbar pian-topbar--end">
       <div class="pian-topbar-actions">
+        <div class="pian-filter-wrap">
+          <button type="button" id="pian-filter-btn" class="ott-toolbar-filter-btn" aria-label="Filtra commesse per stato" aria-expanded="false" aria-controls="pian-filter-panel">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2 3.5h12M4.5 8h7M7 12.5h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <span class="ott-toolbar-filter-label">Filtra</span>
+            <span class="ott-wiz-filter-dot" id="pian-filter-dot" hidden></span>
+          </button>
+        </div>
         <input
           id="pian-search"
           class="pian-search-input inv-search-input"
@@ -173,6 +182,30 @@
 
   </div>
 </main>
+
+<div id="pian-filter-panel" class="ott-wiz-filter-panel" role="dialog" aria-label="Filtra commesse per stato" hidden>
+  <p class="ott-wiz-filter-title">Filtra per stato</p>
+  <label class="ott-wiz-filter-check">
+    <input type="checkbox" id="pian-filter-in_ritardo" value="in_ritardo">
+    <span>In ritardo</span>
+  </label>
+  <label class="ott-wiz-filter-check">
+    <input type="checkbox" id="pian-filter-in_lavorazione" value="in_lavorazione">
+    <span>In corso</span>
+  </label>
+  <label class="ott-wiz-filter-check">
+    <input type="checkbox" id="pian-filter-pianificata" value="pianificata">
+    <span>Pianificate</span>
+  </label>
+  <label class="ott-wiz-filter-check">
+    <input type="checkbox" id="pian-filter-completata" value="completata">
+    <span>Completate</span>
+  </label>
+  <div class="ott-wiz-filter-actions">
+    <button type="button" id="pian-filter-clear" class="btn btn-ghost">Azzera</button>
+    <button type="button" id="pian-filter-apply" class="btn btn-primary">Applica</button>
+  </div>
+</div>
 
 <!-- ── Simple commessa creation modal ───────────────────────────────────────── -->
 <div class="det-overlay" id="job-create-overlay"
@@ -781,6 +814,35 @@ function _pianAggregateStatus(stats) {
   if (stats.working > 0) return { key: 'in_lavorazione', label: 'IN LAVORAZIONE' };
   if (stats.completed === stats.total) return { key: 'completata', label: 'COMPLETATA' };
   return { key: 'pianificata', label: 'PIANIFICATA' };
+}
+
+const _PIAN_STATUS_SORT_ORDER = {
+  in_ritardo: 0,
+  in_lavorazione: 1,
+  pianificata: 2,
+  non_pianificata: 3,
+  completata: 4,
+};
+
+function _pianGroupStatusKey(group) {
+  const commessa = group.dataset.commessa || '';
+  const stats = _pianJobStats(commessa);
+  return _pianAggregateStatus(stats).key;
+}
+
+function sortPianGroupList() {
+  const list = document.getElementById('pian-group-list');
+  if (!list) return;
+  const groups = Array.from(list.querySelectorAll('.pian-group'));
+  groups.sort((a, b) => {
+    const rankA = _PIAN_STATUS_SORT_ORDER[_pianGroupStatusKey(a)] ?? 99;
+    const rankB = _PIAN_STATUS_SORT_ORDER[_pianGroupStatusKey(b)] ?? 99;
+    if (rankA !== rankB) return rankA - rankB;
+    const nameA = (a.dataset.commessa || '').toLowerCase();
+    const nameB = (b.dataset.commessa || '').toLowerCase();
+    return nameA.localeCompare(nameB, 'it');
+  });
+  groups.forEach(g => list.appendChild(g));
 }
 
 function _refreshPianJobCard(group) {
@@ -2055,7 +2117,120 @@ function _wizAppendRow(ormId, warningCount, noteCount) {
   if (placeholder) placeholder.remove();
 
   if (host) host.prepend(div);
+  refreshPianSummary();
+  sortPianGroupList();
   filterPianGroups(document.getElementById('pian-search').value);
+}
+
+// ── Status filter state ───────────────────────────────────────────────────────
+let _pianStatusFilter = new Set();
+
+function _updatePianFilterUi() {
+  const dot = document.getElementById('pian-filter-dot');
+  const btn = document.getElementById('pian-filter-btn');
+  const active = _pianStatusFilter.size > 0;
+  if (dot) dot.hidden = !active;
+  if (btn) btn.classList.toggle('is-active', active);
+}
+
+const _PIAN_FILTER_PANEL_GAP = 6;
+
+function _positionPianFilterPanel() {
+  const panel = document.getElementById('pian-filter-panel');
+  const btn = document.getElementById('pian-filter-btn');
+  if (!panel || !btn || panel.hidden) return;
+  const rect = btn.getBoundingClientRect();
+  const panelW = panel.offsetWidth || Math.min(288, window.innerWidth - 16);
+  const panelH = panel.offsetHeight || 200;
+  let left = rect.left;
+  left = Math.max(8, Math.min(left, window.innerWidth - panelW - 8));
+  let top = rect.bottom + _PIAN_FILTER_PANEL_GAP;
+  if (top + panelH > window.innerHeight - 8) {
+    const above = rect.top - _PIAN_FILTER_PANEL_GAP - panelH;
+    if (above >= 8) top = above;
+  }
+  panel.style.left = left + 'px';
+  panel.style.top = top + 'px';
+}
+
+function _openPianFilterPanel() {
+  const panel = document.getElementById('pian-filter-panel');
+  const btn = document.getElementById('pian-filter-btn');
+  if (!panel || !btn) return;
+  panel.hidden = false;
+  btn.setAttribute('aria-expanded', 'true');
+  requestAnimationFrame(_positionPianFilterPanel);
+}
+
+function _closePianFilterPanel() {
+  const panel = document.getElementById('pian-filter-panel');
+  const btn = document.getElementById('pian-filter-btn');
+  if (!panel || !btn) return;
+  panel.hidden = true;
+  btn.setAttribute('aria-expanded', 'false');
+  panel.style.left = '';
+  panel.style.top = '';
+}
+
+function _readPianFilterCheckboxes() {
+  const keys = ['in_ritardo', 'in_lavorazione', 'pianificata', 'completata'];
+  const selected = new Set();
+  keys.forEach(key => {
+    const cb = document.getElementById('pian-filter-' + key);
+    if (cb && cb.checked) selected.add(key);
+  });
+  return selected;
+}
+
+function _syncPianFilterCheckboxes() {
+  ['in_ritardo', 'in_lavorazione', 'pianificata', 'completata'].forEach(key => {
+    const cb = document.getElementById('pian-filter-' + key);
+    if (cb) cb.checked = _pianStatusFilter.has(key);
+  });
+}
+
+function _initPianStatusFilter() {
+  const btn = document.getElementById('pian-filter-btn');
+  const panel = document.getElementById('pian-filter-panel');
+  if (!btn || !panel) return;
+
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (panel.hidden) {
+      _syncPianFilterCheckboxes();
+      _openPianFilterPanel();
+    } else {
+      _closePianFilterPanel();
+    }
+  });
+
+  document.getElementById('pian-filter-apply')?.addEventListener('click', () => {
+    _pianStatusFilter = _readPianFilterCheckboxes();
+    _closePianFilterPanel();
+    _updatePianFilterUi();
+    filterPianGroups(document.getElementById('pian-search')?.value || '');
+  });
+
+  document.getElementById('pian-filter-clear')?.addEventListener('click', () => {
+    _pianStatusFilter = new Set();
+    _syncPianFilterCheckboxes();
+    _updatePianFilterUi();
+    _closePianFilterPanel();
+    filterPianGroups(document.getElementById('pian-search')?.value || '');
+  });
+
+  document.addEventListener('click', e => {
+    if (panel.hidden) return;
+    if (btn.contains(e.target) || panel.contains(e.target)) return;
+    _closePianFilterPanel();
+  });
+
+  window.addEventListener('resize', _positionPianFilterPanel);
+  window.addEventListener('scroll', _positionPianFilterPanel, true);
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !panel.hidden) _closePianFilterPanel();
+  });
 }
 
 // ── Search / filter ───────────────────────────────────────────────────────────
@@ -2075,8 +2250,9 @@ function filterPianGroups(term) {
       row.style.display = visible ? '' : 'none';
       if (visible) hasVisibleRow = true;
     });
-    // Show the group if the job card or at least one activity row matches
-    const showGroup = !q || jobMatch || hasVisibleRow;
+    const statusKey = _pianGroupStatusKey(group);
+    const statusMatch = _pianStatusFilter.size === 0 || _pianStatusFilter.has(statusKey);
+    const showGroup = statusMatch && (!q || jobMatch || hasVisibleRow);
     group.style.display = showGroup ? '' : 'none';
     if (showGroup && !firstVisible) firstVisible = group.dataset.commessa || '';
   });
@@ -2243,6 +2419,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (name) td.innerHTML = stabBadge(name);
   });
   refreshPianSummary();
+  sortPianGroupList();
+  _initPianStatusFilter();
   filterPianGroups(document.getElementById('pian-search')?.value || '');
 
   document.addEventListener('click', _pianResPopoverClick, true);
@@ -2559,6 +2737,9 @@ async function saveEdit() {
       tr.dataset.jobId = newData.jobId || '';
       tr.dataset.activityId = newData.activityId || '';
       _refreshActivityRowCells(tr);
+      refreshPianSummary();
+      sortPianGroupList();
+      filterPianGroups(document.getElementById('pian-search')?.value || '');
     }
 
     // Visual refresh for job card meta after edit.
@@ -2840,6 +3021,7 @@ function _appendNewJobGroup(job) {
 
   list.appendChild(group);
   refreshPianSummary();
+  sortPianGroupList();
   filterPianGroups(document.getElementById('pian-search').value);
   group.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }

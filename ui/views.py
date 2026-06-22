@@ -227,8 +227,10 @@ def _fetch_grouped() -> list[dict]:
             "activities": [list of task dicts from _attivita_to_task_dict],
         }
 
-    Groups are sorted by commessa name.  Commesse that appear only in the
-    activity table (no matching Job row) are included with blank job metadata.
+    Groups are sorted by aggregate status (late, in progress, planned,
+    unplanned, completed) then by commessa name.  Commesse that appear only
+    in the activity table (no matching Job row) are included with blank job
+    metadata.
 
     Returns:
         list[dict]: One dict per commessa group.
@@ -265,6 +267,12 @@ def _fetch_grouped() -> list[dict]:
             "n_open_problems": sum(a.get("warning_count") or 0 for a in activities),
         }
         result.append({"job": job, "activities": activities})
+    result.sort(
+        key=lambda g: (
+            _JOB_STATUS_SORT_ORDER.get(_aggregate_job_status(g["activities"]), 99),
+            (g["job"].get("commessa") or "").lower(),
+        )
+    )
     return result
 
 
@@ -386,6 +394,58 @@ def _compute_activity_status(
         pills.append({"key": "pianificata", "label": "PIANIFICATA"})
 
     return pills
+
+
+_JOB_STATUS_SORT_ORDER = {
+    "in_ritardo": 0,
+    "in_lavorazione": 1,
+    "pianificata": 2,
+    "non_pianificata": 3,
+    "completata": 4,
+}
+
+
+def _activity_state_key(task: dict) -> str:
+    """Return the primary status key for a task dict (mirrors client _pianActivityState)."""
+    keys = [p["key"] for p in (task.get("status_pills") or [])]
+    if "in_ritardo" in keys:
+        return "in_ritardo"
+    if "in_lavorazione" in keys or "in_lavorazione_ritardo" in keys:
+        return "in_lavorazione"
+    if "completata" in keys:
+        return "completata"
+    if "pianificata" in keys:
+        return "pianificata"
+    return "non_pianificata"
+
+
+def _aggregate_job_status(activities: list[dict]) -> str:
+    """Return aggregate commessa status key (mirrors client _pianAggregateStatus)."""
+    if not activities:
+        return "non_pianificata"
+    late = working = completed = 0
+    for task in activities:
+        state = _activity_state_key(task)
+        if state == "completata":
+            completed += 1
+        if state == "in_ritardo":
+            late += 1
+        if state == "in_lavorazione":
+            working += 1
+    if late > 0:
+        return "in_ritardo"
+    if working > 0:
+        return "in_lavorazione"
+    if completed == len(activities):
+        return "completata"
+    return "pianificata"
+
+
+def _is_job_completed(activities: list[dict]) -> bool:
+    """True when every activity has both actual_start and actual_finish."""
+    if not activities:
+        return False
+    return all(a.get("actual_start") and a.get("actual_finish") for a in activities)
 
 
 def _attivita_to_task_dict(a) -> dict:

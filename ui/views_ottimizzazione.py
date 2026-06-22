@@ -39,7 +39,7 @@ from ui.services.optimization_apply import (
 )
 from ui.services.optimization_explanation import generate_optimization_explanation
 from ui.services.resource_conflicts import ResourceConflictError
-from ui.views import _fetch_grouped
+from ui.views import _fetch_grouped, _is_job_completed
 
 SESSION_DRAFT_KEY = "ottimizzazione_draft"
 SESSION_RESULT_KEY = "ottimizzazione_result"
@@ -134,12 +134,23 @@ def _clear_wizard_session(request: HttpRequest) -> None:
     request.session.modified = True
 
 
+def _optimization_groups() -> list[dict]:
+    """Return grouped commesse excluding those with all activities closed."""
+    return [g for g in _fetch_grouped() if not _is_job_completed(g["activities"])]
+
+
 def _sanitize_draft(draft: dict) -> dict:
     """Drop job ids that no longer resolve to activities in the database."""
     job_ids = [str(j).strip() for j in draft.get("job_ids") or [] if str(j).strip()]
     if not job_ids:
         return {}
     resolved = filter_job_ids_with_activities(job_ids)
+    completed_ids = {
+        g["job"]["job_id"]
+        for g in _fetch_grouped()
+        if g["job"].get("job_id") and _is_job_completed(g["activities"])
+    }
+    resolved = [jid for jid in resolved if jid not in completed_ids]
     if not resolved:
         return {}
     overrides = draft.get("earliest_start_overrides") or {}
@@ -286,7 +297,7 @@ def ottimizzazione(request: HttpRequest) -> HttpResponse:
         request,
         "ui/ottimizzazione_commesse.html",
         {
-            "groups_json": json.dumps(_fetch_grouped()),
+            "groups_json": json.dumps(_optimization_groups()),
             "draft_json": json.dumps(draft),
             "horizon_default": horizon,
             "solver_time_limit": load_runtime_config().solver_time_limit,

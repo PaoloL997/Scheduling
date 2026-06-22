@@ -1,0 +1,208 @@
+"""Tests for commessa aggregate status, sorting, and optimization exclusion."""
+
+from __future__ import annotations
+
+from datetime import date, timedelta
+
+from django.contrib.auth.models import User
+from django.contrib.sessions.middleware import SessionMiddleware
+from django.test import RequestFactory, TestCase
+from django.urls import reverse
+from django.utils.timezone import localdate
+
+from ui.models import Attivita, Job
+from ui.views import (
+    _aggregate_job_status,
+    _fetch_grouped,
+    _is_job_completed,
+    pianificazione,
+)
+from ui.views_ottimizzazione import (
+    SESSION_DRAFT_KEY,
+    _optimization_groups,
+    _sanitize_draft,
+    ottimizzazione,
+)
+
+
+def _make_att(
+    commessa: str,
+    *,
+    di: date | None = None,
+    df: date | None = None,
+    actual_start: date | None = None,
+    actual_finish: date | None = None,
+    item: int = 1,
+    activity: str = "A1",
+) -> Attivita:
+    return Attivita.objects.create(
+        commessa=commessa,
+        job_id=commessa,
+        item=item,
+        activity_id=f"{commessa}-{item:02d}-{activity}",
+        activity=activity,
+        data_inizio=di,
+        data_fine=df,
+        actual_start=actual_start,
+        actual_finish=actual_finish,
+        duration_min=480,
+    )
+
+
+def _request_with_session(factory: RequestFactory, path: str, user: User):
+    request = factory.get(path)
+    request.user = user
+    middleware = SessionMiddleware(lambda r: None)
+    middleware.process_request(request)
+    request.session.save()
+    return request
+
+
+class JobStatusHelpersTest(TestCase):
+    """Unit tests for aggregate status and completion helpers."""
+
+    def test_is_job_completed_requires_all_activities_closed(self) -> None:
+        tasks = [
+            {"actual_start": "2026-01-01", "actual_finish": "2026-01-02"},
+            {"actual_start": "2026-01-03", "actual_finish": "2026-01-04"},
+        ]
+        self.assertTrue(_is_job_completed(tasks))
+
+        tasks[1]["actual_finish"] = None
+        self.assertFalse(_is_job_completed(tasks))
+        self.assertFalse(_is_job_completed([]))
+
+    def test_aggregate_job_status_completed(self) -> None:
+        today = localdate()
+        tasks = [
+            {
+                "status_pills": [{"key": "completata", "label": "COMPLETATA"}],
+                "actual_start": today.isoformat(),
+                "actual_finish": today.isoformat(),
+            }
+        ]
+        self.assertEqual(_aggregate_job_status(tasks), "completata")
+
+    def test_aggregate_job_status_late_over_planned(self) -> None:
+        tasks = [
+            {"status_pills": [{"key": "in_ritardo", "label": "IN RITARDO"}]},
+            {"status_pills": [{"key": "pianificata", "label": "PIANIFICATA"}]},
+        ]
+        self.assertEqual(_aggregate_job_status(tasks), "in_ritardo")
+
+    def test_aggregate_job_status_in_progress(self) -> None:
+        tasks = [
+            {"status_pills": [{"key": "in_lavorazione", "label": "IN LAVORAZIONE"}]},
+            {"status_pills": [{"key": "pianificata", "label": "PIANIFICATA"}]},
+        ]
+        self.assertEqual(_aggregate_job_status(tasks), "in_lavorazione")
+
+
+class FetchGroupedSortTest(TestCase):
+    """Ensure _fetch_grouped orders commesse by aggregate status."""
+
+    def setUp(self) -> None:
+        today = localdate()
+        past = today - timedelta(days=30)
+        future = today + timedelta(days=30)
+
+        Job.objects.bulk_create(
+            [
+                Job(commessa="Z_DONE", job_id="Z_DONE"),
+                Job(commessa="A_LATE", job_id="A_LATE"),
+                Job(commessa="B_WORK", job_id="B_WORK"),
+                Job(commessa="C_PLAN", job_id="C_PLAN"),
+            ]
+        )
+
+        _make_att(
+            "Z_DONE",
+            di=past,
+            df=past + timedelta(days=5),
+            actual_start=past,
+            actual_finish=past + timedelta(days=5),
+        )
+        _make_att("A_LATE", di=past, df=past + timedelta(days=5))
+        _make_att(
+            "B_WORK",
+            di=past,
+            df=past + timedelta(days=5),
+            actual_start=past,
+        )
+        _make_att("C_PLAN", di=future, df=future + timedelta(days=5))
+
+    def test_fetch_grouped_sorts_by_status_then_name(self) -> None:
+        groups = _fetch_grouped()
+        names = [g["job"]["commessa"] for g in groups]
+        self.assertEqual(names, ["A_LATE", "B_WORK", "C_PLAN", "Z_DONE"])
+
+
+class OptimizationExcludeCompletedTest(TestCase):
+    """Completed commesse must not appear in optimization selection."""
+
+    def setUp(self) -> None:
+        self.factory = RequestFactory()
+        self.user = User.objects.create_user(username="opt", password="p")
+        today = localdate()
+
+        Job.objects.create(commessa="OPEN", job_id="OPEN")
+        Job.objects.create(commessa="DONE", job_id="DONE")
+
+        _make_att("OPEN", di=today, df=today + timedelta(days=5))
+        _make_att(
+            "DONE",
+            di=today,
+            df=today + timedelta(days=5),
+            actual_start=today,
+            actual_finish=today + timedelta(days=1),
+        )
+
+    def test_optimization_groups_excludes_completed(self) -> None:
+        groups = _optimization_groups()
+        commesse = {g["job"]["commessa"] for g in groups}
+        self.assertIn("OPEN", commesse)
+        self.assertNotIn("DONE", commesse)
+
+    def test_sanitize_draft_drops_completed_job_ids(self) -> None:
+        draft = {
+            "job_ids": ["OPEN", "DONE"],
+            "earliest_start_overrides": {},
+            "horizon_start": None,
+        }
+        cleaned = _sanitize_draft(draft)
+        self.assertEqual(cleaned["job_ids"], ["OPEN"])
+
+    def test_ottimizzazione_view_prunes_completed_from_session_draft(self) -> None:
+        request = _request_with_session(
+            self.factory, reverse("ottimizzazione"), self.user
+        )
+        request.session[SESSION_DRAFT_KEY] = {
+            "job_ids": ["OPEN", "DONE"],
+            "earliest_start_overrides": {},
+            "horizon_start": None,
+        }
+        request.session.save()
+
+        response = ottimizzazione(request)
+        self.assertEqual(response.status_code, 200)
+        stored = request.session.get(SESSION_DRAFT_KEY, {})
+        self.assertEqual(stored.get("job_ids"), ["OPEN"])
+
+
+class PianificazioneFilterUiTest(TestCase):
+    """Template includes status filter controls."""
+
+    def setUp(self) -> None:
+        self.factory = RequestFactory()
+        self.user = User.objects.create_user(username="plan", password="p")
+        Job.objects.create(commessa="C001", job_id="C001")
+
+    def test_pianificazione_has_status_filter_button(self) -> None:
+        request = self.factory.get(reverse("pianificazione"))
+        request.user = self.user
+        response = pianificazione(request)
+        html = response.content.decode()
+        self.assertIn('id="pian-filter-btn"', html)
+        self.assertIn('id="pian-filter-panel"', html)
+        self.assertIn('id="pian-filter-in_ritardo"', html)
+        self.assertIn('id="pian-filter-completata"', html)
