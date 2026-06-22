@@ -11,33 +11,15 @@ class ImpostazioniPageTest(TestCase):
         self.user = User.objects.create_user("settingsuser", password="pass")
         self.client.force_login(self.user)
 
-    @override_settings(
-        PENALE_MAX="5",
-        SOLVER_TIME_LIMIT="10",
-        HEARTBEAT_INTERVAL_SECONDS="30",
-    )
-    def test_impostazioni_shows_default_values(self) -> None:
+    def test_impostazioni_shows_only_managed_sections(self) -> None:
         resp = self.client.get(reverse("impostazioni"))
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
-        self.assertIn('id="input-penale-max"', html)
-        self.assertRegex(html, r'id="input-penale-max"[\s\S]*?value="5(\.0)?"')
-        self.assertRegex(html, r'id="input-solver-time-limit"[\s\S]*?value="10"')
-        self.assertRegex(html, r'id="input-heartbeat-interval"[\s\S]*?value="30"')
-
-    @override_settings(
-        PENALE_MAX="7.5",
-        SOLVER_TIME_LIMIT="30",
-        GEMINI_MODEL="gemini-2.5-pro",
-        HEARTBEAT_INTERVAL_SECONDS="45",
-    )
-    def test_impostazioni_shows_persisted_values(self) -> None:
-        resp = self.client.get(reverse("impostazioni"))
-        html = resp.content.decode()
-        self.assertRegex(html, r'id="input-penale-max"[\s\S]*?value="7\.5"')
-        self.assertRegex(html, r'id="input-solver-time-limit"[\s\S]*?value="30"')
-        self.assertRegex(html, r'id="input-gemini-model"[\s\S]*?value="gemini-2.5-pro"')
-        self.assertRegex(html, r'id="input-heartbeat-interval"[\s\S]*?value="45"')
+        self.assertNotIn("Parametri generali", html)
+        self.assertNotIn('id="input-penale-max"', html)
+        self.assertIn('id="section-stabilimenti"', html)
+        self.assertIn('id="section-responsabili"', html)
+        self.assertIn('id="section-config-testa"', html)
 
 
 class AppSettingsApiTest(TestCase):

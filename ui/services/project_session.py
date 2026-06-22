@@ -7,12 +7,13 @@ holds live data in its ORM.
 
 Presence detection
 ------------------
-The server cannot be notified when a browser tab closes.  Instead, the
-frontend sends a heartbeat ping (``GET /api/heartbeat/``) every
-:data:`_HEARTBEAT_INTERVAL` seconds.  A watchdog inside ``_hold_thread``
-wakes every :data:`_HEARTBEAT_INTERVAL` seconds and removes sessions whose
-last heartbeat is older than :data:`_HEARTBEAT_TIMEOUT`.  Explicit logouts
-take effect immediately via :meth:`ProjectSession.unregister_session`.
+The server cannot be notified when a browser tab closes.  The frontend sends
+a heartbeat ping (``GET /api/heartbeat/``) every :data:`_HEARTBEAT_INTERVAL`
+seconds **only while the user is active** (mouse, keyboard, touch).  A
+dedicated watchdog thread wakes every :data:`_HEARTBEAT_INTERVAL` seconds and
+removes sessions whose last heartbeat is older than
+:data:`_HEARTBEAT_TIMEOUT`.  Explicit logouts take effect immediately via
+:meth:`ProjectSession.unregister_session`.
 
 Lifecycle
 ---------
@@ -68,18 +69,19 @@ class ProjectSession:
         self._lock = threading.Lock()
         self._hold_thread: threading.Thread | None = None
         self._hold_active: bool = False
+        self._watchdog_thread: threading.Thread | None = None
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def register_session(self, session_key: str) -> None:
-        """Record that a session is active; start the COM lock if this is the first.
+    def ensure_session(self, session_key: str) -> None:
+        """Track a session without refreshing its heartbeat timestamp.
 
-        Also refreshes the last-seen timestamp so the heartbeat watchdog does
-        not expire a session that was just registered.  This method is
-        idempotent — calling it multiple times with the same ``session_key``
-        only updates the timestamp on subsequent calls.
+        Used after a server restart (middleware) or on login so the hold thread
+        starts even when the in-memory session set was lost.  Does **not**
+        count as user activity — only :meth:`heartbeat` / :meth:`register_session`
+        refresh the idle clock.
 
         Args:
             session_key: Django session key for the authenticated user.
@@ -88,11 +90,26 @@ class ProjectSession:
             return
         with self._lock:
             was_empty = len(self._active_sessions) == 0
+            was_new = session_key not in self._active_sessions
             self._active_sessions.add(session_key)
-            self._session_last_seen[session_key] = time.time()
+            if was_new:
+                self._session_last_seen[session_key] = time.time()
             if was_empty and not self._hold_active:
                 self._release_event.clear()
                 self._start_hold_thread()
+            self._ensure_watchdog_locked()
+
+    def register_session(self, session_key: str) -> None:
+        """Track a session and refresh its heartbeat timestamp.
+
+        Called by explicit keep-alive pings (``/api/heartbeat/``) and on login.
+        Unlike :meth:`ensure_session`, every call resets the idle timer.
+
+        Args:
+            session_key: Django session key for the authenticated user.
+        """
+        self.ensure_session(session_key)
+        self.heartbeat(session_key)
 
     def heartbeat(self, session_key: str) -> None:
         """Refresh the last-seen timestamp for an active session.
@@ -160,6 +177,37 @@ class ProjectSession:
                     "Tutte le sessioni scadute per inattività — avvio write-back .mpp."
                 )
                 self._release_event.set()
+
+    def _ensure_watchdog_locked(self) -> None:
+        """Start the session watchdog thread if not already running.
+
+        Must be called while ``_lock`` is held.
+        """
+        if self._watchdog_thread is not None and self._watchdog_thread.is_alive():
+            return
+        self._watchdog_thread = threading.Thread(
+            target=self._watchdog_loop,
+            daemon=True,
+            name="session-watchdog",
+        )
+        self._watchdog_thread.start()
+
+    def _watchdog_loop(self) -> None:
+        """Expire idle sessions and restart the hold thread if it died unexpectedly."""
+        while True:
+            time.sleep(_heartbeat_interval_seconds())
+            with self._lock:
+                has_sessions = bool(self._active_sessions)
+            if not has_sessions:
+                continue
+            self._expire_stale_sessions()
+            with self._lock:
+                if self._active_sessions and not self._hold_active:
+                    logger.warning(
+                        "Watchdog: hold thread assente con sessioni attive — riavvio."
+                    )
+                    self._release_event.clear()
+                    self._start_hold_thread()
 
     def _start_hold_thread(self) -> None:
         """Spawn the background thread that holds the COM lock.

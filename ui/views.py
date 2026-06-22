@@ -1298,9 +1298,6 @@ def impostazioni(request: HttpRequest):
             "configurazioni_teste": configurazioni_teste,
             "all_testa_models_json": json.dumps(all_testa_models),
             "all_gen_models_json": json.dumps(all_gen_models),
-            "penale_max": load_runtime_config().penale_max,
-            "solver_time_limit": int(load_runtime_config().solver_time_limit),
-            "runtime": load_runtime_config(),
         },
     )
 

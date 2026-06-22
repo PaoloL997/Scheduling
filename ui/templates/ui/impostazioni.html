@@ -1,93 +1,9 @@
 {% extends "ui/base.html" %}
-{% load l10n %}
 
 {% block title %}Impostazioni — Programmazione Produzione{% endblock %}
 
 {% block content %}
 <div class="settings-page">
-
-    <section class="settings-section settings-section--generali" id="section-generali">
-        <div class="settings-section-header">
-            <h2>Parametri generali</h2>
-        </div>
-        <div class="settings-generali-card">
-            <div class="settings-form-row">
-                <label for="input-penale-max">Penale max. (%)</label>
-                <input id="input-penale-max" type="number" min="0" max="100" step="0.01"
-                       class="settings-input" value="{{ penale_max|unlocalize }}">
-            </div>
-            <div class="settings-form-row">
-                <label for="input-solver-time-limit">Timeout solver (s)</label>
-                <input id="input-solver-time-limit" type="number" min="1" max="600" step="1"
-                       class="settings-input" value="{{ solver_time_limit|unlocalize }}">
-            </div>
-            <div class="settings-form-row">
-                <label for="input-mpp-path">Path file MPP</label>
-                <input id="input-mpp-path" type="text" class="settings-input" value="{{ runtime.mpp_path }}">
-            </div>
-            <div class="settings-form-row">
-                <label for="input-xlsx-path">Path file Excel</label>
-                <input id="input-xlsx-path" type="text" class="settings-input" value="{{ runtime.xlsx_path }}">
-            </div>
-            <div class="settings-form-row">
-                <label for="input-server-dir">Path project/dataset server</label>
-                <div>
-                    <input id="input-server-dir" type="text" class="settings-input" value="{{ runtime.server_dir }}">
-                    <small style="display:block; margin-top:4px; color:var(--text-subtle);">
-                        Opzionale: directory base condivisa (es. network drive) usata come riferimento operativo.
-                        I file effettivi restano quelli in "Path file MPP" e "Path file Excel".
-                    </small>
-                </div>
-            </div>
-            <div class="settings-form-row">
-                <label for="input-heartbeat-interval">Heartbeat interval (s)</label>
-                <input id="input-heartbeat-interval" type="number" min="5" max="300" step="1"
-                       class="settings-input" value="{{ runtime.heartbeat_interval_seconds }}">
-            </div>
-            <div class="settings-form-row">
-                <label for="input-heartbeat-timeout">Heartbeat timeout (s)</label>
-                <input id="input-heartbeat-timeout" type="number" min="10" max="1800" step="1"
-                       class="settings-input" value="{{ runtime.heartbeat_timeout_seconds }}">
-            </div>
-            <div class="settings-form-row">
-                <label for="input-retry-interval">MSP retry interval (s)</label>
-                <input id="input-retry-interval" type="number" min="0.1" max="5" step="0.1"
-                       class="settings-input" value="{{ runtime.msp_dispatch_retry_interval_seconds|unlocalize }}">
-            </div>
-            <div class="settings-form-row">
-                <label for="input-retry-max-wait">MSP retry max wait (s)</label>
-                <input id="input-retry-max-wait" type="number" min="1" max="120" step="0.1"
-                       class="settings-input" value="{{ runtime.msp_dispatch_retry_max_wait_seconds|unlocalize }}">
-            </div>
-            <div class="settings-form-row">
-                <label for="input-gemini-model">Gemini model</label>
-                <input id="input-gemini-model" type="text" class="settings-input" value="{{ runtime.gemini_model }}">
-            </div>
-            <div class="settings-form-row">
-                <label for="input-gemini-thinking-level">Gemini thinking level</label>
-                <select id="input-gemini-thinking-level" class="settings-input">
-                    <option value="none" {% if runtime.gemini_thinking_level == 'none' %}selected{% endif %}>none</option>
-                    <option value="low" {% if runtime.gemini_thinking_level == 'low' %}selected{% endif %}>low</option>
-                    <option value="medium" {% if runtime.gemini_thinking_level == 'medium' %}selected{% endif %}>medium</option>
-                    <option value="high" {% if runtime.gemini_thinking_level == 'high' %}selected{% endif %}>high</option>
-                </select>
-            </div>
-            <div class="settings-form-row">
-                <label for="input-gemini-thinking-budget">Gemini thinking budget</label>
-                <input id="input-gemini-thinking-budget" type="number" min="0" max="8192" step="1"
-                       class="settings-input" value="{{ runtime.gemini_thinking_budget }}">
-            </div>
-            <div class="settings-form-row">
-                <label for="input-auto-import-on-startup">Auto-import all'avvio</label>
-                <input id="input-auto-import-on-startup" type="checkbox"
-                       {% if runtime.auto_import_on_startup %}checked{% endif %}>
-            </div>
-            <div class="settings-generali-actions">
-                <button class="btn btn-primary" onclick="saveGenerali()">Info</button>
-                <span id="generali-feedback" style="display:none;"></span>
-            </div>
-        </div>
-    </section>
 
     <section class="settings-accordion" id="section-stabilimenti">
         <div class="settings-accordion-header">
@@ -598,24 +514,6 @@ function toggleSettingsAccordion(btn) {
         })
         .catch(function () { alert("Errore di rete. Riprova."); });
     };
-
-    /* ------------------------------------------------------------------ */
-    /* Parametri generali                                                   */
-    /* ------------------------------------------------------------------ */
-    window.saveGenerali = function () {
-        const fb  = document.getElementById("generali-feedback");
-        fb.textContent = "Parametri letti da .env: modifica il file .env e riavvia il server.";
-        fb.style.color = "var(--color-warning, #9a6f00)";
-        fb.style.display = "";
-        setTimeout(function () { fb.style.display = "none"; }, 5000);
-    };
-
-    function getCsrfToken() {
-        const el = document.querySelector('[name=csrfmiddlewaretoken]');
-        if (el) return el.value;
-        const m = document.cookie.match(/csrftoken=([^;]+)/);
-        return m ? m[1] : '';
-    }
 
     /* ------------------------------------------------------------------ */
     /* Enter key submits modal                                              */

@@ -21,4 +21,5 @@ def open_problems(request: HttpRequest) -> dict:
     return {
         "global_open_problems": ProblemaAttivita.objects.filter(risolto=False).count(),
         "heartbeat_interval_ms": runtime.heartbeat_interval_seconds * 1000,
+        "heartbeat_timeout_ms": runtime.heartbeat_timeout_seconds * 1000,
     }

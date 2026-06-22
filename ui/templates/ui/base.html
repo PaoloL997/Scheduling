@@ -252,14 +252,36 @@
 {% if user.is_authenticated %}
 <script>
     (function () {
+        var intervalMs = {{ heartbeat_interval_ms|default:30000 }};
+        var idleLimitMs = {{ heartbeat_timeout_ms|default:90000 }};
+        var lastActivity = Date.now();
+
+        function markActive() {
+            lastActivity = Date.now();
+        }
+
+        ["mousedown", "mousemove", "keydown", "touchstart", "scroll", "click"].forEach(function (evt) {
+            document.addEventListener(evt, markActive, { passive: true });
+        });
+        document.addEventListener("visibilitychange", function () {
+            if (document.visibilityState === "visible") {
+                markActive();
+            }
+        });
+
         function sendHeartbeat() {
+            if (Date.now() - lastActivity > idleLimitMs) {
+                return;
+            }
             fetch("{% url 'api_heartbeat' %}", {
                 method: "GET",
                 credentials: "same-origin",
             }).catch(function () {});
         }
+
+        markActive();
         sendHeartbeat();
-        setInterval(sendHeartbeat, {{ heartbeat_interval_ms|default:30000 }});
+        setInterval(sendHeartbeat, intervalMs);
     })();
 </script>
 {% endif %}

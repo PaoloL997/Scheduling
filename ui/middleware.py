@@ -8,9 +8,10 @@ in-memory ``_active_sessions`` set would be empty, so the hold thread
 would not be started.
 
 On every authenticated request this middleware calls
-:meth:`~ui.services.project_session.ProjectSession.register_session`,
-which is idempotent — if the session is already tracked the call is a
-no-op; if it is new (e.g. after a restart) the hold thread is started.
+:meth:`~ui.services.project_session.ProjectSession.ensure_session`,
+which adds the session to the active set (if missing) and starts the hold
+thread after a server restart.  It does **not** refresh the heartbeat idle
+timer — only explicit ``/api/heartbeat/`` pings do that.
 
 Additionally, while the import status is :attr:`~ui.services.importer.ImportStatus.WRITING`
 (write-back in progress), all mutating API requests (``POST``, ``PUT``,
@@ -75,7 +76,7 @@ class SessionTrackingMiddleware:
             try:
                 from ui.services.project_session import project_session
 
-                project_session.register_session(request.session.session_key)
+                project_session.ensure_session(request.session.session_key)
             except Exception as exc:  # noqa: BLE001
                 logger.error("Errore in SessionTrackingMiddleware: %s", exc)
 
