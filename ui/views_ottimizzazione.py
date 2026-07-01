@@ -39,7 +39,7 @@ from ui.services.optimization_apply import (
 )
 from ui.services.optimization_explanation import generate_optimization_explanation
 from ui.services.resource_conflicts import ResourceConflictError
-from ui.views import _fetch_grouped, _is_job_completed
+from ui.views import _fetch_grouped, _has_plannable_activities
 
 SESSION_DRAFT_KEY = "ottimizzazione_draft"
 SESSION_RESULT_KEY = "ottimizzazione_result"
@@ -135,8 +135,8 @@ def _clear_wizard_session(request: HttpRequest) -> None:
 
 
 def _optimization_groups() -> list[dict]:
-    """Return grouped commesse excluding those with all activities closed."""
-    return [g for g in _fetch_grouped() if not _is_job_completed(g["activities"])]
+    """Return grouped commesse that have at least one plannable activity."""
+    return [g for g in _fetch_grouped() if _has_plannable_activities(g["activities"])]
 
 
 def _sanitize_draft(draft: dict) -> dict:
@@ -145,12 +145,12 @@ def _sanitize_draft(draft: dict) -> dict:
     if not job_ids:
         return {}
     resolved = filter_job_ids_with_activities(job_ids)
-    completed_ids = {
+    unplannable_ids = {
         g["job"]["job_id"]
         for g in _fetch_grouped()
-        if g["job"].get("job_id") and _is_job_completed(g["activities"])
+        if g["job"].get("job_id") and not _has_plannable_activities(g["activities"])
     }
-    resolved = [jid for jid in resolved if jid not in completed_ids]
+    resolved = [jid for jid in resolved if jid not in unplannable_ids]
     if not resolved:
         return {}
     overrides = draft.get("earliest_start_overrides") or {}

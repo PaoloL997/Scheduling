@@ -2629,9 +2629,37 @@ body.light .drop-zone.has-file {
 .recap-grid-label { color: var(--text-subtle); }
 
 /* Autofill notice — kept in DOM for JS compatibility but visually hidden */
-.autofill-notice,
-.s1-autofill-notice {
+.autofill-notice {
   display: none !important;
+}
+
+.s1-autofill-notice {
+  display: block;
+  margin: 0 0 1rem;
+  padding: .6rem .85rem;
+  border-radius: .5rem;
+  font-size: .82rem;
+  line-height: 1.4;
+}
+.s1-autofill-notice.is-ok {
+  background: hsl(142 30% 14%);
+  border: 1px solid hsl(142 40% 30%);
+  color: var(--green);
+}
+.s1-autofill-notice.is-warn {
+  background: hsl(38 30% 14%);
+  border: 1px solid hsl(38 45% 32%);
+  color: hsl(38 70% 62%);
+}
+body.light .s1-autofill-notice.is-ok {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #15803d;
+}
+body.light .s1-autofill-notice.is-warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
 }
 
 /* Commessa panel (step 1 WPS) */

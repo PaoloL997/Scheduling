@@ -6,6 +6,7 @@ modal wizard embedded in the ``pianificazione`` page.
 """
 
 import json
+import logging
 import os
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -26,6 +27,8 @@ from ui.services.activity_inventory import (
 from ui.services.gemini import ReadWPS
 from ui.services.identifiers import build_job_id
 from ui.services.wps_parser import compute_bore, extract_tube_pitch, parse_wps_name
+
+logger = logging.getLogger(__name__)
 
 
 # ── AJAX: analizza WPS ────────────────────────────────────────────────────────
@@ -81,9 +84,26 @@ def api_analizza_wps(request: HttpRequest) -> JsonResponse:
     tmp_path = default_storage.save(f"wps/_tmp_{pdf.name}", pdf)
     abs_path = os.path.join(settings.MEDIA_ROOT, tmp_path)
 
+    logger.info(
+        "WPS analizza start: file=%s tmp_path=%s parsed=%s user=%s",
+        pdf.name,
+        tmp_path,
+        parsed,
+        getattr(request.user, "username", "?"),
+    )
+
     gemini_data = ReadWPS().invoke(abs_path)
     bore = compute_bore(gemini_data.get("diameter"), gemini_data.get("s1"))
+    if not isinstance(bore, dict):
+        bore = {}
     bore["tube_pitch"] = extract_tube_pitch(gemini_data.get("tube_pitch"))
+
+    logger.info(
+        "WPS analizza result: file=%s gemini=%s bore=%s",
+        pdf.name,
+        gemini_data,
+        bore,
+    )
 
     return JsonResponse(
         {
@@ -128,15 +148,62 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
         except (ValueError, TypeError):
             return None
 
+    exclude_activity_id = None
+    raw_exclude = request.GET.get("exclude_activity_id", "").strip()
+    if raw_exclude:
+        try:
+            exclude_activity_id = int(raw_exclude)
+        except (ValueError, TypeError):
+            return JsonResponse(
+                {"ok": False, "error": "exclude_activity_id non valido."},
+                status=400,
+            )
+
+    bore_min = _float(request.GET.get("bore_min"))
+    bore_max = _float(request.GET.get("bore_max"))
+    bore_mid = _float(request.GET.get("bore_mid"))
+    tube_pitch = _float(request.GET.get("tube_pitch"))
+    modello_testa = (request.GET.get("modello_testa") or "").strip() or None
+
+    strict_requirements = request.GET.get("strict_requirements", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+    if exclude_activity_id:
+        try:
+            att = Attivita.objects.get(pk=exclude_activity_id)
+        except Attivita.DoesNotExist:
+            return JsonResponse(
+                {"ok": False, "error": "Attività non trovata."},
+                status=404,
+            )
+        if not modello_testa and att.modello_testa:
+            modello_testa = att.modello_testa
+        if bore_min is None and att.bore_min is not None:
+            bore_min = float(att.bore_min)
+        if bore_max is None and att.bore_max is not None:
+            bore_max = float(att.bore_max)
+        if bore_mid is None and att.bore_mid is not None:
+            bore_mid = float(att.bore_mid)
+        if tube_pitch is None and att.tube_pitch is not None:
+            tube_pitch = float(att.tube_pitch)
+        if not stabilimento and att.stabilimento:
+            stabilimento = att.stabilimento
+        strict_requirements = True
+
     result = get_available_resources(
         stabilimento=stabilimento,
         data_inizio=data_inizio,
         data_fine=data_fine,
-        bore_min=_float(request.GET.get("bore_min")),
-        bore_max=_float(request.GET.get("bore_max")),
-        bore_mid=_float(request.GET.get("bore_mid")),
-        tube_pitch=_float(request.GET.get("tube_pitch")),
-        modello_testa=request.GET.get("modello_testa") or None,
+        bore_min=bore_min,
+        bore_max=bore_max,
+        bore_mid=bore_mid,
+        tube_pitch=tube_pitch,
+        modello_testa=modello_testa,
+        exclude_activity_id=exclude_activity_id,
+        strict_requirements=strict_requirements,
     )
 
     return JsonResponse(

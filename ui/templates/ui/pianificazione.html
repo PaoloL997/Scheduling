@@ -131,6 +131,11 @@
                    data-responsible="{{ task.responsible|default:'' }}"
                    data-resources="{{ task.resources|default:'' }}"
                    data-resources-typed="{{ task.resources_by_tipo_json }}"
+                   data-modello-testa="{{ task.modello_testa|default:'' }}"
+                   data-bore-min="{{ task.bore_min|default:'' }}"
+                   data-bore-max="{{ task.bore_max|default:'' }}"
+                   data-bore-mid="{{ task.bore_mid|default:'' }}"
+                   data-tube-pitch="{{ task.tube_pitch|default:'' }}"
                    data-predecessors="{{ task.predecessors|default:'' }}"
                    onclick="openDetailModal(this, 'task')">
                 <span class="pian-col-id">{{ task.activity_id }}</span>
@@ -626,6 +631,116 @@
     <div style="display:flex; justify-content:flex-end; gap:.5rem;">
       <button class="btn btn-ghost" onclick="closeRisolviModal()">Annulla</button>
       <button id="risolvi-confirm-btn" class="btn btn-primary" onclick="confirmRisolvi()">Conferma</button>
+    </div>
+  </div>
+</div>
+
+<!-- Risorse picker modal (edit attività) -->
+<div id="risorse-picker-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:2500; align-items:center; justify-content:center;">
+  <div style="background:var(--surface); border:1px solid var(--border); border-radius:.75rem; padding:1.25rem; width:min(720px,94vw); max-height:90vh; overflow:auto; display:flex; flex-direction:column; gap:.75rem;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:.5rem;">
+      <h3 style="margin:0; font-size:1rem; font-weight:600;">Seleziona risorse</h3>
+      <button type="button" class="btn-icon" onclick="closeRisorsePicker()" aria-label="Chiudi">&#x2715;</button>
+    </div>
+    <p class="wiz-subtitle" style="margin:0;">Solo item disponibili e non impegnati nell'intervallo dell'attività.</p>
+    <div id="rp-recap" class="s5-recap-banner" style="display:none;"></div>
+    <div id="rp-loader" class="wiz-spinner-wrap">
+      <div class="spinner"></div>
+      <p class="wiz-subtitle" style="margin:.5rem 0 0;">Caricamento risorse disponibili…</p>
+    </div>
+    <div id="rp-content" style="display:none;">
+      <div class="rs-card">
+        <div class="rs-row">
+          <div class="rs-row-label"><span class="rs-row-name">Testa</span></div>
+          <div class="rs-row-body">
+            <div class="ms-wrap" id="wrap-rp-teste">
+              <button type="button" class="ms-trigger" onclick="toggleMs('wrap-rp-teste')">
+                <span class="ms-trigger-text" id="lbl-rp-teste">Nessuna selezionata</span>
+                <span class="ms-arrow">▼</span>
+              </button>
+              <div class="ms-dropdown">
+                <div class="ms-search-wrap">
+                  <input type="text" class="ms-search" placeholder="Cerca testa…" oninput="filterMs('wrap-rp-teste',this.value)">
+                </div>
+                <div id="items-rp-teste"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="rs-row">
+          <div class="rs-row-label"><span class="rs-row-name">Mandrini</span></div>
+          <div class="rs-row-body">
+            <div class="ms-wrap" id="wrap-rp-mandrini">
+              <button type="button" class="ms-trigger" onclick="toggleMs('wrap-rp-mandrini')">
+                <span class="ms-trigger-text" id="lbl-rp-mandrini">Nessuno selezionato</span>
+                <span class="ms-arrow">▼</span>
+              </button>
+              <div class="ms-dropdown">
+                <div class="ms-search-wrap">
+                  <input type="text" class="ms-search" placeholder="Cerca mandrino…" oninput="filterMs('wrap-rp-mandrini',this.value)">
+                </div>
+                <div id="items-rp-mandrini"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="rs-row">
+          <div class="rs-row-label"><span class="rs-row-name">Tastatori</span></div>
+          <div class="rs-row-body">
+            <div class="ms-wrap" id="wrap-rp-tastatori">
+              <button type="button" class="ms-trigger" onclick="toggleMs('wrap-rp-tastatori')">
+                <span class="ms-trigger-text" id="lbl-rp-tastatori">Nessuno selezionato</span>
+                <span class="ms-arrow">▼</span>
+              </button>
+              <div class="ms-dropdown">
+                <div class="ms-search-wrap">
+                  <input type="text" class="ms-search" placeholder="Cerca tastatore…" oninput="filterMs('wrap-rp-tastatori',this.value)">
+                </div>
+                <div id="items-rp-tastatori"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="rs-row">
+          <div class="rs-row-label"><span class="rs-row-name">Maschere</span></div>
+          <div class="rs-row-body">
+            <div class="ms-wrap" id="wrap-rp-maschere">
+              <button type="button" class="ms-trigger" onclick="toggleMs('wrap-rp-maschere')">
+                <span class="ms-trigger-text" id="lbl-rp-maschere">Nessuna selezionata</span>
+                <span class="ms-arrow">▼</span>
+              </button>
+              <div class="ms-dropdown">
+                <div class="ms-search-wrap">
+                  <input type="text" class="ms-search" placeholder="Cerca maschera…" oninput="filterMs('wrap-rp-maschere',this.value)">
+                </div>
+                <div id="items-rp-maschere"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="rs-row">
+          <div class="rs-row-label"><span class="rs-row-name">Generatori</span></div>
+          <div class="rs-row-body">
+            <div class="ms-wrap" id="wrap-rp-generatori">
+              <button type="button" class="ms-trigger" onclick="toggleMs('wrap-rp-generatori')">
+                <span class="ms-trigger-text" id="lbl-rp-generatori">Nessuno selezionato</span>
+                <span class="ms-arrow">▼</span>
+              </button>
+              <div class="ms-dropdown">
+                <div class="ms-search-wrap">
+                  <input type="text" class="ms-search" placeholder="Cerca generatore…" oninput="filterMs('wrap-rp-generatori',this.value)">
+                </div>
+                <div id="items-rp-generatori"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="rp-error" class="wiz-error" style="display:none;"></div>
+    <div style="display:flex; justify-content:flex-end; gap:.5rem; margin-top:.25rem;">
+      <button type="button" class="btn btn-ghost" onclick="closeRisorsePicker()">Annulla</button>
+      <button type="button" class="btn btn-primary" onclick="confirmRisorsePicker()">Conferma</button>
     </div>
   </div>
 </div>
@@ -1383,10 +1498,10 @@ function _s1ShowDataPanel(autofill) {
   const panel = document.getElementById('s1-data-panel');
   panel.style.display = '';
   const notice = document.getElementById('s1-autofill-notice');
-  notice.style.display = autofill ? '' : 'none';
   if (autofill) {
     const p = WIZ.parsed;
-    const b = WIZ.bore;
+    const b = WIZ.bore || {};
+    const g = WIZ.gemini || {};
     const setF = (id, val, highlight) => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -1401,6 +1516,25 @@ function _s1ShowDataPanel(autofill) {
     setF('s1-bore-mid', b.mid,              true);
     setF('s1-bore-max', b.max,              true);
     setF('s1-passo',    b.tube_pitch,       true);
+
+    const hasBore = [b.min, b.mid, b.max, b.tube_pitch].some(
+      v => v != null && v !== ''
+    );
+    if (g.error) {
+      notice.textContent = `Gemini non ha estratto le misure: ${g.error}. Inseriscile manualmente.`;
+      notice.className = 's1-autofill-notice is-warn';
+      notice.style.display = '';
+    } else if (!hasBore) {
+      notice.textContent = 'Gemini non ha trovato diameter/S1 nel WPS. Inserisci le misure manualmente.';
+      notice.className = 's1-autofill-notice is-warn';
+      notice.style.display = '';
+    } else {
+      notice.textContent = 'Misure calcolate da Gemini. Puoi correggerle se necessario.';
+      notice.className = 's1-autofill-notice is-ok';
+      notice.style.display = '';
+    }
+  } else {
+    notice.style.display = 'none';
   }
 }
 
@@ -1612,21 +1746,78 @@ function step4Next() {
   _s5LoadRisorse();
 }
 
-// ── Step 5 ────────────────────────────────────────────────────────────────────
-const _S5_DATA = {};
+// ── Step 5 / Risorse picker (shared) ─────────────────────────────────────────
+const _RISORSE_CAT_KEYS = ['teste', 'mandrini', 'tastatori', 'maschere', 'generatori'];
+const _RISORSE_DATA_STORES = { s5: {}, rp: {} };
+let _RISORSE_ACTIVE_PREFIX = 's5';
+let _RISORSE_TARGET = null;
 
-async function _s5LoadRisorse() {
-  document.getElementById('s5-loader').style.display = '';
-  document.getElementById('s5-content').style.display = 'none';
-  document.getElementById('s5-error').style.display = 'none';
+const TIPO_TO_CAT = {
+  testa: 'teste',
+  mandrino: 'mandrini',
+  tastatore: 'tastatori',
+  maschera: 'maschere',
+  generatore: 'generatori',
+};
 
-  // Populate recap banner — table-grid layout
-  const recap = document.getElementById('s5-recap');
+function _emptyRisorse() {
+  return { teste: [], mandrini: [], tastatori: [], maschere: [], generatori: [] };
+}
+
+function _typedToRisorse(typed) {
+  const risorse = _emptyRisorse();
+  if (!typed) return risorse;
+  let obj = typed;
+  if (typeof typed === 'string') {
+    try { obj = JSON.parse(typed); } catch (_) { return risorse; }
+  }
+  for (const [tipo, ids] of Object.entries(obj || {})) {
+    const cat = TIPO_TO_CAT[tipo];
+    if (cat && Array.isArray(ids)) risorse[cat] = [...ids];
+  }
+  return risorse;
+}
+
+function _risorseToFlat(risorse) {
+  return _RISORSE_CAT_KEYS.flatMap(cat => risorse[cat] || []).join(';');
+}
+
+function _risorseDom(prefix) {
+  const isS5 = prefix === 's5';
+  return {
+    recap: isS5 ? 's5-recap' : 'rp-recap',
+    loader: isS5 ? 's5-loader' : 'rp-loader',
+    content: isS5 ? 's5-content' : 'rp-content',
+    error: isS5 ? 's5-error' : 'rp-error',
+    root: isS5 ? '#add-modal' : '#risorse-picker-overlay',
+    wrapId: cat => isS5 ? `wrap-${cat}` : `wrap-rp-${cat}`,
+    lblId: cat => isS5 ? `lbl-${cat}` : `lbl-rp-${cat}`,
+    itemsId: cat => isS5 ? `items-${cat}` : `items-rp-${cat}`,
+  };
+}
+
+function _risorsePrefixFromWrap(wrapId) {
+  return wrapId.includes('-rp-') || wrapId.startsWith('wrap-rp-') ? 'rp' : 's5';
+}
+
+function _risorseCatFromWrap(wrapId) {
+  return wrapId.replace(/^wrap-(?:rp-)?/, '');
+}
+
+async function _loadRisorse(prefix, opts) {
+  const dom = _risorseDom(prefix);
+  _RISORSE_ACTIVE_PREFIX = prefix;
+  _RISORSE_TARGET = opts.risorseTarget;
+  document.getElementById(dom.loader).style.display = '';
+  document.getElementById(dom.content).style.display = 'none';
+  document.getElementById(dom.error).style.display = 'none';
+
+  const recap = document.getElementById(dom.recap);
   if (recap) {
     const cells = [];
-    if (WIZ.modello_testa)
-      cells.push({ lbl: 'Modello testa', val: WIZ.modello_testa, accent: true });
-    const b = WIZ.bore || {};
+    if (opts.modello_testa)
+      cells.push({ lbl: 'Modello testa', val: opts.modello_testa, accent: true });
+    const b = opts.bore || {};
     if (b.min  != null && b.min  !== '') cells.push({ lbl: 'Ø min',   val: `${b.min} mm` });
     if (b.mid  != null && b.mid  !== '') cells.push({ lbl: 'Ø punt.', val: `${b.mid} mm` });
     if (b.max  != null && b.max  !== '') cells.push({ lbl: 'Ø max',   val: `${b.max} mm` });
@@ -1645,60 +1836,128 @@ async function _s5LoadRisorse() {
   }
 
   const params = new URLSearchParams({
-    stabilimento:  WIZ.stabilimento,
-    data_inizio:   WIZ.dataInizio,
-    data_fine:     WIZ.dataFine,
-    bore_min:      WIZ.bore.min      ?? '',
-    bore_max:      WIZ.bore.max      ?? '',
-    bore_mid:      WIZ.bore.mid      ?? '',
-    tube_pitch:    WIZ.bore.tube_pitch ?? '',
-    modello_testa: WIZ.modello_testa,
+    stabilimento:  opts.stabilimento || '',
+    data_inizio:   opts.data_inizio || '',
+    data_fine:     opts.data_fine || '',
+    bore_min:      opts.bore?.min ?? '',
+    bore_max:      opts.bore?.max ?? '',
+    bore_mid:      opts.bore?.mid ?? '',
+    tube_pitch:    opts.bore?.tube_pitch ?? '',
+    modello_testa: opts.modello_testa || '',
   });
+  if (opts.exclude_activity_id) {
+    params.set('exclude_activity_id', String(opts.exclude_activity_id));
+  }
+  if (opts.strict_requirements) {
+    params.set('strict_requirements', '1');
+  }
+
   try {
     const resp = await fetch(`/api/attivita/risorse/?${params}`);
     const data = await resp.json();
     if (data.ok) {
-      WIZ.risorse.teste      = [...(data.pre_testa      || [])];
-      WIZ.risorse.mandrini   = [...(data.pre_mandrini   || [])];
-      WIZ.risorse.tastatori  = [...(data.pre_tastatori  || [])];
-      WIZ.risorse.maschere   = [...(data.pre_maschere   || [])];
-      WIZ.risorse.generatori = [...(data.pre_generatori || [])];
-      // Build UID→plant map for Riepilogo problem detection
-      window._S5_INVENTORY_MAP = {};
-      ['teste','mandrini','tastatori','maschere','generatori'].forEach(cat => {
-        (data[cat] || []).forEach(r => {
-          const uid = r.uid || r.id || String(r);
-          const plant = r.stab_esterno || r.plant || '';
-          if (uid) window._S5_INVENTORY_MAP[uid] = plant;
+      const pre = opts.useServerPreselect
+        ? {
+            teste:      [...(data.pre_testa      || [])],
+            mandrini:   [...(data.pre_mandrini   || [])],
+            tastatori:  [...(data.pre_tastatori  || [])],
+            maschere:   [...(data.pre_maschere   || [])],
+            generatori: [...(data.pre_generatori || [])],
+          }
+        : {
+            teste:      [...(opts.risorseTarget.teste      || [])],
+            mandrini:   [...(opts.risorseTarget.mandrini   || [])],
+            tastatori:  [...(opts.risorseTarget.tastatori  || [])],
+            maschere:   [...(opts.risorseTarget.maschere   || [])],
+            generatori: [...(opts.risorseTarget.generatori || [])],
+          };
+      if (opts.useServerPreselect) {
+        opts.risorseTarget.teste      = [...pre.teste];
+        opts.risorseTarget.mandrini   = [...pre.mandrini];
+        opts.risorseTarget.tastatori  = [...pre.tastatori];
+        opts.risorseTarget.maschere   = [...pre.maschere];
+        opts.risorseTarget.generatori = [...pre.generatori];
+      }
+      if (prefix === 's5') {
+        window._S5_INVENTORY_MAP = {};
+        _RISORSE_CAT_KEYS.forEach(cat => {
+          (data[cat] || []).forEach(r => {
+            const uid = r.uid || r.id || String(r);
+            const plant = r.stab_esterno || r.plant || '';
+            if (uid) window._S5_INVENTORY_MAP[uid] = plant;
+          });
         });
+      }
+      _RISORSE_CAT_KEYS.forEach(cat => {
+        _renderRisorseCat(prefix, cat, data[cat], pre[cat]);
       });
-      _s5RenderCat('teste',      data.teste,      data.pre_testa);
-      _s5RenderCat('mandrini',   data.mandrini,   data.pre_mandrini);
-      _s5RenderCat('tastatori',  data.tastatori,  data.pre_tastatori);
-      _s5RenderCat('maschere',   data.maschere,   data.pre_maschere);
-      _s5RenderCat('generatori', data.generatori, data.pre_generatori);
+      if (opts.exclude_activity_id) {
+        const total = _RISORSE_CAT_KEYS.reduce(
+          (n, cat) => n + ((data[cat] || []).length),
+          0,
+        );
+        if (total === 0) {
+          _showRisorseError(
+            prefix,
+            'Nessuna risorsa idonea disponibile nel periodo. Verifica modello testa, misure foro, passo tubo e date dell\'attività.',
+          );
+        }
+      }
     } else {
-      _s5ShowError(data.error || 'Errore nel caricamento risorse.');
+      _showRisorseError(prefix, data.error || 'Errore nel caricamento risorse.');
     }
   } catch (_) {
-    _s5ShowError('Errore di rete nel caricamento risorse.');
+    _showRisorseError(prefix, 'Errore di rete nel caricamento risorse.');
   }
-  document.getElementById('s5-loader').style.display = 'none';
-  document.getElementById('s5-content').style.display = '';
+  document.getElementById(dom.loader).style.display = 'none';
+  document.getElementById(dom.content).style.display = '';
 }
 
-function _s5RenderCat(key, items, preSelected) {
-  _S5_DATA[key] = items || [];
-  const pre = new Set(preSelected || []);
-  WIZ.risorse[key] = [...pre];
-  _s5RefreshItems(key, '');
-  _s5UpdateLabel(key);
+async function _s5LoadRisorse() {
+  const b = WIZ.bore || {};
+  await _loadRisorse('s5', {
+    stabilimento: WIZ.stabilimento,
+    data_inizio: WIZ.dataInizio,
+    data_fine: WIZ.dataFine,
+    bore: WIZ.bore,
+    modello_testa: WIZ.modello_testa,
+    risorseTarget: WIZ.risorse,
+    useServerPreselect: true,
+    strict_requirements: Boolean(
+      WIZ.modello_testa && b.min != null && b.min !== '' && b.max != null && b.max !== ''
+    ),
+  });
 }
 
-function _s5RefreshItems(key, query) {
-  const container = document.getElementById('items-' + key);
+function _resourceUid(r) {
+  return r.uid || r.id || String(r);
+}
+
+function _pruneRisorseToAvailable(prefix) {
+  if (!_RISORSE_TARGET) return;
+  _RISORSE_CAT_KEYS.forEach(cat => {
+    const available = new Set(
+      (_RISORSE_DATA_STORES[prefix][cat] || []).map(_resourceUid)
+    );
+    _RISORSE_TARGET[cat] = (_RISORSE_TARGET[cat] || []).filter(uid => available.has(uid));
+  });
+}
+
+function _renderRisorseCat(prefix, key, items, preSelected) {
+  const list = items || [];
+  _RISORSE_DATA_STORES[prefix][key] = list;
+  const available = new Set(list.map(_resourceUid));
+  const pre = (preSelected || []).filter(uid => available.has(uid));
+  if (_RISORSE_TARGET) _RISORSE_TARGET[key] = [...pre];
+  _refreshRisorseItems(prefix, key, '');
+  _updateRisorseLabel(prefix, key);
+}
+
+function _refreshRisorseItems(prefix, key, query) {
+  const dom = _risorseDom(prefix);
+  const container = document.getElementById(dom.itemsId(key));
   if (!container) return;
-  const items = _S5_DATA[key] || [];
+  const items = _RISORSE_DATA_STORES[prefix][key] || [];
   const q = query.toLowerCase();
   const filtered = q
     ? items.filter(r => {
@@ -1712,11 +1971,10 @@ function _s5RefreshItems(key, query) {
     container.innerHTML = '<div class="ms-empty">Nessun risultato</div>';
     return;
   }
-  const sel = new Set(WIZ.risorse[key] || []);
+  const sel = new Set((_RISORSE_TARGET && _RISORSE_TARGET[key]) || []);
   container.innerHTML = filtered.map(r => {
     const uid = r.uid || r.id || String(r);
 
-    // Type-specific measure — inline chip
     let measureHtml = '';
     if ((key === 'teste' || key === 'generatori') && r.model)
       measureHtml = `<span class="ms-item-sep">·</span><span class="ms-item-measure">${r.model}</span>`;
@@ -1725,14 +1983,12 @@ function _s5RefreshItems(key, query) {
     else if (key === 'maschere' && r.pitch)
       measureHtml = `<span class="ms-item-sep">·</span><span class="ms-item-measure">Passo ${r.pitch} mm</span>`;
 
-    // Plant badge — amber-bordered if external, colour-coded by plant
     let plantHtml = '';
     if (r.stab_esterno)
       plantHtml = stabBadge(r.stab_esterno, 'stab-badge--ext');
     else if (r.plant)
       plantHtml = stabBadge(r.plant);
 
-    // Notes — type-specific labels with units
     let notesHtml = '';
     if (key === 'mandrini' && r.notes)
       notesHtml = `<span class="ms-item-notes" title="Max Ø ${r.notes} mm">Max Ø ${r.notes} mm</span>`;
@@ -1743,20 +1999,23 @@ function _s5RefreshItems(key, query) {
 
     return `<label class="ms-item">
       <input type="checkbox" value="${uid}" ${sel.has(uid)?'checked':''}
-        onchange="s5Toggle('${key}','${uid}',this.checked)">
+        onchange="risorseToggle('${prefix}','${key}','${uid}',this.checked)">
       <span class="ms-item-id">${uid}</span>${measureHtml}${plantHtml}${notesHtml}
     </label>`;
   }).join('');
 }
 
 function filterMs(wrapId, query) {
-  _s5RefreshItems(wrapId.replace('wrap-', ''), query);
+  const prefix = _risorsePrefixFromWrap(wrapId);
+  const key = _risorseCatFromWrap(wrapId);
+  _refreshRisorseItems(prefix, key, query);
 }
 
-function _s5UpdateLabel(key) {
-  const lbl = document.getElementById('lbl-' + key);
+function _updateRisorseLabel(prefix, key) {
+  const dom = _risorseDom(prefix);
+  const lbl = document.getElementById(dom.lblId(key));
   if (!lbl) return;
-  const sel = WIZ.risorse[key] || [];
+  const sel = (_RISORSE_TARGET && _RISORSE_TARGET[key]) || [];
   const empty = { teste:'Nessuna selezionata', mandrini:'Nessuno selezionato',
                   tastatori:'Nessuno selezionato', maschere:'Nessuna selezionata',
                   generatori:'Nessuno selezionato' };
@@ -1771,18 +2030,21 @@ function _s5UpdateLabel(key) {
 
 function toggleMs(wrapId) {
   const wrap    = document.getElementById(wrapId);
+  const prefix  = _risorsePrefixFromWrap(wrapId);
+  const dom     = _risorseDom(prefix);
   const wasOpen = wrap.classList.contains('is-open');
-  // chiude tutti prima
-  document.querySelectorAll('#add-modal .ms-wrap').forEach(w => {
-    w.classList.remove('is-open');
-    const t = w.querySelector('.ms-trigger');
-    if (t) t.classList.remove('open');
-  });
+  const root    = document.querySelector(dom.root);
+  if (root) {
+    root.querySelectorAll('.ms-wrap').forEach(w => {
+      w.classList.remove('is-open');
+      const t = w.querySelector('.ms-trigger');
+      if (t) t.classList.remove('open');
+    });
+  }
   if (!wasOpen) {
     wrap.classList.add('is-open');
     const trigger  = wrap.querySelector('.ms-trigger');
     if (trigger) trigger.classList.add('open');
-    // Posiziona il dropdown come overlay fixed sopra il modal
     const dropdown = wrap.querySelector('.ms-dropdown');
     if (dropdown && trigger) {
       const rect = trigger.getBoundingClientRect();
@@ -1790,7 +2052,6 @@ function toggleMs(wrapId) {
       const spaceBelow = vpH - rect.bottom;
       dropdown.style.width = rect.width + 'px';
       dropdown.style.left  = rect.left  + 'px';
-      // apre in basso se c'è spazio, altrimenti in alto
       if (spaceBelow >= 160 || spaceBelow >= rect.top) {
         dropdown.style.top    = rect.bottom + 4 + 'px';
         dropdown.style.bottom = '';
@@ -1804,17 +2065,109 @@ function toggleMs(wrapId) {
   }
 }
 
-function s5Toggle(cat, uid, checked) {
-  const arr = WIZ.risorse[cat];
+function risorseToggle(prefix, cat, uid, checked) {
+  _RISORSE_ACTIVE_PREFIX = prefix;
+  if (!_RISORSE_TARGET) return;
+  const arr = _RISORSE_TARGET[cat];
   if (checked) { if (!arr.includes(uid)) arr.push(uid); }
   else { const i = arr.indexOf(uid); if (i !== -1) arr.splice(i, 1); }
-  _s5UpdateLabel(cat);
+  _updateRisorseLabel(prefix, cat);
+}
+
+function s5Toggle(cat, uid, checked) {
+  risorseToggle('s5', cat, uid, checked);
+}
+
+function _showRisorseError(prefix, msg) {
+  const dom = _risorseDom(prefix);
+  const el = document.getElementById(dom.error);
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = '';
 }
 
 function _s5ShowError(msg) {
-  const el = document.getElementById('s5-error');
-  el.textContent = msg;
-  el.style.display = '';
+  _showRisorseError('s5', msg);
+}
+
+function _s5RenderCat(key, items, preSelected) {
+  _renderRisorseCat('s5', key, items, preSelected);
+}
+
+function _s5RefreshItems(key, query) {
+  _refreshRisorseItems('s5', key, query);
+}
+
+function _s5UpdateLabel(key) {
+  _updateRisorseLabel('s5', key);
+}
+
+async function openRisorsePickerForEdit() {
+  if (!_detState || !_detState.editRisorse) return;
+  const d = { ..._detState.originalData };
+  const body = document.getElementById('det-body');
+  const startEl = body?.querySelector('[name="start"]');
+  const finishEl = body?.querySelector('[name="finish"]');
+  const plantEl = body?.querySelector('[name="plant"]');
+  if (startEl?.value) d.start = startEl.value;
+  if (finishEl?.value) d.finish = finishEl.value;
+  if (plantEl?.value) d.plant = plantEl.value;
+  if (!d.start || !d.finish) return;
+  const overlay = document.getElementById('risorse-picker-overlay');
+  overlay.style.display = 'flex';
+  await _loadRisorse('rp', {
+    stabilimento: d.plant || '',
+    data_inizio: d.start || '',
+    data_fine: d.finish || '',
+    modello_testa: d.modelloTesta || '',
+    bore: {
+      min: d.boreMin || '',
+      max: d.boreMax || '',
+      mid: d.boreMid || '',
+      tube_pitch: d.tubePitch || '',
+    },
+    exclude_activity_id: d.ormId || '',
+    risorseTarget: _detState.editRisorse,
+    useServerPreselect: false,
+  });
+}
+
+function closeRisorsePicker() {
+  const overlay = document.getElementById('risorse-picker-overlay');
+  overlay.style.display = 'none';
+  document.querySelectorAll('#risorse-picker-overlay .ms-wrap').forEach(w => {
+    w.classList.remove('is-open');
+    const t = w.querySelector('.ms-trigger');
+    if (t) t.classList.remove('open');
+  });
+}
+
+function confirmRisorsePicker() {
+  if (!_detState || !_detState.editRisorse) {
+    closeRisorsePicker();
+    return;
+  }
+  _pruneRisorseToAvailable('rp');
+  _detState.risorseDirty = true;
+  _updateDetResourcesSummary();
+  closeRisorsePicker();
+}
+
+function _risorseToByTipo(risorse) {
+  return {
+    testa: risorse.teste || [],
+    mandrino: risorse.mandrini || [],
+    tastatore: risorse.tastatori || [],
+    maschera: risorse.maschere || [],
+    generatore: risorse.generatori || [],
+  };
+}
+
+function _updateDetResourcesSummary() {
+  const summary = document.getElementById('det-resources-summary');
+  if (summary && _detState?.editRisorse) {
+    summary.innerHTML = formatResourcesHtml(_risorseToByTipo(_detState.editRisorse));
+  }
 }
 
 async function step5Save() {
@@ -2402,6 +2755,7 @@ function _pianResPopoverClick(e) {
 }
 
 const PIAN_STAB_OPTIONS = {{ stabilimenti_json|safe }};
+const PIAN_RESP_OPTIONS = {{ responsabili_json|safe }};
 const STAB_COLORS = {{ plant_colors_json|safe }};
 
 function stabBadge(name, extraClass) {
@@ -2453,8 +2807,8 @@ const TASK_FIELDS = [
   { label:'Inizio effett.',key:'actualStart',   readonly:false, isDate:true },
   { label:'Fine effett.',  key:'actualFinish',  readonly:false, isDate:true },
   { label:'Stabilimento',  key:'plant',         readonly:false, isPlant:true },
-  { label:'Responsabile',  key:'responsible',   readonly:false, ormReadonly:true },
-  { label:'Risorse',       key:'resources',     readonly:false, ormReadonly:true },
+  { label:'Responsabile',  key:'responsible',   readonly:false, isResponsible:true },
+  { label:'Risorse',       key:'resources',     readonly:false, isResources:true },
 ];
 
 const JOB_FIELDS = [
@@ -2484,6 +2838,12 @@ function openDetailModal(tr, entityType) {
       plant:        ds.plant        || '',
       responsible:  ds.responsible  || '',
       resources:    ds.resources    || '',
+      resourcesTyped: ds.resourcesTyped || '',
+      modelloTesta: ds.modelloTesta || '',
+      boreMin:      ds.boreMin      || '',
+      boreMax:      ds.boreMax      || '',
+      boreMid:      ds.boreMid      || '',
+      tubePitch:    ds.tubePitch    || '',
       predecessors: ds.predecessors || '',
       source:       ds.source       || 'tasks',
       ormId:        ds.ormId        || '',
@@ -2530,6 +2890,8 @@ function _renderPianViewMode(data, fields) {
       displayVal = stabBadge(rawVal);
     } else if (f.isPredecessor) {
       displayVal = rawVal ? `<code class="s6-uid">${esc(rawVal)}</code>` : '—';
+    } else if (f.key === 'resources') {
+      displayVal = formatResourcesHtml(data.resourcesTyped || rawVal);
     } else {
       displayVal = esc(rawVal) || '—';
     }
@@ -2570,6 +2932,36 @@ async function enterEditMode() {
                 <select class="det-input" name="${f.key}">${opts}</select>
               </div>`;
     }
+    if (f.isResponsible) {
+      const current = originalData[f.key] || '';
+      const opts = [`<option value="">— Nessuno —</option>`]
+        .concat(PIAN_RESP_OPTIONS.map(r =>
+          `<option value="${esc(r)}"${r === current ? ' selected' : ''}>${esc(r)}</option>`
+        ))
+        .join('');
+      return `<div class="det-field">
+                <span class="det-label">${esc(f.label)}</span>
+                <select class="det-input" name="${f.key}">${opts}</select>
+              </div>`;
+    }
+    if (f.isResources) {
+      if (isOrm) {
+        const hasDates = originalData.start && originalData.finish;
+        const summaryId = 'det-resources-summary';
+        const summaryHtml = formatResourcesHtml(originalData.resourcesTyped || originalData.resources);
+        const btnDisabled = hasDates ? '' : ' disabled title="Indica date di inizio e fine per modificare le risorse"';
+        return `<div class="det-field det-field--full">
+                  <span class="det-label">${esc(f.label)}</span>
+                  <div id="${summaryId}" class="det-value">${summaryHtml}</div>
+                  <button type="button" class="btn btn-secondary btn-sm" style="margin-top:.5rem;"
+                    onclick="openRisorsePickerForEdit()"${btnDisabled}>Modifica risorse</button>
+                </div>`;
+      }
+      return `<div class="det-field">
+                <span class="det-label">${esc(f.label)}</span>
+                <span class="det-value">${formatResourcesHtml(originalData.resourcesTyped || originalData.resources)}</span>
+              </div>`;
+    }
     if (f.isCurrency) {
       return `<div class="det-field">
                 <span class="det-label">${esc(f.label)}</span>
@@ -2592,6 +2984,11 @@ async function enterEditMode() {
   }).join('');
   document.getElementById('det-view-btns').style.display = 'none';
   document.getElementById('det-edit-btns').style.display = 'flex';
+
+  if (entityType === 'task' && isOrm) {
+    _detState.editRisorse = _typedToRisorse(originalData.resourcesTyped);
+    _detState.risorseDirty = false;
+  }
 
   // Async: populate predecessor select for task entities
   if (entityType === 'task') {
@@ -2625,6 +3022,8 @@ async function enterEditMode() {
 
 function cancelEdit() {
   if (!_detState) return;
+  _detState.editRisorse = null;
+  _detState.risorseDirty = false;
   _renderPianViewMode(_detState.originalData, _detState.fields);
   document.getElementById('det-view-btns').style.display = '';
   document.getElementById('det-edit-btns').style.display = 'none';
@@ -2667,9 +3066,11 @@ async function saveEdit() {
       actual_finish: newData.actualFinish,
       plant:         newData.plant,
       responsible:   newData.responsible,
-      resources:     newData.resources,
       predecessors:  newData.predecessors ? [newData.predecessors] : [],
     };
+    if (_detState.risorseDirty && _detState.editRisorse) {
+      payload.risorse = _detState.editRisorse;
+    }
   } else {
     const totalCost = _parseMoneyInput(newData.totalCost);
     if (Number.isNaN(totalCost)) {
@@ -2724,6 +3125,17 @@ async function saveEdit() {
       newData.item = String(savedItem).padStart(2, '0');
       newData.jobId = json.job_id || buildJobId(newData.commessa);
       newData.activityId = json.activity_id || buildActivityId(newData.commessa, newData.item, newData.activity);
+      if (json.resources_by_tipo) {
+        newData.resources = json.resources || '';
+        newData.resourcesTyped = JSON.stringify(json.resources_by_tipo);
+        tr.dataset.resources = newData.resources;
+        tr.dataset.resourcesTyped = newData.resourcesTyped;
+      } else if (_detState.risorseDirty && _detState.editRisorse) {
+        newData.resources = _risorseToFlat(_detState.editRisorse);
+        newData.resourcesTyped = JSON.stringify(_risorseToByTipo(_detState.editRisorse));
+        tr.dataset.resources = newData.resources;
+        tr.dataset.resourcesTyped = newData.resourcesTyped;
+      }
     } else {
       newData.jobId = originalData.jobId || '';
     }
@@ -2759,6 +3171,8 @@ async function saveEdit() {
     }
 
     _detState.originalData = { ...newData };
+    _detState.editRisorse = null;
+    _detState.risorseDirty = false;
     _renderPianViewMode(newData, fields);
     document.getElementById('det-view-btns').style.display = '';
     document.getElementById('det-edit-btns').style.display = 'none';

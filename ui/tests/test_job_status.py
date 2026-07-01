@@ -14,6 +14,7 @@ from ui.models import Attivita, Job
 from ui.views import (
     _aggregate_job_status,
     _fetch_grouped,
+    _has_plannable_activities,
     _is_job_completed,
     pianificazione,
 )
@@ -71,6 +72,26 @@ class JobStatusHelpersTest(TestCase):
         tasks[1]["actual_finish"] = None
         self.assertFalse(_is_job_completed(tasks))
         self.assertFalse(_is_job_completed([]))
+
+    def test_has_plannable_activities(self) -> None:
+        today = localdate().isoformat()
+        self.assertTrue(
+            _has_plannable_activities([{"actual_start": None, "actual_finish": None}])
+        )
+        self.assertFalse(
+            _has_plannable_activities([{"actual_start": today, "actual_finish": None}])
+        )
+        self.assertFalse(
+            _has_plannable_activities([{"actual_start": today, "actual_finish": today}])
+        )
+        self.assertTrue(
+            _has_plannable_activities(
+                [
+                    {"actual_start": today, "actual_finish": None},
+                    {"actual_start": None, "actual_finish": None},
+                ]
+            )
+        )
 
     def test_aggregate_job_status_completed(self) -> None:
         today = localdate()
@@ -138,7 +159,7 @@ class FetchGroupedSortTest(TestCase):
 
 
 class OptimizationExcludeCompletedTest(TestCase):
-    """Completed commesse must not appear in optimization selection."""
+    """Commesse without plannable activities must not appear in optimization selection."""
 
     def setUp(self) -> None:
         self.factory = RequestFactory()
@@ -147,6 +168,8 @@ class OptimizationExcludeCompletedTest(TestCase):
 
         Job.objects.create(commessa="OPEN", job_id="OPEN")
         Job.objects.create(commessa="DONE", job_id="DONE")
+        Job.objects.create(commessa="WORKING", job_id="WORKING")
+        Job.objects.create(commessa="MIXED", job_id="MIXED")
 
         _make_att("OPEN", di=today, df=today + timedelta(days=5))
         _make_att(
@@ -156,28 +179,44 @@ class OptimizationExcludeCompletedTest(TestCase):
             actual_start=today,
             actual_finish=today + timedelta(days=1),
         )
+        _make_att(
+            "WORKING",
+            di=today,
+            df=today + timedelta(days=5),
+            actual_start=today,
+        )
+        _make_att("MIXED", di=today, df=today + timedelta(days=5))
+        _make_att(
+            "MIXED",
+            item=2,
+            di=today,
+            df=today + timedelta(days=5),
+            actual_start=today,
+        )
 
     def test_optimization_groups_excludes_completed(self) -> None:
         groups = _optimization_groups()
         commesse = {g["job"]["commessa"] for g in groups}
         self.assertIn("OPEN", commesse)
+        self.assertIn("MIXED", commesse)
         self.assertNotIn("DONE", commesse)
+        self.assertNotIn("WORKING", commesse)
 
     def test_sanitize_draft_drops_completed_job_ids(self) -> None:
         draft = {
-            "job_ids": ["OPEN", "DONE"],
+            "job_ids": ["OPEN", "DONE", "WORKING", "MIXED"],
             "earliest_start_overrides": {},
             "horizon_start": None,
         }
         cleaned = _sanitize_draft(draft)
-        self.assertEqual(cleaned["job_ids"], ["OPEN"])
+        self.assertEqual(sorted(cleaned["job_ids"]), ["MIXED", "OPEN"])
 
     def test_ottimizzazione_view_prunes_completed_from_session_draft(self) -> None:
         request = _request_with_session(
             self.factory, reverse("ottimizzazione"), self.user
         )
         request.session[SESSION_DRAFT_KEY] = {
-            "job_ids": ["OPEN", "DONE"],
+            "job_ids": ["OPEN", "DONE", "WORKING"],
             "earliest_start_overrides": {},
             "horizon_start": None,
         }

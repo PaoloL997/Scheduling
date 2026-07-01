@@ -10,8 +10,28 @@ from django.db import transaction
 
 from ui.models import Attivita, MppSyncQueue, RisorsaAttivita
 from ui.services.resource_conflicts import ResourceConflictError, validate_no_conflicts
+from ui.services.resource_display import (
+    format_activity_resources,
+    format_activity_resources_html,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _risorse_to_pairs(risorse_data: dict) -> list[tuple[str, str]]:
+    """Convert wizard-style risorse dict to (tipo, risorsa_id) pairs."""
+    pairs: list[tuple[str, str]] = []
+    for tipo, key in [
+        ("testa", "teste"),
+        ("mandrino", "mandrini"),
+        ("tastatore", "tastatori"),
+        ("maschera", "maschere"),
+        ("generatore", "generatori"),
+    ]:
+        for rid in risorse_data.get(key, []) or []:
+            if rid:
+                pairs.append((tipo, str(rid)))
+    return pairs
 
 
 class BridgeWriteError(Exception):
@@ -120,6 +140,32 @@ def update_attivita(orm_id: int, data: dict) -> dict:
                 )
         a.predecessors = ", ".join(predecessor_ids) if predecessor_ids else None
 
+    risorse_data = data.get("risorse")
+    new_risorse_pairs: list[tuple[str, str]] | None = None
+    if risorse_data is not None:
+        if not isinstance(risorse_data, dict):
+            raise BridgeWriteError("Formato risorse non valido.", status_code=400)
+        new_risorse_pairs = _risorse_to_pairs(risorse_data)
+        if a.data_inizio and a.data_fine:
+            try:
+                validate_no_conflicts(
+                    new_risorse_pairs,
+                    a.data_inizio,
+                    a.data_fine,
+                    exclude_activity_id=a.pk,
+                )
+            except ResourceConflictError as exc:
+                raise BridgeWriteError(
+                    "Conflitto risorse",
+                    status_code=409,
+                    conflicts=exc.conflicts,
+                ) from exc
+        elif new_risorse_pairs:
+            raise BridgeWriteError(
+                "Per assegnare risorse servono data di inizio e fine.",
+                status_code=400,
+            )
+
     if ("start" in data or "finish" in data) and a.data_inizio and a.data_fine:
         existing_pairs = list(
             RisorsaAttivita.objects.filter(attivita_id=a.pk).values_list(
@@ -140,7 +186,22 @@ def update_attivita(orm_id: int, data: dict) -> dict:
                 conflicts=exc.conflicts,
             ) from exc
 
-    a.save()
+    with transaction.atomic():
+        a.save()
+
+        if new_risorse_pairs is not None:
+            RisorsaAttivita.objects.filter(attivita_id=a.pk).delete()
+            risorsa_rows = [
+                RisorsaAttivita(attivita=a, tipo=tipo, risorsa_id=rid)
+                for tipo, rid in new_risorse_pairs
+            ]
+            if risorsa_rows:
+                RisorsaAttivita.objects.bulk_create(risorsa_rows)
+
+    if risorse_data is not None:
+        from ui.services.problem_detection import detect_and_save_problems
+
+        detect_and_save_problems(a, risorse_data)
 
     MppSyncQueue.objects.create(
         operation="update_task",
@@ -165,11 +226,23 @@ def update_attivita(orm_id: int, data: dict) -> dict:
         ),
     )
 
-    return {
+    result = {
         "item": a.item,
         "job_id": a.job_id,
         "activity_id": a.activity_id,
     }
+    if risorse_data is not None:
+        risorse_all = list(RisorsaAttivita.objects.filter(attivita_id=a.pk))
+        res_fmt = format_activity_resources(risorse_all)
+        result.update(
+            {
+                "resources": ";".join(res_fmt["flat_ids"]) or None,
+                "resources_display": res_fmt["display"],
+                "resources_by_tipo": res_fmt["by_tipo"],
+                "resources_html": format_activity_resources_html(risorse_all),
+            }
+        )
+    return result
 
 
 def cancel_pending_task_ops(attivita_id: int) -> None:

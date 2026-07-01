@@ -155,6 +155,7 @@ def pianificazione(request: HttpRequest):
             "stabilimenti_json": json.dumps(stabilimenti),
             "plant_colors_json": json.dumps(plant_colors),
             "responsabili": responsabili,
+            "responsabili_json": json.dumps(responsabili),
             "penale_max_json": json.dumps(load_runtime_config().penale_max),
             "testa_models_json": json.dumps(get_testa_models()),
         },
@@ -448,6 +449,13 @@ def _is_job_completed(activities: list[dict]) -> bool:
     return all(a.get("actual_start") and a.get("actual_finish") for a in activities)
 
 
+def _has_plannable_activities(activities: list[dict]) -> bool:
+    """True when at least one activity is not in progress or completed."""
+    return any(
+        not (a.get("actual_start") or a.get("actual_finish")) for a in activities
+    )
+
+
 def _attivita_to_task_dict(a) -> dict:
     """Convert an :class:`~ui.models.Attivita` instance to a pianificazione-compatible dict.
 
@@ -499,6 +507,11 @@ def _attivita_to_task_dict(a) -> dict:
         "resources_html": format_activity_resources_html(risorse_all),
         "resources_by_tipo": res_fmt["by_tipo"],
         "resources_by_tipo_json": json.dumps(res_fmt["by_tipo"]),
+        "modello_testa": a.modello_testa or None,
+        "bore_min": float(a.bore_min) if a.bore_min is not None else None,
+        "bore_max": float(a.bore_max) if a.bore_max is not None else None,
+        "bore_mid": float(a.bore_mid) if a.bore_mid is not None else None,
+        "tube_pitch": float(a.tube_pitch) if a.tube_pitch is not None else None,
         "predecessors": a.predecessors,
         "source": "attivita",
         "orm_id": a.pk,

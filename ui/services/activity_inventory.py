@@ -163,6 +163,7 @@ def get_available_resources(
     tube_pitch: float | None = None,
     modello_testa: str | None = None,
     exclude_activity_id: int | None = None,
+    strict_requirements: bool = False,
 ) -> dict:
     """Build the full resource availability context for the wizard step 5.
 
@@ -197,6 +198,10 @@ def get_available_resources(
         tube_pitch: Required maschera pitch (mm).
         modello_testa: Testa model name used for config lookup and testa filter.
         exclude_activity_id: Activity PK to exclude from overlap checks.
+        strict_requirements: When ``True``, each category is empty unless its
+            requirement fields are set (modello for teste, bore range for
+            mandrini/tastatori, pitch for maschere, compatible config for
+            generatori).
 
     Returns:
         dict: With keys ``teste``, ``mandrini``, ``tastatori``, ``maschere``,
@@ -314,13 +319,41 @@ def get_available_resources(
             return qs.filter(model__in=gen_models)
         return qs
 
-    teste = _query_with_fallback(TestaItem.objects.all(), _model_filter, occ_testa)
-    mandrini = _query_with_fallback(MandrinoItem.objects.all(), _bore_filter, occ_m)
-    tastatori = _query_with_fallback(TastatoreItem.objects.all(), _bore_filter, occ_t)
-    maschere = _query_with_fallback(MascheraItem.objects.all(), _pitch_filter, occ_ma)
-    generatori = _query_with_fallback(
-        GeneratoreItem.objects.all(), _gen_model_filter, occ_g
-    )
+    def _teste_available() -> list[dict]:
+        if strict_requirements and not modello_testa:
+            return []
+        return _query_with_fallback(TestaItem.objects.all(), _model_filter, occ_testa)
+
+    def _mandrini_available() -> list[dict]:
+        if strict_requirements and (bore_min is None or bore_max is None):
+            return []
+        return _query_with_fallback(MandrinoItem.objects.all(), _bore_filter, occ_m)
+
+    def _tastatori_available() -> list[dict]:
+        if strict_requirements and (bore_min is None or bore_max is None):
+            return []
+        return _query_with_fallback(TastatoreItem.objects.all(), _bore_filter, occ_t)
+
+    def _maschere_available() -> list[dict]:
+        if strict_requirements and tube_pitch is None:
+            return []
+        return _query_with_fallback(MascheraItem.objects.all(), _pitch_filter, occ_ma)
+
+    def _generatori_available() -> list[dict]:
+        if strict_requirements:
+            if not modello_testa:
+                return []
+            if not gen_models:
+                return []
+        return _query_with_fallback(
+            GeneratoreItem.objects.all(), _gen_model_filter, occ_g
+        )
+
+    teste = _teste_available()
+    mandrini = _mandrini_available()
+    tastatori = _tastatori_available()
+    maschere = _maschere_available()
+    generatori = _generatori_available()
 
     pre_testa: set = {teste[0]["uid"]} if teste else set()
 

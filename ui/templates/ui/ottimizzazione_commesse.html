@@ -204,13 +204,13 @@
     return d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' });
   }
 
-  function isJobCompleted(activities) {
-    return activities.length > 0 && activities.every(a => a.actual_start && a.actual_finish);
+  function hasPlannableActivities(activities) {
+    return activities.some(a => !a.actual_start && !a.actual_finish);
   }
 
   function jobData() {
     return GROUPS
-      .filter(g => g.job?.job_id && g.activities?.length && !isJobCompleted(g.activities))
+      .filter(g => g.job?.job_id && g.activities?.length && hasPlannableActivities(g.activities))
       .map(g => {
         const acts = g.activities;
         const starts = acts.map(a => parseIso(a.start)).filter(d => d && !isNaN(d));
