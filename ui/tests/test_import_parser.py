@@ -55,18 +55,29 @@ class ParseTaskNameTests(SimpleTestCase):
 class ParseWpsNameTests(SimpleTestCase):
     """Tests for WPS filename parsing."""
 
-    def test_full_model_commessa_item_activity_format(self):
+    def test_full_model_commessa_item_format(self):
         self.assertEqual(
             parse_wps_name("HT200_25033_02_qualifica.pdf"),
             {
                 "modello_testa": "HT200",
                 "commessa": "25033",
                 "item": 2,
-                "attivita": "qualifica",
+                "attivita": "",
             },
         )
 
-    def test_item_and_activity_are_optional(self):
+    def test_item_and_activity_suffix_ignored(self):
+        self.assertEqual(
+            parse_wps_name("HT200_25033_Saldatura.pdf"),
+            {
+                "modello_testa": "HT200",
+                "commessa": "25033",
+                "item": 1,
+                "attivita": "",
+            },
+        )
+
+    def test_item_is_optional(self):
         self.assertEqual(
             parse_wps_name("HT200_25033.pdf"),
             {

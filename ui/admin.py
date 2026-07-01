@@ -33,6 +33,7 @@ admin.site.register(User, UserAdmin)
 
 admin.site.register(models.Attivita)
 admin.site.register(models.Responsabile)
+admin.site.register(models.TipoAttivita)
 admin.site.register(models.RisorsaAttivita)
 admin.site.register(models.Job)
 admin.site.register(models.TestaItem)

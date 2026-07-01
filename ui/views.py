@@ -43,6 +43,7 @@ from ui.models import (
     Stabilimento,
     TastatoreItem,
     TestaItem,
+    TipoAttivita,
 )
 
 logger = logging.getLogger(__name__)
@@ -135,6 +136,7 @@ def pianificazione(request: HttpRequest):
         get_responsabili,
         get_stabilimenti,
         get_testa_models,
+        get_tipi_attivita,
     )
 
     groups = _fetch_grouped()
@@ -142,8 +144,10 @@ def pianificazione(request: HttpRequest):
     stab_objs = list(Stabilimento.objects.values("nome", "colore"))
     stab_orm = [s["nome"] for s in stab_objs]
     resp_orm = list(Responsabile.objects.values_list("nome", flat=True))
+    tipo_orm = list(TipoAttivita.objects.values_list("nome", flat=True))
     stabilimenti = sorted(set(stab_orm + get_stabilimenti()))
     responsabili = sorted(set(resp_orm + get_responsabili()))
+    tipi_attivita = sorted(set(tipo_orm + get_tipi_attivita()))
     plant_colors = {s["nome"]: s["colore"] for s in stab_objs}
 
     return render(
@@ -158,6 +162,8 @@ def pianificazione(request: HttpRequest):
             "responsabili_json": json.dumps(responsabili),
             "penale_max_json": json.dumps(load_runtime_config().penale_max),
             "testa_models_json": json.dumps(get_testa_models()),
+            "tipi_attivita": tipi_attivita,
+            "tipi_attivita_json": json.dumps(tipi_attivita),
         },
     )
 
@@ -1368,6 +1374,7 @@ def impostazioni(request: HttpRequest):
         {
             "stabilimenti": list(Stabilimento.objects.values("id", "nome", "colore")),
             "responsabili": list(Responsabile.objects.values("id", "nome")),
+            "tipi_attivita": list(TipoAttivita.objects.values("id", "nome")),
             "configurazioni_teste": configurazioni_teste,
             "all_testa_models_json": json.dumps(all_testa_models),
             "all_gen_models_json": json.dumps(all_gen_models),
@@ -1530,6 +1537,81 @@ def api_responsabili_detail(request: HttpRequest, pk: int) -> JsonResponse:
     if Responsabile.objects.filter(nome__iexact=nome).exclude(pk=pk).exists():
         return JsonResponse(
             {"ok": False, "error": f"Responsabile '{nome}' già esistente."}, status=409
+        )
+
+    obj.nome = nome
+    obj.save()
+    return JsonResponse({"ok": True, "id": obj.pk, "nome": obj.nome})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_tipi_attivita_create(request: HttpRequest) -> JsonResponse:
+    """Create a new activity type entry.
+
+    Accepts JSON body with ``nome`` (required).
+
+    Returns:
+        JsonResponse: 201 with ``{"ok": true, "id": <id>, "nome": "..."}``
+            on success; 400 on validation error; 409 on duplicate nome.
+    """
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+
+    nome = (data.get("nome") or "").strip()
+    if not nome:
+        return JsonResponse(
+            {"ok": False, "error": "Il campo 'nome' è obbligatorio."}, status=400
+        )
+
+    if TipoAttivita.objects.filter(nome__iexact=nome).exists():
+        return JsonResponse(
+            {"ok": False, "error": f"Tipo attività '{nome}' già esistente."}, status=409
+        )
+
+    obj = TipoAttivita.objects.create(nome=nome)
+    return JsonResponse({"ok": True, "id": obj.pk, "nome": obj.nome}, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["PUT", "DELETE"])
+def api_tipi_attivita_detail(request: HttpRequest, pk: int) -> JsonResponse:
+    """Update (PUT) or delete (DELETE) an activity type by primary key.
+
+    PUT accepts JSON body with ``nome`` (required).
+    DELETE requires no body.
+
+    Returns:
+        JsonResponse: 200 with updated object on PUT success; 200 ``{"ok": true}``
+            on DELETE success; 400/404/409 on error.
+    """
+    try:
+        obj = TipoAttivita.objects.get(pk=pk)
+    except TipoAttivita.DoesNotExist:
+        return JsonResponse(
+            {"ok": False, "error": "Tipo attività non trovato."}, status=404
+        )
+
+    if request.method == "DELETE":
+        obj.delete()
+        return JsonResponse({"ok": True})
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+
+    nome = (data.get("nome") or "").strip()
+    if not nome:
+        return JsonResponse(
+            {"ok": False, "error": "Il campo 'nome' è obbligatorio."}, status=400
+        )
+
+    if TipoAttivita.objects.filter(nome__iexact=nome).exclude(pk=pk).exists():
+        return JsonResponse(
+            {"ok": False, "error": f"Tipo attività '{nome}' già esistente."}, status=409
         )
 
     obj.nome = nome

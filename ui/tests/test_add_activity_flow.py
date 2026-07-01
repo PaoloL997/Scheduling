@@ -6,7 +6,14 @@ from datetime import date
 from django.contrib.auth.models import User
 from django.test import Client, TestCase
 
-from ui.models import Attivita, ConfigurazioneTesta, Job, MppSyncQueue, TestaItem
+from ui.models import (
+    Attivita,
+    ConfigurazioneTesta,
+    Job,
+    MppSyncQueue,
+    TestaItem,
+    TipoAttivita,
+)
 from ui.services.activity_inventory import find_modello_testa_in_db, get_testa_models
 
 
@@ -52,6 +59,7 @@ class AddActivityFlowTests(TestCase):
         self.client = Client()
         self.user = User.objects.create_user(username="planner", password="p")
         self.client.force_login(self.user)
+        TipoAttivita.objects.create(nome="Qualifica")
 
     def _post_activity(self, payload: dict):
         return self.client.post(
@@ -78,6 +86,36 @@ class AddActivityFlowTests(TestCase):
         self.assertTrue(payload["exists"])
         self.assertEqual(len(payload["predecessors"]), 1)
         self.assertEqual(payload["predecessors"][0]["activity_id"], prev.activity_id)
+
+    def test_missing_attivita_is_rejected(self) -> None:
+        Job.objects.create(commessa="C010")
+        resp = self._post_activity(
+            {
+                "commessa": "C010",
+                "item": 1,
+                "attivita": "",
+                "data_inizio": "2026-06-10",
+                "data_fine": "2026-06-12",
+                "risorse": {},
+            }
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("obbligatorio", resp.json()["error"].lower())
+
+    def test_invalid_attivita_is_rejected(self) -> None:
+        Job.objects.create(commessa="C011")
+        resp = self._post_activity(
+            {
+                "commessa": "C011",
+                "item": 1,
+                "attivita": "Sconosciuta",
+                "data_inizio": "2026-06-10",
+                "data_fine": "2026-06-12",
+                "risorse": {},
+            }
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("non valido", resp.json()["error"].lower())
 
     def test_new_commessa_requires_delivery_date(self) -> None:
         """Creating an activity for a new commessa without delivery_date is rejected."""

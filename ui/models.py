@@ -134,6 +134,31 @@ class Responsabile(models.Model):
         return self.nome
 
 
+class TipoAttivita(models.Model):
+    """A named activity type selectable when creating or editing activities.
+
+    Maintained as a reference list in the settings page.  New activities must
+    use one of these names; legacy imported activities may retain values not
+    present in this catalog until edited.
+    """
+
+    nome = models.CharField(max_length=200, unique=True)
+
+    class Meta:
+        """Table metadata for TipoAttivita."""
+
+        db_table = "tipo_attivita"
+        ordering = ["nome"]
+
+    def __str__(self) -> str:
+        """Return the activity type name.
+
+        Returns:
+            str: The ``nome`` field value.
+        """
+        return self.nome
+
+
 class UserProfile(models.Model):
     """Extended profile data for a Django auth user."""
 

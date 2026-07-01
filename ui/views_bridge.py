@@ -23,6 +23,7 @@ from ui.services.bridge_serializers import (
     serialize_jobs,
     serialize_problemi,
     serialize_responsabili,
+    serialize_tipi_attivita,
     serialize_stabilimenti,
 )
 from ui.services.bridge_write import BridgeWriteError, delete_attivita, update_attivita
@@ -244,6 +245,12 @@ def api_bridge_stabilimenti(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET"])
 def api_bridge_responsabili(request: HttpRequest) -> JsonResponse:
     return _ok(serialize_responsabili())
+
+
+@bridge_read_guard
+@require_http_methods(["GET"])
+def api_bridge_tipi_attivita(request: HttpRequest) -> JsonResponse:
+    return _ok(serialize_tipi_attivita())
 
 
 @bridge_read_guard
@@ -490,6 +497,51 @@ def api_bridge_responsabili_detail(request: HttpRequest, pk: int) -> JsonRespons
             request,
             "PUT",
             f"/api/bridge/responsabili/{pk}/",
+            data=parsed,
+            pk=pk,
+        )
+    )
+
+
+@bridge_write_guard
+@require_http_methods(["POST"])
+def api_bridge_tipi_attivita_create(request: HttpRequest) -> JsonResponse:
+    parsed = _parse_json(request)
+    if isinstance(parsed, JsonResponse):
+        return parsed
+    return _forward_response(
+        _delegate(
+            views.api_tipi_attivita_create,
+            request,
+            "POST",
+            "/api/bridge/tipi-attivita/",
+            data=parsed,
+        )
+    )
+
+
+@bridge_write_guard
+@require_http_methods(["PUT", "DELETE"])
+def api_bridge_tipi_attivita_detail(request: HttpRequest, pk: int) -> JsonResponse:
+    if request.method == "DELETE":
+        return _forward_response(
+            _delegate(
+                views.api_tipi_attivita_detail,
+                request,
+                "DELETE",
+                f"/api/bridge/tipi-attivita/{pk}/",
+                pk=pk,
+            )
+        )
+    parsed = _parse_json(request)
+    if isinstance(parsed, JsonResponse):
+        return parsed
+    return _forward_response(
+        _delegate(
+            views.api_tipi_attivita_detail,
+            request,
+            "PUT",
+            f"/api/bridge/tipi-attivita/{pk}/",
             data=parsed,
             pk=pk,
         )

@@ -90,6 +90,46 @@
         </div>
     </section>
 
+    <section class="settings-accordion" id="section-tipi-attivita">
+        <div class="settings-accordion-header">
+            <button type="button" class="settings-accordion-toggle" aria-expanded="false" aria-controls="panel-tipi-attivita" onclick="toggleSettingsAccordion(this)">
+                <svg class="settings-accordion-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <polyline points="2,4 7,10 12,4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="settings-accordion-label">Tipi attività</span>
+                <span class="settings-accordion-count">{{ tipi_attivita|length }}</span>
+            </button>
+            <button type="button" class="btn btn-primary" onclick="openModal('tipo-attivita', null)">Aggiungi</button>
+        </div>
+        <div class="settings-accordion-panel" id="panel-tipi-attivita" hidden>
+        <div class="settings-accordion-panel-inner">
+        <table class="settings-table" id="table-tipi-attivita">
+            <thead>
+                <tr>
+                    <th>Nome</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="tbody-tipi-attivita">
+                {% for t in tipi_attivita %}
+                <tr data-id="{{ t.id }}">
+                    <td>{{ t.nome }}</td>
+                    <td class="actions">
+                        <button class="btn btn-ghost" title="Modifica" onclick="openModal('tipo-attivita', {{ t.id }})">Modifica</button>
+                        <button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete('tipo-attivita', {{ t.id }}, '{{ t.nome|escapejs }}')">Elimina</button>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr class="empty-row" id="empty-tipi-attivita">
+                    <td colspan="2">Nessun tipo attività configurato.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        </div>
+    </section>
+
     <section class="settings-accordion" id="section-config-testa">
         <div class="settings-accordion-header">
             <button type="button" class="settings-accordion-toggle" aria-expanded="false" aria-controls="panel-config-testa" onclick="toggleSettingsAccordion(this)">
@@ -261,6 +301,24 @@
     </div>
 </div>
 
+<!-- ------------------------------------------------------------------ -->
+<!-- Modal: Tipo attività                                                  -->
+<!-- ------------------------------------------------------------------ -->
+<div class="modal-overlay" id="modal-tipo-attivita-overlay">
+    <div class="modal">
+        <h3 id="modal-tipo-attivita-title">Aggiungi tipo attività</h3>
+        <div class="form-group">
+            <label for="tipo-attivita-nome">Nome</label>
+            <input type="text" id="tipo-attivita-nome" placeholder="es. Qualifica" autocomplete="off">
+        </div>
+        <div class="modal-error" id="tipo-attivita-error"></div>
+        <div class="modal-actions">
+            <button class="btn btn-cancel" onclick="closeModal('tipo-attivita')">Annulla</button>
+            <button class="btn btn-primary" id="tipo-attivita-save-btn" onclick="saveTipoAttivita()">Salva</button>
+        </div>
+    </div>
+</div>
+
 <script>
 function toggleSettingsAccordion(btn) {
     const accordion = btn.closest('.settings-accordion');
@@ -278,10 +336,12 @@ function toggleSettingsAccordion(btn) {
     /* ------------------------------------------------------------------ */
     let editingStabilimentoId = null;
     let editingResponsabileId = null;
+    let editingTipoAttivitaId = null;
 
     /* In-memory cache built from server-rendered HTML on page load       */
     const stabCache = {};
     const respCache = {};
+    const tipoAttivitaCache = {};
 
     document.querySelectorAll("#tbody-stabilimenti tr[data-id]").forEach(function (tr) {
         const id = parseInt(tr.dataset.id, 10);
@@ -295,6 +355,11 @@ function toggleSettingsAccordion(btn) {
     document.querySelectorAll("#tbody-responsabili tr[data-id]").forEach(function (tr) {
         const id = parseInt(tr.dataset.id, 10);
         respCache[id] = { nome: tr.querySelector("td").textContent.trim() };
+    });
+
+    document.querySelectorAll("#tbody-tipi-attivita tr[data-id]").forEach(function (tr) {
+        const id = parseInt(tr.dataset.id, 10);
+        tipoAttivitaCache[id] = { nome: tr.querySelector("td").textContent.trim() };
     });
 
     /* ------------------------------------------------------------------ */
@@ -331,7 +396,7 @@ function toggleSettingsAccordion(btn) {
             overlay.classList.add("is-open");
             document.getElementById("stab-nome").focus();
 
-        } else {
+        } else if (type === "responsabile") {
             editingResponsabileId = id;
             const overlay = document.getElementById("modal-responsabile-overlay");
             const title   = document.getElementById("modal-responsabile-title");
@@ -346,6 +411,22 @@ function toggleSettingsAccordion(btn) {
             }
             overlay.classList.add("is-open");
             document.getElementById("resp-nome").focus();
+
+        } else if (type === "tipo-attivita") {
+            editingTipoAttivitaId = id;
+            const overlay = document.getElementById("modal-tipo-attivita-overlay");
+            const title   = document.getElementById("modal-tipo-attivita-title");
+            document.getElementById("tipo-attivita-error").textContent = "";
+
+            if (id !== null && tipoAttivitaCache[id]) {
+                title.textContent = "Modifica tipo attività";
+                document.getElementById("tipo-attivita-nome").value = tipoAttivitaCache[id].nome;
+            } else {
+                title.textContent = "Aggiungi tipo attività";
+                document.getElementById("tipo-attivita-nome").value = "";
+            }
+            overlay.classList.add("is-open");
+            document.getElementById("tipo-attivita-nome").focus();
         }
     };
 
@@ -354,7 +435,7 @@ function toggleSettingsAccordion(btn) {
     };
 
     /* Close on overlay click */
-    ["stabilimento", "responsabile"].forEach(function (type) {
+    ["stabilimento", "responsabile", "tipo-attivita"].forEach(function (type) {
         document.getElementById("modal-" + type + "-overlay").addEventListener("click", function (e) {
             if (e.target === this) closeModal(type);
         });
@@ -365,6 +446,7 @@ function toggleSettingsAccordion(btn) {
         if (e.key === "Escape") {
             closeModal("stabilimento");
             closeModal("responsabile");
+            closeModal("tipo-attivita");
         }
     });
 
@@ -485,21 +567,81 @@ function toggleSettingsAccordion(btn) {
     };
 
     /* ------------------------------------------------------------------ */
+    /* Tipi attività                                                        */
+    /* ------------------------------------------------------------------ */
+    window.saveTipoAttivita = function () {
+        const nome  = document.getElementById("tipo-attivita-nome").value.trim();
+        const errEl = document.getElementById("tipo-attivita-error");
+        errEl.textContent = "";
+
+        if (!nome) { errEl.textContent = "Il nome è obbligatorio."; return; }
+
+        const isNew = editingTipoAttivitaId === null;
+        const url   = isNew
+            ? "{% url 'api_tipi_attivita_create' %}"
+            : "{% url 'api_tipi_attivita_detail' pk=0 %}".replace("/0/", "/" + editingTipoAttivitaId + "/");
+        const method = isNew ? "POST" : "PUT";
+
+        fetch(url, {
+            method: method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nome: nome }),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data.ok) { errEl.textContent = data.error; return; }
+
+            tipoAttivitaCache[data.id] = { nome: data.nome };
+
+            const tbody = document.getElementById("tbody-tipi-attivita");
+            removeEmptyRow("tbody-tipi-attivita");
+
+            let tr = tbody.querySelector('tr[data-id="' + data.id + '"]');
+            if (!tr) {
+                tr = document.createElement("tr");
+                tr.dataset.id = data.id;
+                tbody.appendChild(tr);
+            }
+            tr.innerHTML =
+                '<td>' + escHtml(data.nome) + '</td>' +
+                '<td class="actions">' +
+                  '<button class="btn btn-ghost" title="Modifica" onclick="openModal(\'tipo-attivita\',' + data.id + ')">Modifica</button>' +
+                  '<button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete(\'tipo-attivita\',' + data.id + ',\'' + escJs(data.nome) + '\')">Elimina</button>' +
+                '</td>';
+
+            closeModal("tipo-attivita");
+        })
+        .catch(function () { errEl.textContent = "Errore di rete. Riprova."; });
+    };
+
+    /* ------------------------------------------------------------------ */
     /* Delete                                                               */
     /* ------------------------------------------------------------------ */
     window.confirmDelete = function (type, id, nome) {
         if (!confirm('Eliminare "' + nome + '"?')) return;
 
-        const url = type === "stabilimento"
-            ? "{% url 'api_stabilimenti_detail' pk=0 %}".replace("/0/", "/" + id + "/")
-            : "{% url 'api_responsabili_detail' pk=0 %}".replace("/0/", "/" + id + "/");
+        let url;
+        if (type === "stabilimento") {
+            url = "{% url 'api_stabilimenti_detail' pk=0 %}".replace("/0/", "/" + id + "/");
+        } else if (type === "tipo-attivita") {
+            url = "{% url 'api_tipi_attivita_detail' pk=0 %}".replace("/0/", "/" + id + "/");
+        } else {
+            url = "{% url 'api_responsabili_detail' pk=0 %}".replace("/0/", "/" + id + "/");
+        }
 
         fetch(url, { method: "DELETE" })
         .then(function (r) { return r.json(); })
         .then(function (data) {
             if (!data.ok) { alert(data.error); return; }
 
-            const tbodyId = type === "stabilimento" ? "tbody-stabilimenti" : "tbody-responsabili";
+            let tbodyId;
+            if (type === "stabilimento") {
+                tbodyId = "tbody-stabilimenti";
+            } else if (type === "tipo-attivita") {
+                tbodyId = "tbody-tipi-attivita";
+            } else {
+                tbodyId = "tbody-responsabili";
+            }
             const tbody   = document.getElementById(tbodyId);
             const tr      = tbody.querySelector('tr[data-id="' + id + '"]');
             if (tr) tr.remove();
@@ -507,6 +649,9 @@ function toggleSettingsAccordion(btn) {
             if (type === "stabilimento") {
                 delete stabCache[id];
                 maybeAddEmptyRow("tbody-stabilimenti", 3, "Nessuno stabilimento configurato.");
+            } else if (type === "tipo-attivita") {
+                delete tipoAttivitaCache[id];
+                maybeAddEmptyRow("tbody-tipi-attivita", 2, "Nessun tipo attività configurato.");
             } else {
                 delete respCache[id];
                 maybeAddEmptyRow("tbody-responsabili", 2, "Nessun responsabile configurato.");
@@ -523,6 +668,9 @@ function toggleSettingsAccordion(btn) {
     });
     document.getElementById("resp-nome").addEventListener("keydown", function (e) {
         if (e.key === "Enter") saveResponsabile();
+    });
+    document.getElementById("tipo-attivita-nome").addEventListener("keydown", function (e) {
+        if (e.key === "Enter") saveTipoAttivita();
     });
 
     /* ------------------------------------------------------------------ */

@@ -328,7 +328,7 @@
         </svg>
         <span class="drop-zone-label">Trascina il PDF oppure <span class="drop-zone-link">sfoglia</span></span>
         <span id="s1-fname" class="drop-zone-fname"></span>
-        <span class="drop-zone-hint">Formato: <code>ModelloTesta_Commessa[_Item][_Attività].pdf</code></span>
+        <span class="drop-zone-hint">Formato: <code>ModelloTesta_Commessa[_Item].pdf</code></span>
       </label>
       <input id="s1-file-input" type="file" accept=".pdf" style="display:none;" onchange="s1HandleSelect(this);">
     </div>
@@ -364,8 +364,15 @@
           <input id="s1-item" type="number" min="1" placeholder="1" value="1" oninput="_s1CommessaItemChange()">
         </div>
         <div class="wiz-field">
-          <label>Attività <span class="opt">(opz.)</span></label>
-          <input id="s1-attivita" type="text" placeholder="es. Qualifica">
+          <label>Attività <span class="req">*</span></label>
+          <select id="s1-attivita">
+            <option value="">Seleziona</option>
+            {% for t in tipi_attivita %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+          </select>
+          <p id="s1-attivita-empty-hint" class="wiz-field-hint" style="display:none;">
+            Nessun tipo attività configurato.
+            <a href="{% url 'impostazioni' %}">Vai a Impostazioni</a> per aggiungerne almeno uno.
+          </p>
         </div>
       </div>
 
@@ -773,6 +780,7 @@
 // ── App-wide settings ─────────────────────────────────────────────────────────
 const PENALE_MAX = {{ penale_max_json|safe }};
 const TESTA_MODELS = {{ testa_models_json|safe }};
+const PIAN_TIPO_ATTIVITA_OPTIONS = {{ tipi_attivita_json|safe }};
 
 // ── Wizard state ──────────────────────────────────────────────────────────────
 const WIZ = {
@@ -784,7 +792,8 @@ const WIZ = {
   newJob: null,
   predecessors: [],
   predecessorItems: [],
-  risorse:{ teste:[], mandrini:[], tastatori:[], maschere:[], generatori:[] }
+  risorse:{ teste:[], mandrini:[], tastatori:[], maschere:[], generatori:[] },
+  minRequirements: null,
 };
 
 const _WIZ_TITLES = ['Nuova commessa','WPS','Predecessore','Info attività','Pianificazione','Risorse','Riepilogo'];
@@ -1158,6 +1167,7 @@ function openAddModal(opts) {
     document.getElementById('s1-commessa').value = _pianLockedJob;
     _s1CheckCommessa(_pianLockedJob, document.getElementById('s1-item').value);
   }
+  _syncS1AttivitaHint();
   document.addEventListener('keydown', _wizEsc);
 }
 
@@ -1456,9 +1466,17 @@ function step1Skip() {
   document.getElementById('s1-drop-zone').style.display = 'none';
   _s1ShowDataPanel(false);
   document.getElementById('s1-next-btn').style.display = '';
+  _syncS1AttivitaHint();
 }
 
 function _s1ContinueToPredecessor() {
+  const attivitaErr = _s1ValidateAttivita();
+  if (attivitaErr) {
+    const errEl = document.getElementById('s1-error');
+    errEl.textContent = attivitaErr;
+    errEl.style.display = '';
+    return;
+  }
   const commessa = document.getElementById('s1-commessa').value.trim();
   WIZ.modello_testa = document.getElementById('s1-testa').value.trim();
   WIZ.commessa      = commessa;
@@ -1475,9 +1493,38 @@ function _s1ContinueToPredecessor() {
   wizGoTo(2);
 }
 
+function _syncS1AttivitaHint() {
+  const sel = document.getElementById('s1-attivita');
+  const hint = document.getElementById('s1-attivita-empty-hint');
+  const nextBtn = document.getElementById('s1-next-btn');
+  const empty = !PIAN_TIPO_ATTIVITA_OPTIONS.length;
+  if (hint) hint.style.display = empty ? '' : 'none';
+  if (sel) sel.disabled = empty;
+  if (nextBtn && document.getElementById('s1-data-panel')?.style.display !== 'none') {
+    nextBtn.disabled = empty;
+  }
+}
+
+function _s1ValidateAttivita() {
+  if (!PIAN_TIPO_ATTIVITA_OPTIONS.length) {
+    return 'Configura almeno un tipo attività in Impostazioni prima di procedere.';
+  }
+  const attivita = document.getElementById('s1-attivita')?.value.trim();
+  if (!attivita) {
+    return 'Seleziona un tipo attività.';
+  }
+  return '';
+}
+
 async function step1Next() {
   const commessa = document.getElementById('s1-commessa').value.trim();
   const errEl = document.getElementById('s1-error');
+  const attivitaErr = _s1ValidateAttivita();
+  if (attivitaErr) {
+    errEl.textContent = attivitaErr;
+    errEl.style.display = '';
+    return;
+  }
   if (!commessa) {
     errEl.textContent = 'La commessa è obbligatoria.';
     errEl.style.display = '';
@@ -1511,7 +1558,7 @@ function _s1ShowDataPanel(autofill) {
     setF('s1-testa',    p.modello_testa,   true);
     setF('s1-commessa', p.commessa,         true);
     setF('s1-item',     p.item != null ? p.item : 1, false);
-    setF('s1-attivita', p.attivita,         true);
+    document.getElementById('s1-attivita').value = '';
     setF('s1-bore-min', b.min,              true);
     setF('s1-bore-mid', b.mid,              true);
     setF('s1-bore-max', b.max,              true);
@@ -1536,9 +1583,8 @@ function _s1ShowDataPanel(autofill) {
   } else {
     notice.style.display = 'none';
   }
+  _syncS1AttivitaHint();
 }
-
-function _renderPredecessorStep() {
   const body = document.getElementById('s2-predecessor-body');
   const items = WIZ.predecessorItems || [];
   WIZ.predecessors = [];
@@ -1749,6 +1795,7 @@ function step4Next() {
 // ── Step 5 / Risorse picker (shared) ─────────────────────────────────────────
 const _RISORSE_CAT_KEYS = ['teste', 'mandrini', 'tastatori', 'maschere', 'generatori'];
 const _RISORSE_DATA_STORES = { s5: {}, rp: {} };
+const _RISORSE_MIN_REQUIREMENTS = { s5: {}, rp: {} };
 let _RISORSE_ACTIVE_PREFIX = 's5';
 let _RISORSE_TARGET = null;
 
@@ -1804,6 +1851,33 @@ function _risorseCatFromWrap(wrapId) {
   return wrapId.replace(/^wrap-(?:rp-)?/, '');
 }
 
+function _formatMinRequirements(mins) {
+  if (!mins) return '';
+  const labels = {
+    teste: 'Teste', mandrini: 'Mandrini', tastatori: 'Tastatori',
+    maschere: 'Maschere', generatori: 'Generatori',
+  };
+  return _RISORSE_CAT_KEYS
+    .map(k => ({ k, n: mins[k] ?? 1 }))
+    .filter(({ n }) => n > 0)
+    .map(({ k, n }) => `${labels[k]}: min ${n}`)
+    .join(' · ');
+}
+
+function _shortfallNoteHtml(catKey, selected, min, available) {
+  const mancanti = min - selected;
+  if (mancanti <= 0) return '';
+  const unavailable = available === 0;
+  const msg = selected === 0
+    ? (unavailable
+      ? `Richieste ${min} — nessuna disponibile nel periodo`
+      : `Richieste ${min} — nessuna selezionata`)
+    : (unavailable
+      ? `Mancano ancora ${mancanti} su ${min} richieste — nessuna altra disponibile`
+      : `Mancano ancora ${mancanti} su ${min} richieste`);
+  return `<span class="s6-shortfall-hint"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg> ${esc(msg)}</span>`;
+}
+
 async function _loadRisorse(prefix, opts) {
   const dom = _risorseDom(prefix);
   _RISORSE_ACTIVE_PREFIX = prefix;
@@ -1834,7 +1908,6 @@ async function _loadRisorse(prefix, opts) {
       recap.style.display = 'none';
     }
   }
-
   const params = new URLSearchParams({
     stabilimento:  opts.stabilimento || '',
     data_inizio:   opts.data_inizio || '',
@@ -1856,6 +1929,20 @@ async function _loadRisorse(prefix, opts) {
     const resp = await fetch(`/api/attivita/risorse/?${params}`);
     const data = await resp.json();
     if (data.ok) {
+      const minReq = data.min_requirements || null;
+      _RISORSE_MIN_REQUIREMENTS[prefix] = minReq || {};
+      if (prefix === 's5') WIZ.minRequirements = minReq;
+      if (recap && minReq && opts.modello_testa) {
+        const reqText = _formatMinRequirements(minReq);
+        if (reqText) {
+          const reqCell = `<div class="s5-recap-cell">
+             <div class="s5-recap-lbl">Minimi richiesti</div>
+             <div class="s5-recap-val">${esc(reqText)}</div>
+           </div>`;
+          recap.innerHTML = (recap.innerHTML || '') + reqCell;
+          recap.style.display = '';
+        }
+      }
       const pre = opts.useServerPreselect
         ? {
             teste:      [...(data.pre_testa      || [])],
@@ -2016,12 +2103,19 @@ function _updateRisorseLabel(prefix, key) {
   const lbl = document.getElementById(dom.lblId(key));
   if (!lbl) return;
   const sel = (_RISORSE_TARGET && _RISORSE_TARGET[key]) || [];
+  const min = (_RISORSE_MIN_REQUIREMENTS[prefix] || {})[key] ?? 1;
   const empty = { teste:'Nessuna selezionata', mandrini:'Nessuno selezionato',
                   tastatori:'Nessuno selezionato', maschere:'Nessuna selezionata',
                   generatori:'Nessuno selezionato' };
+  const short = sel.length < min;
   if (!sel.length) {
-    lbl.textContent = empty[key] || 'Nessuno selezionato';
-    lbl.style.color = '';
+    lbl.textContent = short
+      ? `${empty[key] || 'Nessuno selezionato'} (richieste ${min})`
+      : (empty[key] || 'Nessuno selezionato');
+    lbl.style.color = short ? 'var(--red)' : '';
+  } else if (short) {
+    lbl.textContent = `${sel.join(', ')} (${sel.length}/${min})`;
+    lbl.style.color = 'hsl(38 95% 55%)';
   } else {
     lbl.textContent = sel.join(', ');
     lbl.style.color = 'var(--text)';
@@ -2185,6 +2279,10 @@ function _s6BuildRiepilogo() {
   const fmt = v => v ? esc(String(v)) : '<span style="color:var(--text-subtle)">—</span>';
   const stab = r.stabilimento;
   const inventoryMap = window._S5_INVENTORY_MAP || {};
+  const invStore = _RISORSE_DATA_STORES.s5 || {};
+  const mins = r.minRequirements || {
+    teste: 1, mandrini: 1, tastatori: 1, maschere: 1, generatori: 1,
+  };
   const catLabels = {
     teste: 'Teste', mandrini: 'Mandrini', tastatori: 'Tastatori',
     maschere: 'Maschere', generatori: 'Generatori',
@@ -2192,24 +2290,49 @@ function _s6BuildRiepilogo() {
 
   const resourcesHtml = (() => {
     const rows = [];
-    Object.entries(r.risorse)
-      .filter(([, v]) => v && v.length)
-      .forEach(([k, v]) => {
-        const catLabel = catLabels[k] || k;
-        const groups = {};
-        v.forEach(uid => {
-          const plant = inventoryMap[uid];
-          const key = (plant && plant !== stab) ? plant : '__ok__';
-          (groups[key] = groups[key] || []).push(uid);
-        });
-        Object.entries(groups).forEach(([fromPlant, uids]) => {
-          const idsHtml = uids.map(u => `<code class="s6-uid">${esc(u)}</code>`).join(' ');
-          const noteHtml = fromPlant === '__ok__'
-            ? ''
-            : `<span class="s6-move-hint"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg> spostamento da ${esc(fromPlant)} a ${esc(stab)}</span>`;
-          rows.push(`<tr><td class="s6-tbl-cat">${catLabel}</td><td class="s6-tbl-ids">${idsHtml}</td><td class="s6-tbl-note">${noteHtml}</td></tr>`);
-        });
+    _RISORSE_CAT_KEYS.forEach(k => {
+      const min = mins[k] ?? 1;
+      const selected = r.risorse[k] || [];
+      const available = (invStore[k] || []).length;
+      const catLabel = catLabels[k] || k;
+
+      if (!selected.length) {
+        if (min > 0) {
+          rows.push(
+            `<tr><td class="s6-tbl-cat">${catLabel}</td>` +
+            `<td class="s6-tbl-ids">—</td>` +
+            `<td class="s6-tbl-note">${_shortfallNoteHtml(k, 0, min, available)}</td></tr>`
+          );
+        }
+        return;
+      }
+
+      const groups = {};
+      selected.forEach(uid => {
+        const plant = inventoryMap[uid];
+        const key = (plant && plant !== stab) ? plant : '__ok__';
+        (groups[key] = groups[key] || []).push(uid);
       });
+      let firstRow = true;
+      Object.entries(groups).forEach(([fromPlant, uids]) => {
+        const idsHtml = uids.map(u => `<code class="s6-uid">${esc(u)}</code>`).join(' ');
+        const notes = [];
+        if (fromPlant !== '__ok__') {
+          notes.push(
+            `<span class="s6-move-hint"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg> spostamento da ${esc(fromPlant)} a ${esc(stab)}</span>`
+          );
+        }
+        if (firstRow && selected.length < min) {
+          notes.push(_shortfallNoteHtml(k, selected.length, min, available));
+        }
+        rows.push(
+          `<tr><td class="s6-tbl-cat">${catLabel}</td>` +
+          `<td class="s6-tbl-ids">${idsHtml}</td>` +
+          `<td class="s6-tbl-note">${notes.join(' ')}</td></tr>`
+        );
+        firstRow = false;
+      });
+    });
     if (!rows.length) return '';
     return `<table class="s6-res-table"><thead><tr><th>Categoria</th><th>Risorse</th><th>Note</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
   })();
@@ -2776,6 +2899,7 @@ document.addEventListener('DOMContentLoaded', () => {
   sortPianGroupList();
   _initPianStatusFilter();
   filterPianGroups(document.getElementById('pian-search')?.value || '');
+  _syncS1AttivitaHint();
 
   document.addEventListener('click', _pianResPopoverClick, true);
   document.addEventListener('click', e => {
@@ -2939,6 +3063,21 @@ async function enterEditMode() {
           `<option value="${esc(r)}"${r === current ? ' selected' : ''}>${esc(r)}</option>`
         ))
         .join('');
+      return `<div class="det-field">
+                <span class="det-label">${esc(f.label)}</span>
+                <select class="det-input" name="${f.key}">${opts}</select>
+              </div>`;
+    }
+    if (f.key === 'activity' && entityType === 'task') {
+      const current = originalData[f.key] || '';
+      const inCatalog = PIAN_TIPO_ATTIVITA_OPTIONS.includes(current);
+      let opts = '<option value="">Seleziona</option>';
+      if (current && !inCatalog) {
+        opts += `<option value="${esc(current)}" selected disabled>${esc(current)} (non in elenco)</option>`;
+      }
+      opts += PIAN_TIPO_ATTIVITA_OPTIONS.map(t =>
+        `<option value="${esc(t)}"${t === current ? ' selected' : ''}>${esc(t)}</option>`
+      ).join('');
       return `<div class="det-field">
                 <span class="det-label">${esc(f.label)}</span>
                 <select class="det-input" name="${f.key}">${opts}</select>
@@ -3316,7 +3455,7 @@ async function openNotesModal(ormId) {
       const from   = esc(p.stabilimento_origine || '?');
       const to     = esc(p.stabilimento_attivita || '?');
       const action = p.tipo === 'acquisto'
-        ? 'Da acquistare / noleggiare'
+        ? (p.descrizione || 'Da acquistare / noleggiare')
         : `Spostamento richiesto da ${from} a ${to}`;
       const isOpen = !p.risolto;
       const risolviDesc = (label + uid + ' — ' + action).replace(/'/g, "\\'");

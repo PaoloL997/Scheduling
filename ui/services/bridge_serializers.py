@@ -71,6 +71,12 @@ def serialize_responsabili() -> list[dict]:
     return list(Responsabile.objects.order_by("nome").values("id", "nome"))
 
 
+def serialize_tipi_attivita() -> list[dict]:
+    from ui.models import TipoAttivita
+
+    return list(TipoAttivita.objects.order_by("nome").values("id", "nome"))
+
+
 def serialize_problemi() -> list[dict]:
     """Return all problems with activity reference fields."""
     rows = (
@@ -174,6 +180,7 @@ def serialize_dataset() -> dict:
         "inventario": serialize_inventario(),
         "stabilimenti": serialize_stabilimenti(),
         "responsabili": serialize_responsabili(),
+        "tipi_attivita": serialize_tipi_attivita(),
         "problemi": serialize_problemi(),
         "app_settings": serialize_app_settings(),
         "config_testa": serialize_config_testa(),

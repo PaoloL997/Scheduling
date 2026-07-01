@@ -48,6 +48,51 @@ def get_responsabili() -> list[str]:
     return list(Responsabile.objects.order_by("nome").values_list("nome", flat=True))
 
 
+def get_tipi_attivita() -> list[str]:
+    """Return sorted activity type names from the TipoAttivita ORM model.
+
+    Returns:
+        list[str]: Activity type names ordered alphabetically, or ``[]`` if none exist.
+    """
+    from ui.models import TipoAttivita
+
+    return list(TipoAttivita.objects.order_by("nome").values_list("nome", flat=True))
+
+
+def validate_activity_type(nome: str) -> str:
+    """Validate and return the canonical activity type name from the catalog.
+
+    Args:
+        nome: Candidate activity type name from the client.
+
+    Returns:
+        str: The canonical ``nome`` stored in :class:`~ui.models.TipoAttivita`.
+
+    Raises:
+        ValueError: When *nome* is empty or does not match a configured type.
+    """
+    from ui.models import TipoAttivita
+
+    cleaned = (nome or "").strip()
+    if not cleaned:
+        raise ValueError("Il tipo attività è obbligatorio.")
+
+    canonical = (
+        TipoAttivita.objects.filter(nome__iexact=cleaned)
+        .values_list("nome", flat=True)
+        .first()
+    )
+    if canonical is None:
+        if not TipoAttivita.objects.exists():
+            raise ValueError(
+                "Nessun tipo attività configurato. Aggiungine almeno uno in Impostazioni."
+            )
+        raise ValueError(
+            f"Tipo attività '{cleaned}' non valido. Seleziona un'opzione da Impostazioni."
+        )
+    return canonical
+
+
 def _occupied_ids(
     tipo: str,
     data_inizio: date,
@@ -108,6 +153,29 @@ def find_modello_testa_in_db(modello_testa: str) -> str | None:
         .first()
     )
     return partial
+
+
+def get_testa_min_requirements(modello_testa: str | None) -> dict[str, int]:
+    """Return minimum resource counts for a testa model configuration.
+
+    Args:
+        modello_testa: Testa model name used for configuration lookup.
+
+    Returns:
+        dict[str, int]: Keys ``teste``, ``mandrini``, ``tastatori``,
+            ``maschere``, ``generatori`` with the required minimum counts.
+            Defaults to ``1`` for each category when no configuration exists.
+    """
+    min_mandrini, min_tastatori, min_maschere, min_generatori, _ = _get_testa_config(
+        modello_testa
+    )
+    return {
+        "teste": 1,
+        "mandrini": min_mandrini,
+        "tastatori": min_tastatori,
+        "maschere": min_maschere,
+        "generatori": min_generatori,
+    }
 
 
 def _get_testa_config(modello_testa: str | None) -> tuple[int, int, int, int, set[str]]:
@@ -429,4 +497,5 @@ def get_available_resources(
         "pre_tastatori": pre_tastatori,
         "pre_maschere": pre_maschere,
         "pre_generatori": pre_generatori,
+        "min_requirements": get_testa_min_requirements(modello_testa),
     }

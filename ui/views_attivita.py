@@ -71,7 +71,7 @@ def api_analizza_wps(request: HttpRequest) -> JsonResponse:
             {
                 "ok": False,
                 "error": "Nome file non valido. Usa il formato "
-                "ModelloTesta_Commessa[_Item][_Attività].pdf.",
+                "ModelloTesta_Commessa[_Item].pdf.",
             },
             status=400,
         )
@@ -219,6 +219,7 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
             "pre_tastatori": list(result["pre_tastatori"]),
             "pre_maschere": list(result["pre_maschere"]),
             "pre_generatori": list(result["pre_generatori"]),
+            "min_requirements": result["min_requirements"],
         }
     )
 
@@ -291,6 +292,13 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
     except (ValueError, TypeError):
         item = 1
 
+    from ui.services.activity_inventory import validate_activity_type
+
+    try:
+        attivita = validate_activity_type(data.get("attivita", ""))
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+
     try:
         data_inizio = date.fromisoformat(data["data_inizio"])
         data_fine = date.fromisoformat(data["data_fine"])
@@ -362,6 +370,7 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
 
     from ui.services.resource_conflicts import (
         ResourceConflictError,
+        format_conflict_message,
         validate_no_conflicts,
     )
 
@@ -371,7 +380,13 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
         return JsonResponse(
             {
                 "ok": False,
-                "error": "Conflitto risorse",
+                "error": format_conflict_message(
+                    exc.conflicts,
+                    action_hint=(
+                        "Torna allo step risorse per scegliere alternative "
+                        "non occupate nel periodo indicato."
+                    ),
+                ),
                 "conflicts": exc.conflicts,
             },
             status=409,
@@ -381,7 +396,7 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
         att = Attivita(
             commessa=commessa,
             item=item,
-            activity=data.get("attivita", ""),
+            activity=attivita,
             stabilimento=data.get("stabilimento", ""),
             responsabile=data.get("responsabile", ""),
             modello_testa=data.get("modello_testa", ""),

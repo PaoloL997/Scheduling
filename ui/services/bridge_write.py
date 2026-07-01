@@ -9,7 +9,11 @@ import logging
 from django.db import transaction
 
 from ui.models import Attivita, MppSyncQueue, RisorsaAttivita
-from ui.services.resource_conflicts import ResourceConflictError, validate_no_conflicts
+from ui.services.resource_conflicts import (
+    ResourceConflictError,
+    format_conflict_message,
+    validate_no_conflicts,
+)
 from ui.services.resource_display import (
     format_activity_resources,
     format_activity_resources_html,
@@ -94,7 +98,12 @@ def update_attivita(orm_id: int, data: dict) -> dict:
                 status_code=400,
             ) from exc
     if "activity" in data:
-        a.activity = (data["activity"] or "").strip()
+        from ui.services.activity_inventory import validate_activity_type
+
+        try:
+            a.activity = validate_activity_type(data["activity"])
+        except ValueError as exc:
+            raise BridgeWriteError(str(exc), status_code=400) from exc
 
     if a.commessa != old_commessa or a.item != old_item or a.activity != old_activity:
         if (
@@ -156,7 +165,13 @@ def update_attivita(orm_id: int, data: dict) -> dict:
                 )
             except ResourceConflictError as exc:
                 raise BridgeWriteError(
-                    "Conflitto risorse",
+                    format_conflict_message(
+                        exc.conflicts,
+                        action_hint=(
+                            "Scegli risorse alternative non occupate "
+                            "nel periodo indicato."
+                        ),
+                    ),
                     status_code=409,
                     conflicts=exc.conflicts,
                 ) from exc
@@ -181,7 +196,13 @@ def update_attivita(orm_id: int, data: dict) -> dict:
             )
         except ResourceConflictError as exc:
             raise BridgeWriteError(
-                "Conflitto risorse",
+                format_conflict_message(
+                    exc.conflicts,
+                    action_hint=(
+                        "Usa «Modifica risorse» per sostituirle o rimuoverle, "
+                        "oppure accorcia il periodo dell'attività."
+                    ),
+                ),
                 status_code=409,
                 conflicts=exc.conflicts,
             ) from exc

@@ -26,6 +26,37 @@ _TIPO_LABELS: dict[str, str] = {
     "generatore": "Generatore",
 }
 
+_CAT_KEYS = ("teste", "mandrini", "tastatori", "maschere", "generatori")
+
+_CAT_TO_TIPO: dict[str, str] = {
+    "teste": "testa",
+    "mandrini": "mandrino",
+    "tastatori": "tastatore",
+    "maschere": "maschera",
+    "generatori": "generatore",
+}
+
+
+def _shortfall_description(
+    label: str,
+    selected: int,
+    required: int,
+    modello_testa: str,
+) -> str:
+    """Build an Italian description for an under-selected resource category."""
+    modello_part = f" per il modello {modello_testa}" if modello_testa else ""
+    if label in ("Testa", "Maschera"):
+        sel_adj = "selezionata" if selected == 1 else "selezionate"
+    else:
+        sel_adj = "selezionato" if selected == 1 else "selezionati"
+
+    base = f"{label}: {selected}/{required} {sel_adj}{modello_part}"
+    if selected == 0:
+        return f"{base} — da recuperare, acquistare o affittare."
+    mancanti = required - selected
+    return f"{base} — manca/no ancora {mancanti}."
+
+
 _RESOURCE_MODELS: dict[str, type] = {}
 
 
@@ -104,36 +135,35 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
         int: The number of new :class:`~ui.models.ProblemaAttivita` rows created.
     """
     from ui.models import ProblemaAttivita
+    from ui.services.activity_inventory import get_testa_min_requirements
 
-    cat_map: dict[str, str] = {
-        "teste": "testa",
-        "mandrini": "mandrino",
-        "tastatori": "tastatore",
-        "maschere": "maschera",
-        "generatori": "generatore",
-    }
+    min_requirements = get_testa_min_requirements(
+        (attivita.modello_testa or "").strip() or None
+    )
+    modello_testa = (attivita.modello_testa or "").strip()
 
     stabilimento_attivita = (attivita.stabilimento or "").strip()
     problems: list[ProblemaAttivita] = []
 
-    for key, categoria in cat_map.items():
+    for key in _CAT_KEYS:
+        categoria = _CAT_TO_TIPO[key]
         uids: list[str] = risorse_dict.get(key) or []
         label = _TIPO_LABELS.get(categoria, categoria.capitalize())
+        required = min_requirements.get(key, 1)
+        selected = len(uids)
 
-        if not uids:
+        if selected < required:
             problems.append(
                 ProblemaAttivita(
                     attivita=attivita,
                     tipo=ProblemaAttivita.TIPO_ACQUISTO,
                     risorsa_tipo=categoria,
                     risorsa_uid="",
-                    descrizione=(
-                        f"Nessun/a {label} selezionato/a — "
-                        "la risorsa deve essere recuperata, acquistata o affittata."
+                    descrizione=_shortfall_description(
+                        label, selected, required, modello_testa
                     ),
                 )
             )
-            continue
 
         for uid in uids:
             plant = _lookup_plant(categoria, uid)

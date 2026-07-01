@@ -19,6 +19,7 @@ class ImpostazioniPageTest(TestCase):
         self.assertNotIn('id="input-penale-max"', html)
         self.assertIn('id="section-stabilimenti"', html)
         self.assertIn('id="section-responsabili"', html)
+        self.assertIn('id="section-tipi-attivita"', html)
         self.assertIn('id="section-config-testa"', html)
 
 

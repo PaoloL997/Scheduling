@@ -6,11 +6,12 @@ from datetime import date
 from django.contrib.auth.models import User
 from django.test import Client, RequestFactory, TestCase
 
-from ui.models import Attivita, Job, MppSyncQueue, RisorsaAttivita
+from ui.models import Attivita, Job, MppSyncQueue, RisorsaAttivita, TipoAttivita
 from ui.services.resource_conflicts import (
     ResourceAssignment,
     ResourceConflictError,
     find_conflicts,
+    format_conflict_message,
     validate_no_conflicts,
 )
 from ui.views import api_tasks_update
@@ -140,9 +141,45 @@ class ValidateNoConflictsTest(TestCase):
                 date(2026, 6, 15),
             )
         self.assertEqual(len(ctx.exception.conflicts), 1)
+        self.assertIn("t1", str(ctx.exception))
+        self.assertIn("X001", str(ctx.exception))
 
     def test_no_raise_when_empty(self) -> None:
         validate_no_conflicts([], date(2026, 6, 5), date(2026, 6, 15))
+
+
+class FormatConflictMessageTest(TestCase):
+    """format_conflict_message produces descriptive Italian text."""
+
+    def test_single_conflict_includes_resource_and_activity(self) -> None:
+        a = _make_activity("X001", 1, "2026-06-01", "2026-06-10")
+        _book(a, "testa", "t1")
+        conflicts = find_conflicts(
+            [("testa", "t1")],
+            date(2026, 6, 5),
+            date(2026, 6, 15),
+        )
+        msg = format_conflict_message(
+            conflicts,
+            action_hint="Usa «Modifica risorse».",
+        )
+        self.assertIn("la testa «t1»", msg)
+        self.assertIn("01/06/2026", msg)
+        self.assertIn("Usa «Modifica risorse».", msg)
+
+    def test_multiple_conflicts_are_listed(self) -> None:
+        a = _make_activity("X001", 1, "2026-06-01", "2026-06-10")
+        _book(a, "testa", "t1")
+        _book(a, "mandrino", "C1")
+        conflicts = find_conflicts(
+            [("testa", "t1"), ("mandrino", "C1")],
+            date(2026, 6, 5),
+            date(2026, 6, 15),
+        )
+        msg = format_conflict_message(conflicts)
+        self.assertIn("2 risorse", msg)
+        self.assertIn("Testa «t1»", msg)
+        self.assertIn("Mandrino «C1»", msg)
 
 
 class FindConflictsMultiAssignmentTest(TestCase):
@@ -185,6 +222,8 @@ class ApiTasksUpdateConflictTest(TestCase):
         payload = json.loads(resp.content)
         self.assertFalse(payload["ok"])
         self.assertEqual(len(payload["conflicts"]), 1)
+        self.assertIn("t1", payload["error"])
+        self.assertIn("Modifica risorse", payload["error"])
 
     def test_conflict_does_not_save(self) -> None:
         req = self._put({"orm_id": self.a.pk, "finish": "2026-06-22"})
@@ -213,6 +252,7 @@ class ApiSalvaAttivitaConflictTest(TestCase):
         self.client = Client()
         self.user = User.objects.create_user(username="u", password="p")
         self.client.force_login(self.user)
+        TipoAttivita.objects.create(nome="act")
         self.existing = _make_activity("X001", 1, "2026-06-01", "2026-06-10")
         _book(self.existing, "testa", "t1")
         Job.objects.create(commessa="Y001")

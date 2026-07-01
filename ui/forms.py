@@ -48,7 +48,7 @@ class WpsUploadForm(forms.Form):
 
     Validates that the uploaded file is a PDF and that its filename follows
     the expected naming convention:
-    ``{modello_testa}_{commessa}[-{item}][_{attivita}].pdf``.
+    ``{modello_testa}_{commessa}[_{item}].pdf``.
     """
 
     wps_file = forms.FileField(
@@ -74,8 +74,7 @@ class WpsUploadForm(forms.Form):
         stem = f.name[:-4]
         if "_" not in stem:
             raise forms.ValidationError(
-                "Nome file non valido. Formato atteso: "
-                "modellotesta_commessa[_attivita].pdf"
+                "Nome file non valido. Formato atteso: modellotesta_commessa[_item].pdf"
             )
         return f
 
@@ -102,12 +101,15 @@ class AttivitaWpsConfermaForm(forms.Form):
         min_value=1,
         widget=forms.NumberInput(attrs={"min": "1"}),
     )
-    attivita = forms.CharField(
+    attivita = forms.ChoiceField(
         label="Attività",
-        max_length=200,
-        required=True,
-        widget=forms.TextInput(attrs={"autocomplete": "off"}),
+        choices=[],
     )
+
+    def __init__(self, *args, tipi_attivita: list[str] | None = None, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        choices = [("", "Seleziona")] + [(t, t) for t in (tipi_attivita or [])]
+        self.fields["attivita"].choices = choices
 
 
 class AttivitaPianificazioneForm(forms.Form):

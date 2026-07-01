@@ -14,6 +14,106 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+_TIPO_LABELS = {
+    "testa": "Testa",
+    "generatore": "Generatore",
+    "mandrino": "Mandrino",
+    "tastatore": "Tastatore",
+    "maschera": "Maschera",
+}
+
+_TIPO_WITH_ARTICLE = {
+    "testa": "la testa",
+    "generatore": "il generatore",
+    "mandrino": "il mandrino",
+    "tastatore": "il tastatore",
+    "maschera": "la maschera",
+}
+
+
+def _format_date_it(iso: str | None) -> str:
+    if not iso:
+        return "?"
+    return date.fromisoformat(iso).strftime("%d/%m/%Y")
+
+
+def _format_date_range(data_inizio: str | None, data_fine: str | None) -> str:
+    if data_inizio and data_fine:
+        return f"{_format_date_it(data_inizio)} – {_format_date_it(data_fine)}"
+    if data_inizio:
+        return f"da {_format_date_it(data_inizio)}"
+    if data_fine:
+        return f"fino al {_format_date_it(data_fine)}"
+    return "date non definite"
+
+
+def format_conflict_message(
+    conflicts: list[dict],
+    *,
+    action_hint: str | None = None,
+) -> str:
+    """Build a human-readable Italian message describing resource conflicts.
+
+    Args:
+        conflicts: Conflict descriptors as returned by :func:`find_conflicts`.
+        action_hint: Optional closing sentence guiding the user on how to
+            resolve the conflict (e.g. which UI action to take).
+
+    Returns:
+        str: A descriptive error message; falls back to ``Conflitto risorse``
+            when *conflicts* is empty.
+    """
+    if not conflicts:
+        return "Conflitto risorse"
+
+    default_hint = "Sostituisci o rimuovi le risorse in conflitto prima di procedere."
+    hint = action_hint or default_hint
+
+    seen: set[tuple] = set()
+    unique: list[dict] = []
+    for conflict in conflicts:
+        key = (
+            conflict.get("tipo"),
+            conflict.get("risorsa_id"),
+            conflict.get("attivita_id"),
+        )
+        if key not in seen:
+            seen.add(key)
+            unique.append(conflict)
+
+    if len(unique) == 1:
+        conflict = unique[0]
+        tipo_key = conflict.get("tipo", "")
+        resource = _TIPO_WITH_ARTICLE.get(tipo_key, "la risorsa")
+        rid = conflict.get("risorsa_id", "?")
+        activity = conflict.get("attivita_label", "?")
+        period = _format_date_range(
+            conflict.get("data_inizio"), conflict.get("data_fine")
+        )
+        return (
+            f"Conflitto risorse: {resource} «{rid}» è già assegnata "
+            f"all'attività {activity} ({period}), che si sovrappone al periodo "
+            f"selezionato. {hint}"
+        )
+
+    lines = [
+        (
+            f"Conflitto risorse: {len(unique)} risorse sono già occupate "
+            f"nel periodo selezionato:"
+        )
+    ]
+    for conflict in unique:
+        tipo_key = conflict.get("tipo", "")
+        tipo_label = _TIPO_LABELS.get(tipo_key, "Risorsa")
+        rid = conflict.get("risorsa_id", "?")
+        activity = conflict.get("attivita_label", "?")
+        period = _format_date_range(
+            conflict.get("data_inizio"), conflict.get("data_fine")
+        )
+        lines.append(f"• {tipo_label} «{rid}» — attività {activity} ({period})")
+    lines.append(hint)
+    return "\n".join(lines)
+
 
 @dataclass(frozen=True)
 class ResourceAssignment:
@@ -38,14 +138,20 @@ class ResourceConflictError(Exception):
             ``data_inizio``, ``data_fine``.
     """
 
-    def __init__(self, conflicts: list[dict]) -> None:
+    def __init__(
+        self,
+        conflicts: list[dict],
+        *,
+        action_hint: str | None = None,
+    ) -> None:
         """Initialise the exception with a list of conflict descriptors.
 
         Args:
             conflicts: Conflict descriptors as returned by
                 :func:`find_conflicts`.
+            action_hint: Optional closing sentence for the error message.
         """
-        super().__init__("Conflitto risorse")
+        super().__init__(format_conflict_message(conflicts, action_hint=action_hint))
         self.conflicts = conflicts
 
 

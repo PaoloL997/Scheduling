@@ -1615,6 +1615,25 @@ body.light .s6-move-hint {
   border-color: hsl(38 80% 50% / .35);
 }
 
+.s6-shortfall-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  font-size: .7rem;
+  font-weight: 600;
+  color: hsl(0 85% 62%);
+  background: hsl(0 50% 50% / .12);
+  border: 1px solid hsl(0 50% 50% / .35);
+  border-radius: .25rem;
+  padding: .15rem .45rem;
+  white-space: normal;
+}
+body.light .s6-shortfall-hint {
+  color: hsl(0 70% 38%);
+  background: hsl(0 80% 55% / .10);
+  border-color: hsl(0 60% 55% / .30);
+}
+
 /* Warning badge on activity rows */
 .warn-badge {
   display: inline-flex; align-items: center; gap: .25rem;
@@ -2322,6 +2341,7 @@ body.light .det-footer {
   border-left: 3px solid var(--red);
   border-radius: var(--radius);
   padding: 0.5rem 0.75rem;
+  white-space: pre-line;
 }
 body.light .det-error {
   background: hsl(0 80% 97%);
@@ -3304,6 +3324,7 @@ body.light .s5-recap-cell--accent { background: hsl(215 40% 93%); }
   border-left: 3px solid var(--red);
   border-radius: 0.375rem; padding: 0.375rem 0.625rem;
   min-height: 1.25rem;
+  white-space: pre-line;
 }
 body.light .wiz-error { background: #fef2f2; border-color: #fecaca; border-left-color: #ef4444; }
 

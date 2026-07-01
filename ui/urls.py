@@ -175,6 +175,21 @@ urlpatterns = [
         name="api_bridge_responsabili_detail",
     ),
     path(
+        "api/bridge/tipi-attivita/",
+        views_bridge.api_bridge_tipi_attivita,
+        name="api_bridge_tipi_attivita",
+    ),
+    path(
+        "api/bridge/tipi-attivita/create/",
+        views_bridge.api_bridge_tipi_attivita_create,
+        name="api_bridge_tipi_attivita_create",
+    ),
+    path(
+        "api/bridge/tipi-attivita/<int:pk>/",
+        views_bridge.api_bridge_tipi_attivita_detail,
+        name="api_bridge_tipi_attivita_detail",
+    ),
+    path(
         "api/bridge/problemi/",
         views_bridge.api_bridge_problemi,
         name="api_bridge_problemi",
@@ -271,6 +286,16 @@ urlpatterns = [
         "api/responsabili/<int:pk>/",
         views.api_responsabili_detail,
         name="api_responsabili_detail",
+    ),
+    path(
+        "api/tipi-attivita/",
+        views.api_tipi_attivita_create,
+        name="api_tipi_attivita_create",
+    ),
+    path(
+        "api/tipi-attivita/<int:pk>/",
+        views.api_tipi_attivita_detail,
+        name="api_tipi_attivita_detail",
     ),
     path(
         "api/config-testa/",

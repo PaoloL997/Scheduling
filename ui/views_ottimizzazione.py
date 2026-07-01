@@ -38,7 +38,10 @@ from ui.services.optimization_apply import (
     apply_optimization_result,
 )
 from ui.services.optimization_explanation import generate_optimization_explanation
-from ui.services.resource_conflicts import ResourceConflictError
+from ui.services.resource_conflicts import (
+    ResourceConflictError,
+    format_conflict_message,
+)
 from ui.views import _fetch_grouped, _has_plannable_activities
 
 SESSION_DRAFT_KEY = "ottimizzazione_draft"
@@ -491,7 +494,13 @@ def api_ottimizzazione_accetta(request: HttpRequest) -> JsonResponse:
         return JsonResponse(
             {
                 "ok": False,
-                "error": "Conflitto risorse durante l'applicazione della proposta.",
+                "error": format_conflict_message(
+                    exc.conflicts,
+                    action_hint=(
+                        "Rivedi le date o le risorse delle attività coinvolte "
+                        "prima di applicare la proposta."
+                    ),
+                ),
                 "conflicts": exc.conflicts,
             },
             status=409,
