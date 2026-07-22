@@ -8,7 +8,7 @@ from datetime import date
 from django.contrib.auth.models import User
 from django.test import RequestFactory, TestCase
 
-from ui.models import Attivita, MandrinoItem, RisorsaAttivita, TestaItem
+from ui.models import Attivita, MandrinoItem, MppSyncQueue, RisorsaAttivita, TestaItem
 from ui.services.activity_inventory import get_available_resources
 from ui.services.bridge_write import BridgeWriteError, update_attivita
 from ui.views import api_tasks_update
@@ -52,6 +52,23 @@ class UpdateAttivitaRisorseTest(TestCase):
         self.assertEqual(rows[0].risorsa_id, "T002")
         self.assertIn("resources_by_tipo", result)
         self.assertEqual(result["resources_by_tipo"]["testa"], ["T002"])
+
+    def test_update_risorse_enqueues_resources_for_mpp_writeback(self) -> None:
+        update_attivita(
+            self.att.pk,
+            {
+                "risorse": {
+                    "teste": ["T002"],
+                    "mandrini": ["M1"],
+                    "tastatori": [],
+                    "maschere": [],
+                    "generatori": [],
+                }
+            },
+        )
+        entry = MppSyncQueue.objects.get(operation="update_task")
+        payload = json.loads(entry.payload_json)
+        self.assertEqual(payload["resources"], ["T002", "M1"])
 
     def test_update_risorse_conflict_raises(self) -> None:
         other = Attivita.objects.create(
@@ -190,6 +207,60 @@ class StrictRequirementsTest(TestCase):
             strict_requirements=True,
         )
         self.assertEqual(result["teste"], [])
+
+    def test_relax_requirements_returns_all_free_resources(self) -> None:
+        MandrinoItem.objects.create(uid="M_OTHER", diameter="80", plant="Dalmine")
+        result = get_available_resources(
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            modello_testa="HT200",
+            bore_min=20.0,
+            bore_max=30.0,
+            strict_requirements=True,
+            relax_requirements=True,
+        )
+        teste_uids = {r["uid"] for r in result["teste"]}
+        mandrini_uids = {r["uid"] for r in result["mandrini"]}
+        self.assertIn("T001", teste_uids)
+        self.assertIn("T002", teste_uids)
+        self.assertIn("M_OK", mandrini_uids)
+        self.assertIn("M_BAD", mandrini_uids)
+        self.assertIn("M_OTHER", mandrini_uids)
+        other = next(r for r in result["mandrini"] if r["uid"] == "M_OTHER")
+        self.assertEqual(other.get("stab_esterno"), "Dalmine")
+
+    def test_api_relax_requirements_overrides_strict_from_activity(self) -> None:
+        factory = RequestFactory()
+        user = User.objects.create_user("relax", password="pass")
+        att = Attivita.objects.create(
+            commessa="C101",
+            item=1,
+            activity="A1",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            stabilimento="Valbrembo",
+            modello_testa="HT200",
+            bore_min=20,
+            bore_max=30,
+        )
+        request = factory.get(
+            "/api/attivita/risorse/",
+            {
+                "stabilimento": "Valbrembo",
+                "data_inizio": "2026-06-01",
+                "data_fine": "2026-06-05",
+                "exclude_activity_id": str(att.pk),
+                "relax_requirements": "1",
+            },
+        )
+        request.user = user
+        resp = api_get_risorse(request)
+        data = json.loads(resp.content)
+        self.assertTrue(data["ok"])
+        mandrini_uids = {r["uid"] for r in data["mandrini"]}
+        self.assertIn("M_OK", mandrini_uids)
+        self.assertIn("M_BAD", mandrini_uids)
 
     def test_api_edit_loads_requirements_from_activity(self) -> None:
         factory = RequestFactory()

@@ -244,6 +244,20 @@ class ApplyUpdateTaskTests(TestCase):
         kwargs = wrapper.update_task.call_args[1]
         self.assertIsNone(kwargs["new_name"])
 
+    def test_resources_replaces_task_assignments(self):
+        """``resources`` in the payload replaces MPP task assignments."""
+        wrapper = self._wrapper_with("25033_01_qualifica")
+        payload = {
+            "commessa": "25033",
+            "item": 1,
+            "activity": "qualifica",
+            "resources": ["T1", "M2"],
+        }
+        _apply_update_task(wrapper, payload)
+        wrapper.set_task_resources.assert_called_once_with(
+            "25033_01_qualifica", ["T1", "M2"]
+        )
+
 
 class ApplyDeleteTaskTests(TestCase):
     """Tests for :func:`_apply_delete_task`."""

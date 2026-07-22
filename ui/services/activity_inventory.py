@@ -232,6 +232,7 @@ def get_available_resources(
     modello_testa: str | None = None,
     exclude_activity_id: int | None = None,
     strict_requirements: bool = False,
+    relax_requirements: bool = False,
 ) -> dict:
     """Build the full resource availability context for the wizard step 5.
 
@@ -270,6 +271,10 @@ def get_available_resources(
             requirement fields are set (modello for teste, bore range for
             mandrini/tastatori, pitch for maschere, compatible config for
             generatori).
+        relax_requirements: When ``True``, ignore model/bore/pitch filters and
+            return every inventory item free in the activity interval (same-plant
+            first, then other plants with ``stab_esterno``). Overrides
+            ``strict_requirements``.
 
     Returns:
         dict: With keys ``teste``, ``mandrini``, ``tastatori``, ``maschere``,
@@ -286,6 +291,9 @@ def get_available_resources(
         TastatoreItem,
         TestaItem,
     )
+
+    if relax_requirements:
+        strict_requirements = False
 
     min_mandrini, min_tastatori, min_maschere, min_generatori, gen_models = (
         _get_testa_config(modello_testa)
@@ -328,6 +336,21 @@ def get_available_resources(
         for r in fallback:
             r["stab_esterno"] = r.get("plant") or "—"
         return fallback
+
+    def _query_all_free(base_qs, occ: set) -> list[dict]:
+        """Return all free resources in the period, same-plant first.
+
+        Unlike ``_query_with_fallback``, other-plant items are always appended
+        (with ``stab_esterno``) rather than only when the local plant is empty.
+        """
+        qs = base_qs
+        if occ:
+            qs = qs.exclude(uid__in=occ)
+        primary = list(qs.filter(plant=stabilimento).order_by("uid").values())
+        others = list(qs.exclude(plant=stabilimento).order_by("plant", "uid").values())
+        for r in others:
+            r["stab_esterno"] = r.get("plant") or "—"
+        return primary + others
 
     def _bore_filter(qs):
         """Filter queryset by bore diameter range when both bounds are set.
@@ -388,26 +411,36 @@ def get_available_resources(
         return qs
 
     def _teste_available() -> list[dict]:
+        if relax_requirements:
+            return _query_all_free(TestaItem.objects.all(), occ_testa)
         if strict_requirements and not modello_testa:
             return []
         return _query_with_fallback(TestaItem.objects.all(), _model_filter, occ_testa)
 
     def _mandrini_available() -> list[dict]:
+        if relax_requirements:
+            return _query_all_free(MandrinoItem.objects.all(), occ_m)
         if strict_requirements and (bore_min is None or bore_max is None):
             return []
         return _query_with_fallback(MandrinoItem.objects.all(), _bore_filter, occ_m)
 
     def _tastatori_available() -> list[dict]:
+        if relax_requirements:
+            return _query_all_free(TastatoreItem.objects.all(), occ_t)
         if strict_requirements and (bore_min is None or bore_max is None):
             return []
         return _query_with_fallback(TastatoreItem.objects.all(), _bore_filter, occ_t)
 
     def _maschere_available() -> list[dict]:
+        if relax_requirements:
+            return _query_all_free(MascheraItem.objects.all(), occ_ma)
         if strict_requirements and tube_pitch is None:
             return []
         return _query_with_fallback(MascheraItem.objects.all(), _pitch_filter, occ_ma)
 
     def _generatori_available() -> list[dict]:
+        if relax_requirements:
+            return _query_all_free(GeneratoreItem.objects.all(), occ_g)
         if strict_requirements:
             if not modello_testa:
                 return []
@@ -499,3 +532,58 @@ def get_available_resources(
         "pre_generatori": pre_generatori,
         "min_requirements": get_testa_min_requirements(modello_testa),
     }
+
+
+def lookup_resources(pairs: list[tuple[str, str]]) -> dict[str, dict]:
+    """Return inventory metadata for specific resource UIDs.
+
+    Args:
+        pairs: ``(categoria, uid)`` tuples where *categoria* is one of
+            ``testa``, ``mandrino``, ``tastatore``, ``maschera``,
+            ``generatore``.
+
+    Returns:
+        dict[str, dict]: Mapping ``uid`` → row dict from the inventory ORM.
+    """
+    from ui.models import (
+        GeneratoreItem,
+        MandrinoItem,
+        MascheraItem,
+        TastatoreItem,
+        TestaItem,
+    )
+
+    models = {
+        "testa": TestaItem,
+        "mandrino": MandrinoItem,
+        "tastatore": TastatoreItem,
+        "maschera": MascheraItem,
+        "generatore": GeneratoreItem,
+    }
+    out: dict[str, dict] = {}
+    for categoria, uid in pairs:
+        uid = (uid or "").strip()
+        if not uid or uid in out:
+            continue
+        model = models.get((categoria or "").strip().lower())
+        if model is None:
+            continue
+        row = model.objects.filter(uid=uid).values().first()
+        if row:
+            out[uid] = dict(row)
+    return out
+
+
+def parse_resource_lookup_param(raw: str) -> list[tuple[str, str]]:
+    """Parse ``tipo:uid`` pairs from a comma-separated lookup string."""
+    pairs: list[tuple[str, str]] = []
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part or ":" not in part:
+            continue
+        tipo, uid = part.split(":", 1)
+        tipo = tipo.strip().lower()
+        uid = uid.strip()
+        if tipo and uid:
+            pairs.append((tipo, uid))
+    return pairs

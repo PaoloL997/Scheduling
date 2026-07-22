@@ -281,7 +281,7 @@ def _apply_update_task(project_wrapper, payload: dict) -> None:
         project_wrapper: Open Project COM wrapper.
         payload: Decoded JSON dict with keys ``commessa``, ``item``, ``activity``
             and optional ``start``, ``finish``, ``actual_start``, ``actual_finish``,
-            ``plant``, ``responsible``.
+            ``plant``, ``responsible``, ``resources``.
     """
     commessa = payload["commessa"]
     item = payload["item"]
@@ -317,6 +317,9 @@ def _apply_update_task(project_wrapper, payload: dict) -> None:
         )
 
     project_wrapper.update_task(current_name, **update_kwargs)
+    task_name = rename_to or current_name
+    if "resources" in payload:
+        project_wrapper.set_task_resources(task_name, payload.get("resources") or [])
     logger.debug("Task aggiornato nel .mpp: %s → %s", current_name, canonical_name)
 
 

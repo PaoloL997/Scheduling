@@ -303,6 +303,10 @@ def _fetch_tasks() -> list[dict]:
 
     from ui.models import Attivita
 
+    from ui.services.problem_detection import refresh_overlap_warnings
+
+    refresh_overlap_warnings()
+
     activities = list(
         Attivita.objects.prefetch_related("risorse", "problemi").order_by(
             "job_id", "activity_id"
@@ -1169,21 +1173,22 @@ def api_jobs_delete(request: HttpRequest) -> JsonResponse:
                 if commessa
                 else Job.objects.filter(job_id=job_id)
             )
-            if not job_qs.exists():
-                return JsonResponse(
-                    {"ok": False, "error": "Job non trovato."}, status=404
-                )
-
             att_qs = (
                 Attivita.objects.filter(commessa=commessa)
                 if commessa
                 else Attivita.objects.filter(job_id=job_id)
             )
+            if not job_qs.exists() and not att_qs.exists():
+                return JsonResponse(
+                    {"ok": False, "error": "Job non trovato."}, status=404
+                )
+
             for a in att_qs:
                 _reconcile_delete(a)
 
             att_qs.delete()
-            job_qs.delete()
+            if job_qs.exists():
+                job_qs.delete()
     except Exception as exc:
         logger.error(
             "Errore eliminazione Job commessa=%s job_id=%s: %s", commessa, job_id, exc
@@ -1827,6 +1832,8 @@ def api_attivita_problemi(request: HttpRequest, pk: int) -> JsonResponse:
             "risorsa_tipo",
             "risorsa_uid",
             "stabilimento_origine",
+            "bloccata_fino",
+            "riferimento_attivita",
             "descrizione",
             "risolto",
             "note_risoluzione",
@@ -1841,6 +1848,8 @@ def api_attivita_problemi(request: HttpRequest, pk: int) -> JsonResponse:
             p["data_risoluzione"] = p["data_risoluzione"].isoformat()
         if p["created_at"]:
             p["created_at"] = p["created_at"].isoformat()
+        if p["bloccata_fino"]:
+            p["bloccata_fino"] = p["bloccata_fino"].isoformat()
 
     return JsonResponse({"ok": True, "problemi": problemi})
 

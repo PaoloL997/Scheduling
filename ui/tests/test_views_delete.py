@@ -248,3 +248,22 @@ class JobsDeleteTest(TestCase):
         req = _delete_request(self.factory, {"job_id": "MISSING"})
         resp = api_jobs_delete(req)
         self.assertEqual(resp.status_code, 404)
+
+    def test_deletes_activities_when_job_row_missing(self) -> None:
+        """MPP-imported commesse may have Attivita but no Job row in jobs.xlsx."""
+        Attivita.objects.create(
+            commessa="MMP01",
+            item=1,
+            activity="sna",
+            imported_from_mpp=True,
+            synced_to_mpp=True,
+        )
+        self.assertFalse(Job.objects.filter(commessa="MMP01").exists())
+
+        req = _delete_request(self.factory, {"commessa": "MMP01"})
+        resp = api_jobs_delete(req)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(json.loads(resp.content)["ok"])
+        self.assertFalse(Attivita.objects.filter(commessa="MMP01").exists())
+        self.assertTrue(MppSyncQueue.objects.filter(operation="delete_task").exists())

@@ -433,10 +433,12 @@ class ProblemaAttivita(models.Model):
 
     TIPO_SPOSTAMENTO = "spostamento"
     TIPO_ACQUISTO = "acquisto"
+    TIPO_SOVRAPPOSIZIONE = "sovrapposizione"
 
     TIPO_CHOICES = [
         (TIPO_SPOSTAMENTO, "Spostamento richiesto"),
         (TIPO_ACQUISTO, "Risorsa da recuperare"),
+        (TIPO_SOVRAPPOSIZIONE, "Sovrapposizione risorse"),
     ]
 
     attivita = models.ForeignKey(
@@ -448,6 +450,8 @@ class ProblemaAttivita(models.Model):
     risorsa_tipo = models.CharField(max_length=20)
     risorsa_uid = models.CharField(max_length=100, blank=True, default="")
     stabilimento_origine = models.CharField(max_length=200, blank=True, default="")
+    bloccata_fino = models.DateField(null=True, blank=True)
+    riferimento_attivita = models.CharField(max_length=500, blank=True, default="")
     descrizione = models.TextField()
     risolto = models.BooleanField(default=False)
     note_risoluzione = models.TextField(blank=True, default="")

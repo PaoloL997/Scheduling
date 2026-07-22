@@ -220,37 +220,48 @@ def update_attivita(orm_id: int, data: dict) -> dict:
                 RisorsaAttivita.objects.bulk_create(risorsa_rows)
 
     if risorse_data is not None:
-        from ui.services.problem_detection import detect_and_save_problems
+        from ui.services.problem_detection import (
+            detect_and_save_problems,
+            resolve_stale_overlaps,
+        )
 
         detect_and_save_problems(a, risorse_data)
+        resolve_stale_overlaps(a)
+
+    overlaps: list[dict] = []
+    if "actual_start" in data and a.actual_start:
+        from ui.services.problem_detection import detect_overlap_problems
+
+        overlaps = detect_overlap_problems(a)
+
+    mpp_payload: dict = {
+        "attivita_id": orm_id,
+        "commessa": a.commessa,
+        "item": a.item,
+        "activity": a.activity,
+        "old_commessa": old_commessa,
+        "old_item": old_item,
+        "old_activity": old_activity,
+        "start": a.data_inizio.isoformat() if a.data_inizio else None,
+        "finish": a.data_fine.isoformat() if a.data_fine else None,
+        "actual_start": a.actual_start.isoformat() if a.actual_start else None,
+        "actual_finish": a.actual_finish.isoformat() if a.actual_finish else None,
+        "plant": a.stabilimento or None,
+        "responsible": a.responsabile or None,
+    }
+    if new_risorse_pairs is not None:
+        mpp_payload["resources"] = [rid for _, rid in new_risorse_pairs]
 
     MppSyncQueue.objects.create(
         operation="update_task",
-        payload_json=json.dumps(
-            {
-                "attivita_id": orm_id,
-                "commessa": a.commessa,
-                "item": a.item,
-                "activity": a.activity,
-                "old_commessa": old_commessa,
-                "old_item": old_item,
-                "old_activity": old_activity,
-                "start": a.data_inizio.isoformat() if a.data_inizio else None,
-                "finish": a.data_fine.isoformat() if a.data_fine else None,
-                "actual_start": a.actual_start.isoformat() if a.actual_start else None,
-                "actual_finish": a.actual_finish.isoformat()
-                if a.actual_finish
-                else None,
-                "plant": a.stabilimento or None,
-                "responsible": a.responsabile or None,
-            }
-        ),
+        payload_json=json.dumps(mpp_payload),
     )
 
     result = {
         "item": a.item,
         "job_id": a.job_id,
         "activity_id": a.activity_id,
+        "overlaps": overlaps,
     }
     if risorse_data is not None:
         risorse_all = list(RisorsaAttivita.objects.filter(attivita_id=a.pk))

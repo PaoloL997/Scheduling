@@ -612,17 +612,17 @@
 <div id="pian-res-popover" hidden role="dialog" aria-label="Risorse assegnate"></div>
 
 <!-- Notes modal — read-only view of all problems/notes for an activity -->
-<div id="notes-modal-overlay" onclick="_notesOverlayClick(event)"
-     style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:2500; align-items:center; justify-content:center;">
-  <div class="notes-modal-inner">
-    <div class="notes-modal-header">
-      <h3 class="notes-modal-title" id="notes-modal-title">Note attività</h3>
-      <button class="btn-icon" onclick="closeNotesModal()" aria-label="Chiudi">&#x2715;</button>
-    </div>
+<div id="notes-modal-overlay" class="notes-modal-overlay" onclick="_notesOverlayClick(event)">
+  <div class="notes-modal-inner" role="dialog" aria-labelledby="notes-modal-title" aria-modal="true">
+    <header class="notes-modal-header">
+      <div class="notes-modal-heading">
+        <p class="notes-modal-eyebrow">Note</p>
+        <h3 class="notes-modal-title" id="notes-modal-title">Attività</h3>
+        <p class="notes-modal-subtitle" id="notes-modal-subtitle"></p>
+      </div>
+      <button class="btn-icon notes-modal-close" onclick="closeNotesModal()" aria-label="Chiudi">&#x2715;</button>
+    </header>
     <div class="notes-modal-body" id="notes-modal-body"></div>
-    <div class="notes-modal-footer">
-      <button class="btn btn-ghost" onclick="closeNotesModal()">Chiudi</button>
-    </div>
   </div>
 </div>
 
@@ -638,6 +638,21 @@
     <div style="display:flex; justify-content:flex-end; gap:.5rem;">
       <button class="btn btn-ghost" onclick="closeRisolviModal()">Annulla</button>
       <button id="risolvi-confirm-btn" class="btn btn-primary" onclick="confirmRisolvi()">Conferma</button>
+    </div>
+  </div>
+</div>
+
+<!-- Overlap reassignment proposal modal -->
+<div id="overlap-reassign-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:3100; align-items:center; justify-content:center;">
+  <div class="overlap-reassign-inner">
+    <h3 class="overlap-reassign-title">Riassegna risorse</h3>
+    <p id="overlap-reassign-desc" class="overlap-reassign-desc"></p>
+    <div id="overlap-reassign-proposal" class="overlap-reassign-proposal"></div>
+    <div id="overlap-reassign-warn" class="overlap-reassign-warn" style="display:none;"></div>
+    <div class="overlap-reassign-actions">
+      <button type="button" class="btn btn-ghost" onclick="closeOverlapReassignModal()">Annulla</button>
+      <button type="button" class="btn btn-secondary" id="overlap-reassign-edit-btn" onclick="modifyOverlapReassignManual()">Modifica manualmente</button>
+      <button type="button" class="btn btn-primary" id="overlap-reassign-confirm-btn" onclick="confirmOverlapReassign()">Conferma proposta</button>
     </div>
   </div>
 </div>
@@ -1798,6 +1813,9 @@ function step4Next() {
 const _RISORSE_CAT_KEYS = ['teste', 'mandrini', 'tastatori', 'maschere', 'generatori'];
 const _RISORSE_DATA_STORES = { s5: {}, rp: {} };
 const _RISORSE_MIN_REQUIREMENTS = { s5: {}, rp: {} };
+const _RISORSE_LAST_OPTS = { s5: null, rp: null };
+const _RISORSE_RELAXED = { s5: {}, rp: {} };
+const _RISORSE_RELAXED_CACHE = { s5: null, rp: null };
 let _RISORSE_ACTIVE_PREFIX = 's5';
 let _RISORSE_TARGET = null;
 
@@ -1884,6 +1902,9 @@ async function _loadRisorse(prefix, opts) {
   const dom = _risorseDom(prefix);
   _RISORSE_ACTIVE_PREFIX = prefix;
   _RISORSE_TARGET = opts.risorseTarget;
+  _RISORSE_LAST_OPTS[prefix] = { ...opts, risorseTarget: opts.risorseTarget };
+  _RISORSE_RELAXED[prefix] = {};
+  _RISORSE_RELAXED_CACHE[prefix] = null;
   document.getElementById(dom.loader).style.display = '';
   document.getElementById(dom.content).style.display = 'none';
   document.getElementById(dom.error).style.display = 'none';
@@ -1988,7 +2009,7 @@ async function _loadRisorse(prefix, opts) {
         if (total === 0) {
           _showRisorseError(
             prefix,
-            'Nessuna risorsa idonea disponibile nel periodo. Verifica modello testa, misure foro, passo tubo e date dell\'attività.',
+            'Nessuna risorsa idonea ai requisiti. Apri una categoria e usa «Mostra tutte» per vedere le risorse libere nel periodo.',
           );
         }
       }
@@ -2057,11 +2078,27 @@ function _refreshRisorseItems(prefix, key, query) {
       })
     : items;
   if (!filtered.length) {
-    container.innerHTML = '<div class="ms-empty">Nessun risultato</div>';
+    if (!items.length && !_RISORSE_RELAXED[prefix]?.[key]) {
+      container.innerHTML = `
+        <div class="ms-empty-block">
+          <div class="ms-empty">Nessuna risorsa idonea ai requisiti</div>
+          <button type="button" class="ms-show-all-btn" onclick="event.stopPropagation(); mostraTutteRisorse('${prefix}','${key}', event)">
+            Mostra tutte
+          </button>
+          <div class="ms-empty-hint">Risorse libere nel periodo, senza filtri di modello/misura</div>
+        </div>`;
+    } else if (!items.length) {
+      container.innerHTML = '<div class="ms-empty">Nessuna risorsa libera nel periodo</div>';
+    } else {
+      container.innerHTML = '<div class="ms-empty">Nessun risultato</div>';
+    }
     return;
   }
   const sel = new Set((_RISORSE_TARGET && _RISORSE_TARGET[key]) || []);
-  container.innerHTML = filtered.map(r => {
+  const relaxedNote = _RISORSE_RELAXED[prefix]?.[key]
+    ? '<div class="ms-relaxed-banner">Elenco completo (senza filtri requisiti)</div>'
+    : '';
+  container.innerHTML = relaxedNote + filtered.map(r => {
     const uid = r.uid || r.id || String(r);
 
     let measureHtml = '';
@@ -2092,6 +2129,117 @@ function _refreshRisorseItems(prefix, key, query) {
       <span class="ms-item-id">${uid}</span>${measureHtml}${plantHtml}${notesHtml}
     </label>`;
   }).join('');
+}
+
+async function mostraTutteRisorse(prefix, key, evt) {
+  if (evt) {
+    evt.preventDefault();
+    evt.stopPropagation();
+  }
+  const opts = _RISORSE_LAST_OPTS[prefix];
+  const dom = _risorseDom(prefix);
+  const wrapId = dom.wrapId(key);
+  const wrap = document.getElementById(wrapId);
+  const container = document.getElementById(dom.itemsId(key));
+  if (!opts || !container) return;
+
+  // Keep the dropdown open while content is replaced (avoids outside-click close).
+  if (wrap) {
+    wrap.classList.add('is-open');
+    const trigger = wrap.querySelector('.ms-trigger');
+    if (trigger) trigger.classList.add('open');
+  }
+
+  container.innerHTML = '<div class="ms-empty">Caricamento risorse libere…</div>';
+
+  let data = _RISORSE_RELAXED_CACHE[prefix];
+  if (!data) {
+    const params = new URLSearchParams({
+      stabilimento:  opts.stabilimento || '',
+      data_inizio:   opts.data_inizio || '',
+      data_fine:     opts.data_fine || '',
+      bore_min:      opts.bore?.min ?? '',
+      bore_max:      opts.bore?.max ?? '',
+      bore_mid:      opts.bore?.mid ?? '',
+      tube_pitch:    opts.bore?.tube_pitch ?? '',
+      modello_testa: opts.modello_testa || '',
+      relax_requirements: '1',
+    });
+    if (opts.exclude_activity_id) {
+      params.set('exclude_activity_id', String(opts.exclude_activity_id));
+    }
+    try {
+      const resp = await fetch(`/api/attivita/risorse/?${params}`);
+      data = await resp.json();
+      if (!resp.ok || !data.ok) {
+        container.innerHTML = `<div class="ms-empty">${esc(data.error || 'Errore nel caricamento.')}</div>`;
+        _repositionMsDropdown(wrapId);
+        return;
+      }
+      _RISORSE_RELAXED_CACHE[prefix] = data;
+    } catch (_) {
+      container.innerHTML = '<div class="ms-empty">Errore di rete.</div>';
+      _repositionMsDropdown(wrapId);
+      return;
+    }
+  }
+
+  if (!_RISORSE_RELAXED[prefix]) _RISORSE_RELAXED[prefix] = {};
+  // Fill the clicked category and any other still-empty categories.
+  const catsToFill = _RISORSE_CAT_KEYS.filter(cat =>
+    cat === key || !(_RISORSE_DATA_STORES[prefix][cat] || []).length
+  );
+  catsToFill.forEach(cat => {
+    const list = data[cat] || [];
+    _RISORSE_DATA_STORES[prefix][cat] = list;
+    _RISORSE_RELAXED[prefix][cat] = true;
+    if (prefix === 's5') {
+      if (!window._S5_INVENTORY_MAP) window._S5_INVENTORY_MAP = {};
+      list.forEach(r => {
+        const uid = r.uid || r.id || String(r);
+        const plant = r.stab_esterno || r.plant || '';
+        if (uid) window._S5_INVENTORY_MAP[uid] = plant;
+      });
+    }
+  });
+
+  const errEl = document.getElementById(dom.error);
+  if (errEl) errEl.style.display = 'none';
+
+  const searchVal = wrap?.querySelector('.ms-search')?.value || '';
+  catsToFill.forEach(cat => {
+    const catWrap = document.getElementById(dom.wrapId(cat));
+    const q = cat === key ? searchVal : (catWrap?.querySelector('.ms-search')?.value || '');
+    _refreshRisorseItems(prefix, cat, q);
+  });
+
+  // Re-assert open state after DOM updates and refresh fixed position.
+  if (wrap) {
+    wrap.classList.add('is-open');
+    const trigger = wrap.querySelector('.ms-trigger');
+    if (trigger) trigger.classList.add('open');
+  }
+  _repositionMsDropdown(wrapId);
+}
+
+function _repositionMsDropdown(wrapId) {
+  const wrap = document.getElementById(wrapId);
+  if (!wrap || !wrap.classList.contains('is-open')) return;
+  const trigger = wrap.querySelector('.ms-trigger');
+  const dropdown = wrap.querySelector('.ms-dropdown');
+  if (!trigger || !dropdown) return;
+  const rect = trigger.getBoundingClientRect();
+  const vpH = window.innerHeight;
+  const spaceBelow = vpH - rect.bottom;
+  dropdown.style.width = rect.width + 'px';
+  dropdown.style.left = rect.left + 'px';
+  if (spaceBelow >= 160 || spaceBelow >= rect.top) {
+    dropdown.style.top = rect.bottom + 4 + 'px';
+    dropdown.style.bottom = '';
+  } else {
+    dropdown.style.bottom = (vpH - rect.top + 4) + 'px';
+    dropdown.style.top = '';
+  }
 }
 
 function filterMs(wrapId, query) {
@@ -2744,13 +2892,12 @@ function filterActiveTable() {
 
 // Close ms-wrap dropdowns when clicking outside
 document.addEventListener('click', function(e) {
-  if (!e.target.closest('.ms-wrap')) {
-    document.querySelectorAll('#add-modal .ms-wrap.is-open').forEach(w => {
-      w.classList.remove('is-open');
-      const t = w.querySelector('.ms-trigger');
-      if (t) t.classList.remove('open');
-    });
-  }
+  if (e.target.closest('.ms-wrap') || e.target.closest('.ms-dropdown')) return;
+  document.querySelectorAll('#add-modal .ms-wrap.is-open, #risorse-picker-overlay .ms-wrap.is-open').forEach(w => {
+    w.classList.remove('is-open');
+    const t = w.querySelector('.ms-trigger');
+    if (t) t.classList.remove('open');
+  });
 });
 
 // Chiude i dropdown se il corpo del wizard viene scrollato
@@ -3293,6 +3440,9 @@ async function saveEdit() {
       refreshPianSummary();
       sortPianGroupList();
       filterPianGroups(document.getElementById('pian-search')?.value || '');
+      if (Array.isArray(json.overlaps) && json.overlaps.length) {
+        _applyOverlapNotes(json.overlaps);
+      }
     }
 
     // Visual refresh for job card meta after edit.
@@ -3434,46 +3584,104 @@ let _notesModalTr    = null;
 
 // ── Notes modal (read-only list of all problems/notes) ────────────────────
 const _PROB_LABEL = { testa:'Testa', mandrino:'Mandrino', tastatore:'Tastatore', maschera:'Maschera', generatore:'Generatore' };
+const _NOTE_TIPO_LABEL = {
+  sovrapposizione: 'Sovrapposizione risorse',
+  acquisto: 'Risorsa da recuperare',
+  spostamento: 'Spostamento richiesto',
+};
+
+function _fmtNoteDate(iso) {
+  if (!iso) return '';
+  const raw = String(iso).slice(0, 10);
+  const d = new Date(raw + 'T12:00:00');
+  if (Number.isNaN(d.getTime())) return raw;
+  return d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function _fmtNoteDateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString('it-IT', {
+    day: 'numeric', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function _renderNoteItem(p) {
+  const isOverlap = p.tipo === 'sovrapposizione';
+  const typeLabel = _NOTE_TIPO_LABEL[p.tipo] || p.tipo;
+  const resourceLabel = isOverlap ? '' : (_PROB_LABEL[p.risorsa_tipo] || p.risorsa_tipo || '');
+  const resourceUid = isOverlap ? '' : (p.risorsa_uid || '');
+  const from = p.stabilimento_origine || '?';
+  const to = p.stabilimento_attivita || '?';
+  const description = p.tipo === 'acquisto'
+    ? (p.descrizione || 'Risorsa da acquistare o noleggiare.')
+    : isOverlap
+      ? (p.descrizione || 'Conflitto di risorse con un\'altra attività.')
+      : (p.descrizione || `Spostamento richiesto da ${from} a ${to}.`);
+  const isOpen = !p.risolto;
+
+  let footHtml = '';
+  if (!isOpen && p.note_risoluzione) {
+    const when = p.data_risoluzione ? ` · ${_fmtNoteDateTime(p.data_risoluzione)}` : '';
+    footHtml = `<p class="note-item__resolved">${esc(p.note_risoluzione)}${esc(when)}</p>`;
+  } else if (isOpen && p.tipo === 'sovrapposizione') {
+    footHtml = `<div class="note-item__actions">
+      <button class="btn-risolvi" type="button" onclick="reassignFromOverlap('${_notesModalOrmId}')">Risolvi</button>
+      <button class="btn-risolvi btn-risolvi--ghost" type="button" onclick="leaveOverlapAsIs(${p.id})">Lascia invariato</button>
+    </div>`;
+  } else if (isOpen) {
+    const risolviDesc = (typeLabel + (resourceUid ? ' ' + resourceUid : '') + ' — ' + description).replace(/'/g, "\\'");
+    footHtml = `<div class="note-item__actions">
+      <button class="btn-risolvi" type="button" onclick="openRisolviModal(${p.id}, '${risolviDesc}')">Risolvi</button>
+    </div>`;
+  }
+
+  return `<li class="note-item${isOpen ? ' note-item--open' : ''}">
+    <div class="note-item__row">
+      <span class="note-item__type">${esc(typeLabel)}</span>
+      <span class="note-item__state">${isOpen ? 'Aperta' : 'Risolta'}</span>
+    </div>
+    <p class="note-item__text">${esc(description)}</p>
+    ${footHtml}
+  </li>`;
+}
 
 async function openNotesModal(ormId) {
   _notesModalOrmId = ormId;
   _notesModalTr = document.querySelector(`[data-orm-id="${ormId}"]`);
   const body = document.getElementById('notes-modal-body');
-  body.innerHTML = '<div style="padding:.5rem 0; color:var(--text-muted); font-size:.85rem;">Caricamento…</div>';
+  const titleEl = document.getElementById('notes-modal-title');
+  const subtitleEl = document.getElementById('notes-modal-subtitle');
+  const activityId = _notesModalTr?.dataset?.activityId || '';
+  titleEl.textContent = activityId || 'Attività';
+  subtitleEl.textContent = '';
+  body.innerHTML = '<p class="notes-modal-status">Caricamento…</p>';
   const ov = document.getElementById('notes-modal-overlay');
   ov.style.display = 'flex';
   try {
     const resp = await fetch(`/api/attivita/${ormId}/problemi/`);
-    if (!resp.ok) { body.innerHTML = '<div class="det-error">Errore nel caricamento delle note.</div>'; return; }
+    if (!resp.ok) {
+      body.innerHTML = '<p class="notes-modal-status notes-modal-status--error">Errore nel caricamento.</p>';
+      return;
+    }
     const data = await resp.json();
     const problemi = data.problemi || [];
     if (!problemi.length) {
-      body.innerHTML = '<div style="color:var(--text-subtle);font-size:.875rem;">Nessun problema registrato per questa attività.</div>';
+      body.innerHTML = '<p class="notes-modal-status">Nessuna nota per questa attività.</p>';
       return;
     }
-    body.innerHTML = '<div class="prob-list">' + problemi.map(p => {
-      const label  = _PROB_LABEL[p.risorsa_tipo] || p.risorsa_tipo;
-      const uid    = p.risorsa_uid ? ` ${esc(p.risorsa_uid)}` : '';
-      const from   = esc(p.stabilimento_origine || '?');
-      const to     = esc(p.stabilimento_attivita || '?');
-      const action = p.tipo === 'acquisto'
-        ? (p.descrizione || 'Da acquistare / noleggiare')
-        : `Spostamento richiesto da ${from} a ${to}`;
-      const isOpen = !p.risolto;
-      const risolviDesc = (label + uid + ' — ' + action).replace(/'/g, "\\'");
-      const resolutionHtml = (!isOpen && p.note_risoluzione)
-        ? `<span class="prob-list-item-resolution" title="${esc(p.note_risoluzione)}">✓ ${esc(p.note_risoluzione)}</span>`
-        : '';
-      return `<div class="prob-list-item ${isOpen ? 'prob-list-item--open' : 'prob-list-item--resolved'}">
-        <div class="prob-list-item-header">
-          <span class="prob-list-item-label">${isOpen ? '⚠' : '✓'} ${esc(label)}${esc(uid)}</span>
-          <span class="prob-list-item-action">${action}</span>
-          ${isOpen ? `<button class="btn-risolvi" onclick="openRisolviModal(${p.id}, '${risolviDesc}')">Risolvi</button>` : resolutionHtml}
-        </div>
-      </div>`;
-    }).join('') + '</div>';
+    const openCount = problemi.filter(p => !p.risolto).length;
+    const resolvedCount = problemi.length - openCount;
+    const parts = [];
+    if (openCount) parts.push(`${openCount} apert${openCount === 1 ? 'a' : 'e'}`);
+    if (resolvedCount) parts.push(`${resolvedCount} risolt${resolvedCount === 1 ? 'a' : 'e'}`);
+    subtitleEl.textContent = parts.join(', ');
+    body.innerHTML = `<ul class="note-list">${problemi.map(_renderNoteItem).join('')}</ul>`;
   } catch (e) {
-    body.innerHTML = '<div class="det-error">Errore di rete.</div>';
+    console.error('openNotesModal error:', e);
+    body.innerHTML = '<p class="notes-modal-status notes-modal-status--error">Errore di rete.</p>';
   }
 }
 
@@ -3481,6 +3689,394 @@ function closeNotesModal() {
   document.getElementById('notes-modal-overlay').style.display = 'none';
   _notesModalOrmId = null;
   _notesModalTr = null;
+}
+
+// ── Overlap (sovrapposizione) note handling ───────────────────────────────
+let _overlapReassignState = null;
+
+function _taskDataFromTr(tr) {
+  const ds = tr.dataset;
+  return {
+    ormId: ds.ormId,
+    start: ds.start || '',
+    finish: ds.finish || '',
+    plant: ds.plant || '',
+    modelloTesta: ds.modelloTesta || '',
+    boreMin: ds.boreMin || '',
+    boreMax: ds.boreMax || '',
+    boreMid: ds.boreMid || '',
+    tubePitch: ds.tubePitch || '',
+    resourcesTyped: ds.resourcesTyped || '',
+  };
+}
+
+function _cloneRisorse(risorse) {
+  return {
+    teste: [...(risorse.teste || [])],
+    mandrini: [...(risorse.mandrini || [])],
+    tastatori: [...(risorse.tastatori || [])],
+    maschere: [...(risorse.maschere || [])],
+    generatori: [...(risorse.generatori || [])],
+  };
+}
+
+async function _fetchOpenOverlapProblemi(ormId) {
+  const resp = await fetch(`/api/attivita/${ormId}/problemi/`);
+  if (!resp.ok) return [];
+  const data = await resp.json();
+  return (data.problemi || []).filter(p => p.tipo === 'sovrapposizione' && !p.risolto);
+}
+
+async function _loadAvailableRisorseForTask(taskData, lookupPairs) {
+  const params = new URLSearchParams({
+    stabilimento: taskData.plant || '',
+    data_inizio: taskData.start || '',
+    data_fine: taskData.finish || '',
+    bore_min: taskData.boreMin || '',
+    bore_max: taskData.boreMax || '',
+    bore_mid: taskData.boreMid || '',
+    tube_pitch: taskData.tubePitch || '',
+    modello_testa: taskData.modelloTesta || '',
+    exclude_activity_id: String(taskData.ormId || ''),
+    strict_requirements: '1',
+  });
+  if (lookupPairs?.length) {
+    params.set('lookup', lookupPairs.map(([tipo, uid]) => `${tipo}:${uid}`).join(','));
+  }
+  const resp = await fetch(`/api/attivita/risorse/?${params}`);
+  const data = await resp.json();
+  if (!resp.ok || !data.ok) {
+    throw new Error(data.error || 'Impossibile caricare le risorse disponibili.');
+  }
+  return data;
+}
+
+function _resourceLookupFromAvail(avail) {
+  const map = {};
+  for (const cat of _RISORSE_CAT_KEYS) {
+    for (const r of (avail[cat] || [])) {
+      const uid = r.uid || r.id;
+      if (uid) map[uid] = { ...r, cat };
+    }
+  }
+  return map;
+}
+
+function _overlapResourceMeasure(cat, r) {
+  if (!r) return '';
+  if ((cat === 'teste' || cat === 'generatori') && r.model) return String(r.model);
+  if ((cat === 'mandrini' || cat === 'tastatori') && r.diameter) return `Ø ${r.diameter} mm`;
+  if (cat === 'maschere' && r.pitch) return `Passo ${r.pitch} mm`;
+  return '';
+}
+
+function _overlapResourceHtml(uid, cat, lookup) {
+  const r = lookup[uid] || {};
+  const measure = _overlapResourceMeasure(cat, r);
+  const plant = r.stab_esterno || r.plant || '';
+  const measureHtml = measure
+    ? `<span class="overlap-reassign-sep">·</span><span class="overlap-reassign-measure">${esc(measure)}</span>`
+    : '';
+  const plantHtml = plant
+    ? `<span class="overlap-reassign-sep">·</span>${stabBadge(plant, r.stab_esterno ? 'stab-badge--ext' : '')}`
+    : '';
+  return `<span class="overlap-reassign-res"><code>${esc(uid)}</code>${measureHtml}${plantHtml}</span>`;
+}
+
+function _pickReplacement(cat, blockedUid, availableRows, preselected) {
+  const candidates = [
+    ...(preselected || []),
+    ...(availableRows || []).map(r => r.uid || r.id || '').filter(Boolean),
+  ];
+  for (const uid of candidates) {
+    if (uid !== blockedUid) return uid;
+  }
+  return null;
+}
+
+function _parseOverlapBlockedResources(p) {
+  const uid = p.risorsa_uid || '';
+  if (uid.includes('|') || (uid.includes(':') && !p.risorsa_tipo)) {
+    return uid.split('|').map(part => {
+      const sep = part.indexOf(':');
+      if (sep < 0) return null;
+      const tipo = part.slice(0, sep);
+      const rid = part.slice(sep + 1);
+      if (!tipo || !rid) return null;
+      return {
+        tipo,
+        uid: rid,
+        label: _PROB_LABEL[tipo] || tipo,
+      };
+    }).filter(Boolean);
+  }
+  if (p.risorsa_tipo && uid) {
+    return [{
+      tipo: p.risorsa_tipo,
+      uid,
+      label: _PROB_LABEL[p.risorsa_tipo] || p.risorsa_tipo,
+    }];
+  }
+  return [];
+}
+
+async function _buildOverlapProposal(tr, overlapProblemi) {
+  const taskData = _taskDataFromTr(tr);
+  const current = _typedToRisorse(taskData.resourcesTyped);
+  const proposed = _cloneRisorse(current);
+  const changes = [];
+  const unresolved = [];
+
+  const seenBlocked = new Set();
+  const allBlocked = [];
+  for (const p of overlapProblemi) {
+    for (const b of _parseOverlapBlockedResources(p)) {
+      const key = `${b.tipo}:${b.uid}`;
+      if (seenBlocked.has(key)) continue;
+      seenBlocked.add(key);
+      allBlocked.push({ ...b });
+    }
+  }
+
+  const lookupPairs = allBlocked.map(b => [b.tipo, b.uid]);
+  const avail = await _loadAvailableRisorseForTask(taskData, lookupPairs);
+  const preMap = {
+    teste: avail.pre_testa || [],
+    mandrini: avail.pre_mandrini || [],
+    tastatori: avail.pre_tastatori || [],
+    maschere: avail.pre_maschere || [],
+    generatori: avail.pre_generatori || [],
+  };
+
+  for (const b of allBlocked) {
+    const cat = TIPO_TO_CAT[b.tipo];
+    if (!cat) continue;
+    const blocked = b.uid;
+    const replacement = _pickReplacement(cat, blocked, avail[cat], preMap[cat]);
+    if (!replacement) {
+      unresolved.push(b);
+      continue;
+    }
+    const arr = proposed[cat] || [];
+    if (arr.includes(blocked)) {
+      proposed[cat] = arr.map(uid => (uid === blocked ? replacement : uid));
+    } else {
+      proposed[cat] = [...arr, replacement];
+    }
+    changes.push({
+      label: b.label,
+      tipo: b.tipo,
+      cat,
+      from: blocked,
+      to: replacement,
+    });
+  }
+
+  const resourceLookup = {
+    ..._resourceLookupFromAvail(avail),
+    ...(avail.lookup || {}),
+  };
+
+  return { proposed, changes, unresolved, taskData, resourceLookup };
+}
+
+function _renderOverlapProposal(changes, unresolved, resourceLookup) {
+  const proposalEl = document.getElementById('overlap-reassign-proposal');
+  const warnEl = document.getElementById('overlap-reassign-warn');
+  const confirmBtn = document.getElementById('overlap-reassign-confirm-btn');
+  const lookup = resourceLookup || {};
+
+  if (changes.length) {
+    proposalEl.innerHTML = changes.map(c => {
+      return `<div class="overlap-reassign-row">
+        <span class="overlap-reassign-label">${esc(c.label)}</span>
+        <div class="overlap-reassign-swap">
+          ${_overlapResourceHtml(c.from, c.cat, lookup)}
+          <span class="overlap-reassign-arrow" aria-hidden="true">→</span>
+          ${_overlapResourceHtml(c.to, c.cat, lookup)}
+        </div>
+      </div>`;
+    }).join('');
+    proposalEl.style.display = '';
+  } else {
+    proposalEl.innerHTML = '<p class="overlap-reassign-empty">Nessuna sostituzione automatica disponibile.</p>';
+    proposalEl.style.display = '';
+  }
+
+  if (unresolved.length) {
+    warnEl.innerHTML = 'Attenzione: nessuna alternativa libera per '
+      + unresolved.map(u => `${esc(u.label)} ${esc(u.uid)}`).join(', ')
+      + '. Usa «Modifica manualmente» per scegliere altre risorse.';
+    warnEl.style.display = '';
+  } else {
+    warnEl.style.display = 'none';
+  }
+
+  confirmBtn.disabled = changes.length === 0;
+}
+
+async function _refreshActivityWarningCounts(tr) {
+  const ormId = tr?.dataset?.ormId;
+  if (!ormId) return;
+  try {
+    const resp = await fetch(`/api/attivita/${ormId}/problemi/`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const problemi = data.problemi || [];
+    const wc = problemi.filter(p => !p.risolto).length;
+    const nc = problemi.filter(p => p.risolto).length;
+    tr.dataset.warningCount = wc;
+    tr.dataset.noteCount = nc;
+    _refreshActivityRowCells(tr);
+    refreshPianSummary();
+  } catch (_) { /* ignore */ }
+}
+
+async function reassignFromOverlap(ormId) {
+  const tr = document.querySelector(`[data-orm-id="${ormId}"]`);
+  if (!tr) return;
+
+  closeNotesModal();
+  const descEl = document.getElementById('overlap-reassign-desc');
+  const proposalEl = document.getElementById('overlap-reassign-proposal');
+  const warnEl = document.getElementById('overlap-reassign-warn');
+  const confirmBtn = document.getElementById('overlap-reassign-confirm-btn');
+  descEl.textContent = 'Calcolo proposta in corso…';
+  proposalEl.innerHTML = '';
+  warnEl.style.display = 'none';
+  confirmBtn.disabled = true;
+  document.getElementById('overlap-reassign-overlay').style.display = 'flex';
+
+  try {
+    const overlapProblemi = await _fetchOpenOverlapProblemi(ormId);
+    if (!overlapProblemi.length) {
+      descEl.textContent = 'Nessuna sovrapposizione aperta da risolvere.';
+      return;
+    }
+
+    const { proposed, changes, unresolved, taskData, resourceLookup } = await _buildOverlapProposal(tr, overlapProblemi);
+    _overlapReassignState = {
+      ormId,
+      tr,
+      proposed,
+      overlapCount: overlapProblemi.length,
+      taskData,
+      resourceLookup,
+    };
+
+    descEl.textContent = changes.length
+      ? 'Proposta di riassegnazione basata sulle risorse libere nel periodo dell\'attività:'
+      : 'Non è stato possibile proporre sostituzioni automatiche.';
+    _renderOverlapProposal(changes, unresolved, resourceLookup);
+  } catch (e) {
+    console.error('reassignFromOverlap error:', e);
+    descEl.textContent = e.message || 'Errore durante il calcolo della proposta.';
+    proposalEl.innerHTML = '';
+    confirmBtn.disabled = true;
+  }
+}
+
+function closeOverlapReassignModal() {
+  document.getElementById('overlap-reassign-overlay').style.display = 'none';
+  _overlapReassignState = null;
+}
+
+async function confirmOverlapReassign() {
+  if (!_overlapReassignState?.proposed) return;
+  const { ormId, tr, proposed } = _overlapReassignState;
+  const btn = document.getElementById('overlap-reassign-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Salvataggio…';
+
+  try {
+    const resp = await fetch('/api/tasks/update/', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCsrfToken() },
+      body: JSON.stringify({ orm_id: ormId, risorse: proposed }),
+    });
+    const json = await resp.json();
+    if (!resp.ok) {
+      alert(json.error || `Errore ${resp.status}`);
+      btn.disabled = false;
+      btn.textContent = 'Conferma proposta';
+      return;
+    }
+
+    if (json.resources_by_tipo) {
+      tr.dataset.resources = json.resources || '';
+      tr.dataset.resourcesTyped = JSON.stringify(json.resources_by_tipo);
+    } else {
+      tr.dataset.resources = _risorseToFlat(proposed);
+      tr.dataset.resourcesTyped = JSON.stringify(_risorseToByTipo(proposed));
+    }
+
+    closeOverlapReassignModal();
+    await _refreshActivityWarningCounts(tr);
+    _syncNavWarnBadge();
+    _wizToast('Risorse riassegnate con successo.');
+  } catch (e) {
+    console.error('confirmOverlapReassign error:', e);
+    alert('Errore di rete durante il salvataggio.');
+    btn.disabled = false;
+    btn.textContent = 'Conferma proposta';
+  }
+}
+
+async function modifyOverlapReassignManual() {
+  if (!_overlapReassignState) return;
+  const { ormId, tr, proposed } = _overlapReassignState;
+  closeOverlapReassignModal();
+  openDetailModal(tr, 'task');
+  await enterEditMode();
+  _detState.editRisorse = _cloneRisorse(proposed);
+  _detState.risorseDirty = true;
+  _updateDetResourcesSummary();
+  await openRisorsePickerForEdit();
+}
+
+async function leaveOverlapAsIs(problemaId) {
+  const ormId = _notesModalOrmId;
+  const tr = _notesModalTr || (ormId ? document.querySelector(`[data-orm-id="${ormId}"]`) : null);
+  try {
+    const resp = await fetch(`/api/attivita/problemi/${problemaId}/risolvi/`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCsrfToken() },
+      body: JSON.stringify({ note: 'Sovrapposizione accettata (lasciato invariato).' }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      if (tr) {
+        tr.dataset.warningCount = data.warning_count ?? 0;
+        tr.dataset.noteCount = data.note_count ?? 0;
+        _refreshActivityRowCells(tr);
+      }
+      refreshPianSummary();
+      _updateNavBadge(-1);
+      if (ormId) openNotesModal(ormId);
+    }
+  } catch (e) { console.error('leaveOverlapAsIs error:', e); }
+}
+
+// Apply overlap notes returned when an actual start date is saved: bump the
+// affected successor rows' warning counts and notify the planner.
+function _applyOverlapNotes(overlaps) {
+  const counts = {};
+  overlaps.forEach(o => { counts[o.attivita_id] = (counts[o.attivita_id] || 0) + 1; });
+  let total = 0;
+  Object.entries(counts).forEach(([id, n]) => {
+    const tr2 = document.querySelector(`[data-orm-id="${id}"]`);
+    if (tr2) {
+      tr2.dataset.warningCount = (parseInt(tr2.dataset.warningCount, 10) || 0) + n;
+      _refreshActivityRowCells(tr2);
+    }
+    total += n;
+  });
+  if (total > 0) {
+    _updateNavBadge(total);
+    refreshPianSummary();
+    const labels = [...new Set(overlaps.map(o => o.activity_label))].join(', ');
+    _wizToast(`Sovrapposizione risorse: ${total} nota/e aggiunta/e su ${labels}.`);
+  }
 }
 
 function _notesOverlayClick(e) {
@@ -3591,6 +4187,19 @@ function _updateNavBadge(delta) {
     badge.remove();
   } else {
     badge.textContent = `⚠ ${next}`;
+  }
+}
+
+function _syncNavWarnBadge() {
+  const total = Array.from(document.querySelectorAll('.pian-activity-row'))
+    .reduce((sum, tr) => sum + (parseInt(tr.dataset.warningCount, 10) || 0), 0);
+  const badge = document.getElementById('nav-warn-badge');
+  if (total <= 0) {
+    badge?.remove();
+    return;
+  }
+  if (badge) {
+    badge.textContent = `⚠ ${total}`;
   }
 }
 

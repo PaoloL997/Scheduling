@@ -23,6 +23,8 @@ from ui.models import Attivita, MppSyncQueue, RisorsaAttivita
 from ui.services.activity_inventory import (
     find_modello_testa_in_db,
     get_available_resources,
+    lookup_resources,
+    parse_resource_lookup_param,
 )
 from ui.services.gemini import ReadWPS
 from ui.services.identifiers import build_job_id
@@ -170,6 +172,11 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
         "true",
         "yes",
     )
+    relax_requirements = request.GET.get("relax_requirements", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
     if exclude_activity_id:
         try:
@@ -191,7 +198,8 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
             tube_pitch = float(att.tube_pitch)
         if not stabilimento and att.stabilimento:
             stabilimento = att.stabilimento
-        strict_requirements = True
+        if not relax_requirements:
+            strict_requirements = True
 
     result = get_available_resources(
         stabilimento=stabilimento,
@@ -204,7 +212,11 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
         modello_testa=modello_testa,
         exclude_activity_id=exclude_activity_id,
         strict_requirements=strict_requirements,
+        relax_requirements=relax_requirements,
     )
+
+    lookup_pairs = parse_resource_lookup_param(request.GET.get("lookup", ""))
+    lookup = lookup_resources(lookup_pairs) if lookup_pairs else {}
 
     return JsonResponse(
         {
@@ -220,6 +232,7 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
             "pre_maschere": list(result["pre_maschere"]),
             "pre_generatori": list(result["pre_generatori"]),
             "min_requirements": result["min_requirements"],
+            "lookup": lookup,
         }
     )
 

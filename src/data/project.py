@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 # MS Project sentinel date used for "not set" optional date fields.
 _MSP_SENTINEL_YEAR = 1990
 _MSP_CLEAR_DATE = date(1989, 1, 1)
+_MSP_START_HOUR = 9
+_MSP_FINISH_HOUR = 18
 _UNSET = object()
 
 # COM HRESULT for "server process could not be started" (0x80080005).
@@ -87,6 +89,21 @@ def _dispatch_msp() -> object:
     )
 
 
+def _to_msp_start_datetime(d: date) -> datetime:
+    """Convert a calendar start date to a COM datetime at 09:00."""
+    return datetime(d.year, d.month, d.day, _MSP_START_HOUR, 0)
+
+
+def _to_msp_finish_datetime(d: date) -> datetime:
+    """Convert a calendar finish date to a COM datetime at 18:00."""
+    return datetime(d.year, d.month, d.day, _MSP_FINISH_HOUR, 0)
+
+
+def _to_msp_clear_datetime(d: date) -> datetime:
+    """Convert a sentinel date to midnight for clearing optional MS Project fields."""
+    return datetime(d.year, d.month, d.day)
+
+
 class Project:
     """A wrapper around the MS Project application to manage tasks and resources."""
 
@@ -158,15 +175,15 @@ class Project:
         """
         t = self.project.Tasks.Add(task.name)
 
-        t.Start = _to_msp_date(task.start)
-        t.Finish = _to_msp_date(task.end)
+        t.Start = _to_msp_start_datetime(task.start)
+        t.Finish = _to_msp_finish_datetime(task.end)
 
         if task.predecessors:
             t.Predecessors = task.predecessors
         if task.actual_start:
-            t.Start1 = _to_msp_date(task.actual_start)
+            t.Start1 = _to_msp_start_datetime(task.actual_start)
         if task.actual_end:
-            t.Finish1 = _to_msp_date(task.actual_end)
+            t.Finish1 = _to_msp_finish_datetime(task.actual_end)
 
         t.Text1 = task.plant or ""
         t.Text2 = task.owner or ""
@@ -278,22 +295,22 @@ class Project:
         if new_name is not None:
             t.Name = new_name
         if start is not None:
-            t.Start = _to_msp_date(start)
+            t.Start = _to_msp_start_datetime(start)
         if end is not None:
-            t.Finish = _to_msp_date(end)
+            t.Finish = _to_msp_finish_datetime(end)
         if predecessors is not None:
             t.Predecessors = predecessors
         if actual_start is not _UNSET:
             t.Start1 = (
-                _to_msp_date(actual_start)
+                _to_msp_start_datetime(actual_start)
                 if actual_start is not None
-                else _to_msp_date(_MSP_CLEAR_DATE)
+                else _to_msp_clear_datetime(_MSP_CLEAR_DATE)
             )
         if actual_end is not _UNSET:
             t.Finish1 = (
-                _to_msp_date(actual_end)
+                _to_msp_finish_datetime(actual_end)
                 if actual_end is not None
-                else _to_msp_date(_MSP_CLEAR_DATE)
+                else _to_msp_clear_datetime(_MSP_CLEAR_DATE)
             )
         if plant is not None:
             t.Text1 = plant
@@ -428,6 +445,24 @@ class Project:
                 )
             task_obj.Assignments.Add(task_obj.ID, resource_id)
 
+    def set_task_resources(self, task: str, resources: list[str]) -> None:
+        """Replace all resource assignments on a task.
+
+        Existing assignments are removed before the new list is applied.
+
+        Args:
+            task: The name of the task to update.
+            resources: Resource names to assign (may be empty to clear all).
+
+        Raises:
+            ValueError: If the task or any resource is not found.
+        """
+        task_obj = self._find_task(task)
+        while task_obj.Assignments.Count > 0:
+            task_obj.Assignments(task_obj.Assignments.Count).Delete()
+        if resources:
+            self.assign_resources(task, resources)
+
     def _find_task(self, name: str):
         """Return the COM task object for *name*, raising ValueError if absent."""
         t = self._find_task_or_none(name)
@@ -491,20 +526,6 @@ class Project:
             notes=r.Notes or None,
             category=r.Text2 or None,
         )
-
-
-def _to_msp_date(d: date) -> Optional[datetime]:
-    """Convert a :class:`date` to a :class:`datetime` for MS Project COM date fields.
-
-    Args:
-        d: The date to convert, or None.
-
-    Returns:
-        Optional[datetime]: A datetime instance, or None if d is None.
-    """
-    if d is None:
-        return None
-    return datetime(d.year, d.month, d.day)
 
 
 def _to_date(value) -> Optional[date]:
