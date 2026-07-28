@@ -37,7 +37,7 @@ def request_import(*, force: bool = False) -> dict:
             "message": "Modifiche pendenti. Usa force=true per sovrascrivere.",
         }
 
-    reset_app_dataset()
+    reset_app_dataset(force=True)
     trigger_reimport()
     return {
         "accepted": True,

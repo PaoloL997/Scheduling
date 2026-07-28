@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 class Command(BaseCommand):
     help = (
         "Scrive le modifiche pendenti su dataset.mpp e jobs.xlsx senza "
-        "resettare il database. Opzionalmente crea un backup di db.sqlite3."
+        "resettare il database. Crea un backup dei file sorgente; "
+        "opzionalmente crea anche un backup di db.sqlite3."
     )
 
     def add_arguments(self, parser):
@@ -31,26 +32,39 @@ class Command(BaseCommand):
             default="",
             help="Cartella per i backup (default: directory del progetto).",
         )
+        parser.add_argument(
+            "--no-source-backup",
+            action="store_true",
+            help="Non creare backup di .mpp/.xlsx prima del write-back.",
+        )
 
     def handle(self, *args, **options):
-        from ui.services.importer import configure, set_files_readonly, set_files_writable
+        from ui.services.importer import configure, set_files_readonly
         from ui.services.runtime_config import load_runtime_config
+        from ui.services.sync_state import backup_source_files, clear_sync_queue
 
         config = load_runtime_config()
         configure(config.mpp_path, config.xlsx_path)
 
+        backup_dir = options["backup_dir"] or None
         if options["backup_db"]:
-            backup_path = self._backup_sqlite(options["backup_dir"])
+            backup_path = self._backup_sqlite(backup_dir or "")
             self.stdout.write(self.style.SUCCESS(f"Backup DB: {backup_path}"))
+
+        if not options["no_source_backup"]:
+            created = backup_source_files(config.mpp_path, config.xlsx_path, backup_dir)
+            for path in created:
+                self.stdout.write(self.style.SUCCESS(f"Backup sorgente: {path}"))
 
         self.stdout.write("Avvio write-back su .mpp e .xlsx...")
         try:
             self._write_back(config.mpp_path, config.xlsx_path)
+            clear_sync_queue()
         except Exception as exc:  # noqa: BLE001
             raise CommandError(f"Write-back fallito: {exc}") from exc
 
         set_files_readonly()
-        self.stdout.write(self.style.SUCCESS("Write-back completato."))
+        self.stdout.write(self.style.SUCCESS("Write-back completato; coda cancellata."))
 
     def _backup_sqlite(self, backup_dir: str) -> Path:
         db_path = Path(settings.DATABASES["default"]["NAME"])
@@ -79,6 +93,7 @@ class Command(BaseCommand):
 
         import pythoncom
 
+        from ui.models import MppSyncQueue
         from ui.services.importer import set_files_writable
         from ui.services.writeback import write_pending_changes
 
@@ -91,30 +106,27 @@ class Command(BaseCommand):
         try:
             set_files_writable()
 
-            app = _dispatch_msp()
-            app.Visible = False
-            app.FileOpen(os.path.abspath(mpp_path))
-            project_com = app.ActiveProject
+            if MppSyncQueue.objects.exists():
+                app = _dispatch_msp()
+                app.Visible = False
+                app.FileOpen(os.path.abspath(mpp_path))
+                project_com = app.ActiveProject
 
-            if project_com.ReadOnly:
-                raise CommandError(
-                    "Il file .mpp è in sola lettura (aperto da un altro processo?)."
+                if project_com.ReadOnly:
+                    raise CommandError(
+                        "Il file .mpp è in sola lettura (aperto da un altro processo?)."
+                    )
+
+                wrapper = ProjectClass.from_open_app(app, project_com)
+                logger.info(
+                    "COM session aperta per write-back: %s", os.path.basename(mpp_path)
                 )
 
-            wrapper = ProjectClass.from_open_app(app, project_com)
-            logger.info("COM session aperta per write-back: %s", os.path.basename(mpp_path))
-
-            save_ok = False
-            try:
                 write_pending_changes(wrapper)
-                save_ok = True
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Errore durante il write-back: %s", exc)
-                raise
-
-            if save_ok:
                 app.FileSave()
                 logger.info("File .mpp salvato.")
+            else:
+                logger.info("Coda vuota — salto fase COM.")
 
             from src.data.export_xlsx import export_to_xlsx
 

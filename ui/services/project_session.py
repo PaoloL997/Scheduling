@@ -27,14 +27,16 @@ Lifecycle
 4. **All sessions gone** — either explicit logout via
    :meth:`ProjectSession.unregister_session` or heartbeat timeout detected by
    the watchdog → ``_release_event`` is set.
-5. **Write-back** — status is set to ``WRITING``; files are made writable;
-   a COM session is opened briefly to flush :class:`~ui.models.MppSyncQueue`
-   entries and save; finally the jobs ``.xlsx`` is overwritten via
-   ``openpyxl``.
-6. **Cleanup** — ORM tables are deleted; status is reset to ``NOT_STARTED``
-   so the *next* first login always performs a fresh import.
+5. **Write-back** — status is set to ``WRITING``; source files are backed up;
+   a COM session applies :class:`~ui.models.MppSyncQueue` entries and saves;
+   then the jobs ``.xlsx`` is overwritten.  The queue is cleared only after
+   both files are written successfully.
+6. **Cleanup** — ORM tables are deleted only after a confirmed durable flush;
+   status returns to ``NOT_STARTED`` / idle.  On restart, a non-empty working
+   copy is resumed instead of wiped.
 """
 
+import atexit
 import logging
 import os
 import threading
@@ -224,25 +226,18 @@ class ProjectSession:
         logger.info("Thread di lock .mpp avviato.")
 
     def _hold(self) -> None:
-        """Background thread: import → mark files read-only → heartbeat watchdog → write-back → cleanup.
+        """Background thread: import → mark files read-only → heartbeat → write-back → cleanup.
 
         Lifecycle phases:
 
-        1. **Import** — if the status is ``NOT_STARTED``, resets the ORM and
-           triggers a fresh import.  Waits until the import finishes (READY or
-           ERROR).
-        2. **Heartbeat loop** — polls :meth:`_expire_stale_sessions` every
-           :data:`_HEARTBEAT_INTERVAL` seconds until all sessions are gone and
-           ``_release_event`` is set.  The source files are read-only during
-           this phase (set by the import pipeline).
-        3. **Write-back** — makes files writable, opens a COM session, applies
-           pending :class:`~ui.models.MppSyncQueue` entries, saves and closes
-           the project, then exports the updated jobs to ``.xlsx``.
-        4. **Cleanup** — resets ORM tables and the importer state so the next
-           first-login always triggers a fresh import.
-
-        The ``released`` flag gates cleanup so that early exits (import error,
-        file locked) do not wipe data that active sessions are still using.
+        1. **Import / resume** — if there is no working copy, resets the ORM and
+           triggers a fresh import.  If a working copy (or pending queue) still
+           exists after a restart / failed write-back, resumes without wiping.
+        2. **Heartbeat loop** — waits until all sessions are gone and
+           ``_release_event`` is set.  Source files stay read-only.
+        3. **Write-back** — backups sources, applies the queue, saves ``.mpp``,
+           exports ``.xlsx``, then clears the queue only if both succeeded.
+        4. **Cleanup** — resets ORM tables only after a confirmed durable flush.
         """
         import pythoncom
 
@@ -251,8 +246,15 @@ class ProjectSession:
             begin_writeback,
             end_writeback,
             get_status,
+            hydrate_status_from_db,
             set_files_writable,
             trigger_reimport,
+        )
+        from ui.services.sync_state import (
+            backup_source_files,
+            clear_sync_queue,
+            pending_queue_count,
+            should_fresh_import,
         )
         from ui.services.writeback import write_pending_changes
 
@@ -266,25 +268,37 @@ class ProjectSession:
         released = False
         writeback_ok = False
         try:
-            # If the import has not started yet (first login or server restart
-            # with surviving session cookie), reset stale ORM data and kick off
-            # the import now.
+            hydrate_status_from_db()
             status = get_status()
-            if status == ImportStatus.NOT_STARTED:
+
+            if should_fresh_import():
                 logger.info(
-                    "Status '%s' — reset dataset app e avvio import da _hold_thread.",
+                    "Nessun working copy — reset dataset e avvio import (status=%s).",
                     status.value,
                 )
                 from ui.services.reset import reset_app_dataset
 
-                reset_app_dataset()
+                reset_app_dataset(force=True)
                 trigger_reimport()
             elif status == ImportStatus.WRITING:
                 logger.warning(
                     "Stato WRITING rilevato a inizio sessione: write-back precedente "
-                    "interrotto/non concluso. Dataset preservato per retry."
+                    "interrotto. Dataset preservato per retry."
                 )
                 end_writeback(False, "Write-back precedente interrotto.")
+            elif status == ImportStatus.NOT_STARTED:
+                # Working copy exists but in-memory said NOT_STARTED — already
+                # hydrated to READY above in normal cases; force READY if needed.
+                logger.info(
+                    "Working copy presente con status NOT_STARTED — ripresa senza reset."
+                )
+                end_writeback(False, "")
+            else:
+                logger.info(
+                    "Ripresa sessione esistente (status=%s, coda=%d).",
+                    status.value,
+                    pending_queue_count(),
+                )
 
             # --- Wait for any running import to finish -----------------
             while get_status() == ImportStatus.LOADING:
@@ -298,8 +312,6 @@ class ProjectSession:
                 return
 
             # --- Heartbeat watchdog loop --------------------------------
-            # Files are read-only (set by the import pipeline).
-            # No COM session is held during this phase.
             while not self._release_event.is_set():
                 self._release_event.wait(timeout=_heartbeat_interval_seconds())
                 if not self._release_event.is_set():
@@ -320,39 +332,58 @@ class ProjectSession:
             mpp_path = config.mpp_path
             xlsx_path = config.xlsx_path
 
-            app = None
             try:
-                app = _dispatch_msp()
-                app.Visible = False
-                app.FileOpen(os.path.abspath(mpp_path))
-                project_com = app.ActiveProject
+                backup_source_files(mpp_path, xlsx_path)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Backup pre-write-back non riuscito: %s", exc)
 
-                if project_com.ReadOnly:
-                    logger.error(
-                        "Il file .mpp è ancora in sola lettura dopo il ripristino dei permessi "
-                        "(aperto da un processo esterno?). Write-back annullato — dati preservati."
+            app = None
+            mpp_saved = False
+            try:
+                queue_count = pending_queue_count()
+                if queue_count > 0:
+                    app = _dispatch_msp()
+                    app.Visible = False
+                    app.FileOpen(os.path.abspath(mpp_path))
+                    project_com = app.ActiveProject
+
+                    if project_com.ReadOnly:
+                        logger.error(
+                            "Il file .mpp è ancora in sola lettura dopo il ripristino dei permessi "
+                            "(aperto da un processo esterno?). Write-back annullato — dati preservati."
+                        )
+                        released = False
+                        return
+
+                    wrapper = ProjectClass.from_open_app(app, project_com)
+                    logger.info(
+                        "COM session aperta per write-back: %s",
+                        os.path.basename(mpp_path),
                     )
-                    released = False
-                    return
 
-                wrapper = ProjectClass.from_open_app(app, project_com)
-                logger.info(
-                    "COM session aperta per write-back: %s", os.path.basename(mpp_path)
-                )
+                    save_ok = False
+                    try:
+                        write_pending_changes(wrapper)
+                        save_ok = True
+                    except Exception as exc:  # noqa: BLE001
+                        logger.error("Errore durante il write-back: %s", exc)
 
-                save_ok = False
-                try:
-                    write_pending_changes(wrapper)
-                    save_ok = True
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("Errore durante il write-back: %s", exc)
-
-                if save_ok:
-                    app.FileSave()
-                    logger.info("Write-back completato. File .mpp salvato.")
-                    writeback_ok = True
+                    if save_ok:
+                        app.FileSave()
+                        mpp_saved = True
+                        logger.info(
+                            "Write-back .mpp salvato (%d voci in coda).", queue_count
+                        )
+                    else:
+                        logger.warning(
+                            "Write-back non riuscito — file .mpp NON salvato."
+                        )
                 else:
-                    logger.warning("Write-back non riuscito — file .mpp NON salvato.")
+                    # Coda vuota: possibile retry solo-xlsx dopo un MPP già salvato.
+                    mpp_saved = True
+                    logger.info(
+                        "Coda vuota — salto fase COM, procedo con export .xlsx."
+                    )
 
             except Exception as exc:  # noqa: BLE001
                 logger.error("Errore nella fase COM write-back: %s", exc)
@@ -364,14 +395,17 @@ class ProjectSession:
                         pass
                     logger.info("COM session chiusa.")
 
-            if writeback_ok:
-                # Export the current Job table to .xlsx (full overwrite)
+            if mpp_saved:
                 try:
                     from src.data.export_xlsx import export_to_xlsx
 
                     export_to_xlsx(xlsx_path)
+                    clear_sync_queue()
+                    writeback_ok = True
+                    logger.info("Export .xlsx completato; coda cancellata.")
                 except Exception as exc:  # noqa: BLE001
                     logger.error("Errore durante l'export xlsx: %s", exc)
+                    writeback_ok = False
             else:
                 logger.warning(
                     "Write-back incompleto: export .xlsx saltato, dataset mantenuto."
@@ -380,15 +414,12 @@ class ProjectSession:
         except Exception as exc:  # noqa: BLE001
             logger.error("Errore nel thread di lock .mpp: %s", exc)
         finally:
-            # Full cleanup only when all users have disconnected.  For early
-            # exits (import error, file locked by another process) we leave
-            # the data intact so active sessions can continue.
             if released and writeback_ok:
                 try:
                     from ui.services.reset import reset_app_dataset
                     from ui.services.importer import cleanup_for_next_session
 
-                    reset_app_dataset()
+                    reset_app_dataset(force=True)
                     cleanup_for_next_session()
                 except Exception as exc:  # noqa: BLE001
                     logger.error("Errore durante il cleanup finale: %s", exc)
@@ -401,9 +432,6 @@ class ProjectSession:
 
             with self._lock:
                 self._hold_active = False
-                # Only restart if the hold cycle completed normally (released).
-                # Do not restart for early exits — the file or import is
-                # unavailable, so retrying immediately would loop forever.
                 if released and self._active_sessions:
                     logger.info(
                         "Nuove sessioni rilevate dopo write-back — riavvio ciclo."
@@ -416,3 +444,33 @@ class ProjectSession:
 
 # Module-level singleton used by signals and middleware.
 project_session = ProjectSession()
+
+
+def _atexit_flush_best_effort() -> None:
+    """Best-effort flush when the process exits with an empty session set."""
+    try:
+        from ui.services.sync_state import pending_queue_count
+
+        if pending_queue_count() == 0:
+            return
+        with project_session._lock:
+            has_sessions = bool(project_session._active_sessions)
+            hold_active = project_session._hold_active
+        if has_sessions or hold_active:
+            # Hold thread still owns the lifecycle; just signal release.
+            logger.info(
+                "atexit: sessioni/hold attivi — segnalo release per write-back."
+            )
+            project_session._release_event.set()
+            return
+        logger.info(
+            "atexit: coda pendente senza sessioni — avvio flush_to_sources best-effort."
+        )
+        from django.core.management import call_command
+
+        call_command("flush_to_sources")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("atexit write-back best-effort fallito: %s", exc)
+
+
+atexit.register(_atexit_flush_best_effort)

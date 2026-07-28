@@ -88,9 +88,15 @@ class FindMppTaskTests(TestCase):
 class ApplyAddTaskTests(TestCase):
     """Tests for :func:`_apply_add_task`."""
 
+    def _new_wrapper(self) -> MagicMock:
+        """Mock wrapper with no existing tasks (add path, not idempotent skip)."""
+        wrapper = MagicMock()
+        wrapper._find_task_or_none.return_value = None
+        return wrapper
+
     def test_add_task_called_with_canonical_name(self):
         """``project_wrapper.add_task`` receives a task with the canonical name."""
-        wrapper = MagicMock()
+        wrapper = self._new_wrapper()
         payload = {
             "commessa": "25033",
             "item": 1,
@@ -108,7 +114,7 @@ class ApplyAddTaskTests(TestCase):
 
     def test_add_task_bore_testa_fields_propagated(self):
         """Bore and testa fields are passed through to the Task passed to add_task."""
-        wrapper = MagicMock()
+        wrapper = self._new_wrapper()
         payload = {
             "commessa": "25033",
             "item": 1,
@@ -134,7 +140,7 @@ class ApplyAddTaskTests(TestCase):
 
     def test_add_task_bore_testa_absent_when_not_in_payload(self):
         """bore/testa fields default to None when absent from payload."""
-        wrapper = MagicMock()
+        wrapper = self._new_wrapper()
         payload = {
             "commessa": "25033",
             "item": 1,
@@ -152,7 +158,7 @@ class ApplyAddTaskTests(TestCase):
 
     def test_synced_to_mpp_updated(self):
         """``Attivita.synced_to_mpp`` is set to True after add."""
-        wrapper = MagicMock()
+        wrapper = self._new_wrapper()
         payload = {
             "attivita_id": 42,
             "commessa": "X001",
@@ -167,6 +173,20 @@ class ApplyAddTaskTests(TestCase):
             MockAtt.objects.filter.return_value.update.assert_called_once_with(
                 synced_to_mpp=True
             )
+
+    def test_add_task_skipped_when_already_present(self):
+        """Idempotent retry does not call ``add_task`` if the task already exists."""
+        wrapper = MagicMock()
+        wrapper._find_task_or_none.return_value = MagicMock()
+        payload = {
+            "commessa": "25033",
+            "item": 1,
+            "activity": "saldatura",
+            "data_inizio": "2025-01-01",
+            "data_fine": "2025-02-01",
+        }
+        _apply_add_task(wrapper, payload)
+        wrapper.add_task.assert_not_called()
 
 
 class ApplyUpdateTaskTests(TestCase):
@@ -282,12 +302,12 @@ class ApplyDeleteTaskTests(TestCase):
         _apply_delete_task(wrapper, payload)
         wrapper.delete_task.assert_called_once_with("25033-01-act")
 
-    def test_raises_when_task_absent(self):
-        """Propagates :class:`ValueError` when the task does not exist."""
+    def test_skips_when_task_absent(self):
+        """Missing tasks are skipped (idempotent retry after a prior delete)."""
         wrapper = MagicMock()
         wrapper._find_task_or_none.return_value = None
-        with self.assertRaises(ValueError):
-            _apply_delete_task(wrapper, {"commessa": "X", "item": 1, "activity": ""})
+        _apply_delete_task(wrapper, {"commessa": "X", "item": 1, "activity": ""})
+        wrapper.delete_task.assert_not_called()
 
 
 class WritePendingChangesTests(TestCase):
@@ -311,7 +331,7 @@ class WritePendingChangesTests(TestCase):
         wrapper.delete_task.assert_not_called()
 
     def test_add_task_entry_is_dispatched(self):
-        """``add_task`` entries are forwarded to the COM wrapper."""
+        """``add_task`` entries are forwarded to the COM wrapper; coda resta finché il caller non conferma."""
         from ui.models import MppSyncQueue
 
         self._make_entry(
@@ -325,23 +345,24 @@ class WritePendingChangesTests(TestCase):
             },
         )
         wrapper = MagicMock()
+        wrapper._find_task_or_none.return_value = None
         write_pending_changes(wrapper)
         wrapper.add_task.assert_called_once()
-        self.assertEqual(MppSyncQueue.objects.count(), 0)
+        self.assertEqual(MppSyncQueue.objects.count(), 1)
 
     def test_job_ops_are_consumed_without_error(self):
-        """Job operations are deleted from the queue without calling COM methods."""
+        """Job operations are applied as no-ops without calling COM methods; coda resta."""
         from ui.models import MppSyncQueue
 
         for op in ("add_job", "update_job", "delete_job"):
             self._make_entry(op, {"commessa": "J001"})
         wrapper = MagicMock()
         write_pending_changes(wrapper)
-        self.assertEqual(MppSyncQueue.objects.count(), 0)
+        self.assertEqual(MppSyncQueue.objects.count(), 3)
         wrapper.add_task.assert_not_called()
 
-    def test_failed_entry_does_not_block_remaining(self):
-        """A failing entry is kept; successful ones are deleted; overall raises."""
+    def test_failed_entry_keeps_entire_queue(self):
+        """On any failure the whole queue stays intact (no partial delete)."""
         from ui.models import MppSyncQueue
 
         self._make_entry(
@@ -363,7 +384,8 @@ class WritePendingChangesTests(TestCase):
             write_pending_changes(wrapper)
         wrapper.add_task.assert_called_once()
         remaining = list(MppSyncQueue.objects.values_list("operation", flat=True))
-        self.assertEqual(remaining, ["update_task"])
+        self.assertEqual(sorted(remaining), ["add_task", "update_task"])
+        self.assertEqual(MppSyncQueue.objects.count(), 2)
 
     def test_string_item_kept_as_is(self):
         """Non-numeric item identifiers are not zero-padded."""

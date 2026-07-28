@@ -368,6 +368,39 @@ class MppSyncQueue(models.Model):
         return f"{self.operation} @ {self.created_at}"
 
 
+class SyncSessionState(models.Model):
+    """Singleton row that persists the import/write-back phase across restarts.
+
+    Survives process restarts so a non-empty working copy is never mistaken for
+    a fresh session and wiped before changes are flushed to ``.mpp`` / ``.xlsx``.
+    """
+
+    PHASE_IDLE = "idle"
+    PHASE_LOADING = "loading"
+    PHASE_READY = "ready"
+    PHASE_WRITING = "writing"
+    PHASE_DIRTY = "dirty"
+
+    PHASE_CHOICES = [
+        (PHASE_IDLE, "Idle"),
+        (PHASE_LOADING, "Loading"),
+        (PHASE_READY, "Ready"),
+        (PHASE_WRITING, "Writing"),
+        (PHASE_DIRTY, "Dirty"),
+    ]
+
+    singleton_id = models.PositiveSmallIntegerField(primary_key=True, default=1)
+    phase = models.CharField(max_length=20, choices=PHASE_CHOICES, default=PHASE_IDLE)
+    last_error = models.TextField(blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "sync_session_state"
+
+    def __str__(self) -> str:
+        return f"SyncSessionState({self.phase})"
+
+
 class ConfigurazioneTesta(models.Model):
     """Per-testa-model configuration: resource minimums and compatible generators.
 

@@ -174,11 +174,20 @@ def api_bridge_auth_me(request: HttpRequest) -> JsonResponse:
 @login_required
 def api_bridge_status(request: HttpRequest) -> JsonResponse:
     """Return import pipeline status for tablet polling."""
+    from ui.services.sync_state import get_last_error, get_phase, pending_queue_count
+
     status = get_status()
+    detail = ""
+    if status == ImportStatus.ERROR:
+        detail = get_error_detail()
+    elif get_phase() == "dirty" or get_last_error():
+        detail = get_last_error() or get_error_detail()
     return _ok(
         {
             "status": status.value,
-            "detail": get_error_detail() if status == ImportStatus.ERROR else "",
+            "detail": detail,
+            "pending_queue_count": pending_queue_count(),
+            "sync_phase": get_phase(),
         }
     )
 

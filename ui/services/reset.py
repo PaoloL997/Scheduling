@@ -16,7 +16,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def reset_app_dataset() -> None:
+def reset_app_dataset(*, force: bool = False) -> None:
     """Clear all app-side data that mirrors or stages content from the .mpp file.
 
     Deletes all :class:`~ui.models.Attivita` records (cascading to their
@@ -27,6 +27,11 @@ def reset_app_dataset() -> None:
 
     After the reset, the fresh import from the ``.mpp`` file becomes the
     single source of truth.
+
+    Args:
+        force: When ``False`` (default), refuse to wipe if a working copy or
+            pending queue still exists.  Pass ``True`` only after a confirmed
+            durable write-back or an explicit forced reimport.
     """
     from ui.models import (
         Attivita,
@@ -38,6 +43,17 @@ def reset_app_dataset() -> None:
         TastatoreItem,
         TestaItem,
     )
+    from ui.services.sync_state import dataset_has_working_copy, pending_queue_count
+
+    if not force and dataset_has_working_copy():
+        logger.error(
+            "reset_app_dataset bloccato: working copy presente "
+            "(coda=%d). Usare force=True solo dopo write-back riuscito.",
+            pending_queue_count(),
+        )
+        raise RuntimeError(
+            "Reset dataset rifiutato: modifiche locali o coda ancora presenti."
+        )
 
     deleted_att, _ = Attivita.objects.all().delete()
     deleted_queue, _ = MppSyncQueue.objects.all().delete()

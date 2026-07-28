@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 
 class SafeCloseTests(SimpleTestCase):
@@ -41,3 +41,26 @@ class WritebackCleanupGateTests(SimpleTestCase):
         writeback_ok = True
         should_reset = released and writeback_ok
         self.assertTrue(should_reset)
+
+
+class HoldStartupRecoveryTests(TestCase):
+    """``_hold`` must not wipe a populated working copy on restart."""
+
+    def test_should_fresh_import_false_preserves_queue(self):
+        from ui.models import MppSyncQueue
+        from ui.services.sync_state import should_fresh_import
+
+        MppSyncQueue.objects.create(operation="update_task", payload_json="{}")
+        self.assertFalse(should_fresh_import())
+
+    @patch("ui.services.reset.reset_app_dataset")
+    def test_reset_not_called_when_working_copy_exists(self, mock_reset):
+        from ui.models import MppSyncQueue
+        from ui.services.sync_state import should_fresh_import
+
+        MppSyncQueue.objects.create(operation="add_task", payload_json="{}")
+        if should_fresh_import():
+            from ui.services.reset import reset_app_dataset
+
+            reset_app_dataset(force=True)
+        mock_reset.assert_not_called()

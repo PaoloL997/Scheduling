@@ -603,10 +603,20 @@ def api_status(request: HttpRequest) -> JsonResponse:
         JsonResponse: A JSON object with ``status`` and ``detail`` fields.
     """
     status = get_status()
+    from ui.services.sync_state import get_last_error, get_phase, pending_queue_count
+
+    detail = ""
+    if status == ImportStatus.ERROR:
+        detail = get_error_detail()
+    elif get_phase() == "dirty" or get_last_error():
+        detail = get_last_error() or get_error_detail()
+
     return JsonResponse(
         {
             "status": status.value,
-            "detail": get_error_detail() if status == ImportStatus.ERROR else "",
+            "detail": detail,
+            "pending_queue_count": pending_queue_count(),
+            "sync_phase": get_phase(),
         }
     )
 

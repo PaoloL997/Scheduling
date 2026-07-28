@@ -23,37 +23,46 @@ logger = logging.getLogger(__name__)
 _JOB_OPS = frozenset({"add_job", "update_job", "delete_job"})
 
 
-def write_pending_changes(project_wrapper) -> None:
+def write_pending_changes(project_wrapper) -> int:
     """Apply all pending :class:`~ui.models.MppSyncQueue` entries to the project.
 
-    Processes queue entries in ``created_at`` order (oldest first).  Each
-    entry is deleted from the database immediately after being successfully
-    applied.  Entries that raise exceptions are logged and skipped so the
-    remaining queue can still be flushed.
+    Processes queue entries in ``created_at`` order (oldest first).  Entries are
+    **not** deleted here: the caller must clear the queue only after
+    ``FileSave`` and the Excel export both succeed.  If any entry fails, this
+    function raises and leaves the entire queue intact so a retry can re-apply
+    from a freshly opened (unsaved) COM session.
 
     After a task is added, the corresponding :class:`~ui.models.Attivita`
     record is marked ``synced_to_mpp=True`` to remove it from the live merge
     on the pianificazione page.
 
-    Job operations (``add_job``, ``update_job``, ``delete_job``) are consumed
-    here without applying changes to the ``.mpp`` file; the Excel file is
-    updated separately via the full-overwrite export in Phase D.
+    Job operations (``add_job``, ``update_job``, ``delete_job``) are no-ops for
+    the ``.mpp`` file; the Excel file is updated separately via the
+    full-overwrite export in Phase D.
 
     Args:
         project_wrapper: An open :class:`~src.data.project.Project` instance
             that wraps the COM session.  Must not be closed before this
             function returns.
+
+    Returns:
+        Number of queue entries successfully applied (or skipped as no-ops).
+
+    Raises:
+        RuntimeError: If one or more entries could not be applied.  No entries
+            are deleted from the queue in that case.
     """
     from ui.models import MppSyncQueue
 
     entries = list(MppSyncQueue.objects.order_by("created_at"))
     if not entries:
         logger.info("MppSyncQueue vuota, nessuna modifica da scrivere.")
-        return
+        return 0
 
     logger.info("Scrittura di %d voci su .mpp...", len(entries))
     total = len(entries)
     failures = 0
+    applied = 0
     with logging_redirect_tqdm():
         with tqdm(
             entries, desc="Scrittura .mpp", unit="op", ncols=72, leave=True
@@ -76,10 +85,10 @@ def write_pending_changes(project_wrapper) -> None:
                     elif op == "delete_resource":
                         _apply_delete_resource(project_wrapper, payload)
                     elif op in _JOB_OPS:
-                        pass  # consumato silenziosamente, xlsx usa full-overwrite
+                        pass  # no-op su .mpp; xlsx usa full-overwrite
                     else:
                         logger.warning("Operazione sconosciuta nella coda: %s", op)
-                    entry.delete()
+                    applied += 1
                 except Exception as exc:  # noqa: BLE001
                     failures += 1
                     logger.error(
@@ -92,10 +101,13 @@ def write_pending_changes(project_wrapper) -> None:
     if failures:
         raise RuntimeError(
             f"Write-back incompleto: {failures}/{total} operazioni non applicate. "
-            "Le entry fallite restano in coda e il dataset non verrà resettato."
+            "La coda resta intatta e il dataset non verrà resettato."
         )
 
-    logger.info("Scrittura .mpp completata (%d voci).", total)
+    logger.info(
+        "Scrittura .mpp completata (%d voci, coda non ancora cancellata).", applied
+    )
+    return applied
 
 
 # ---------------------------------------------------------------------------
@@ -176,9 +188,7 @@ def _find_mpp_task(project_wrapper, commessa: str, item: int | str, activity: st
         if com_task is not None:
             return com_task, name
 
-    raise ValueError(
-        f"Task '{candidates[0]}' (o varianti) non trovato nel file .mpp."
-    )
+    raise ValueError(f"Task '{candidates[0]}' (o varianti) non trovato nel file .mpp.")
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +267,20 @@ def _apply_add_task(project_wrapper, payload: dict) -> None:
     item = payload["item"]
     activity = payload.get("activity", "")
     name = _task_mpp_name(commessa, item, activity)
+
+    # Idempotent: a retry after FileSave must not create duplicates.
+    try:
+        _find_mpp_task(project_wrapper, commessa, item, activity)
+    except ValueError:
+        pass
+    else:
+        logger.debug("Task '%s' già presente nel .mpp, skip add_task.", name)
+        attivita_id = payload.get("attivita_id")
+        if attivita_id:
+            from ui.models import Attivita
+
+            Attivita.objects.filter(pk=attivita_id).update(synced_to_mpp=True)
+        return
 
     start = (
         date.fromisoformat(payload["data_inizio"])
@@ -352,7 +376,7 @@ def _apply_delete_task(project_wrapper, payload: dict) -> None:
     """Delete an existing task from the MS Project file from a ``delete_task`` queue entry.
 
     Finds the task by trying the canonical ``_``-separated name first, then the
-    legacy ``-``-separated name.
+    legacy ``-``-separated name.  Missing tasks are skipped (idempotent retry).
 
     Args:
         project_wrapper: Open Project COM wrapper.
@@ -362,7 +386,14 @@ def _apply_delete_task(project_wrapper, payload: dict) -> None:
     item = payload["item"]
     activity = payload.get("activity", "")
 
-    _, current_name = _find_mpp_task(project_wrapper, commessa, item, activity)
+    try:
+        _, current_name = _find_mpp_task(project_wrapper, commessa, item, activity)
+    except ValueError:
+        logger.debug(
+            "Task '%s' già assente nel .mpp, skip delete_task.",
+            _task_mpp_name(commessa, item, activity),
+        )
+        return
     project_wrapper.delete_task(current_name)
     logger.debug("Task eliminato dal .mpp: %s", current_name)
 

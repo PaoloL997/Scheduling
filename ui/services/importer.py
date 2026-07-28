@@ -44,6 +44,7 @@ _status: ImportStatus = ImportStatus.NOT_STARTED
 _error_detail: str = ""
 _is_importing: bool = False
 _lock = threading.Lock()
+_hydrated_from_db: bool = False
 
 _mpp_path: str = ""
 _xlsx_path: str = ""
@@ -65,12 +66,79 @@ def configure(mpp_path: str, xlsx_path: str) -> None:
     _xlsx_path = xlsx_path
 
 
+def hydrate_status_from_db() -> None:
+    """Restore in-memory import status from the persisted sync phase.
+
+    Called lazily on first status read / hold-thread start so a process restart
+    does not treat a populated working copy as ``NOT_STARTED``.
+    """
+    global _status, _error_detail, _hydrated_from_db
+    with _lock:
+        if _hydrated_from_db:
+            return
+    try:
+        from ui.models import SyncSessionState
+        from ui.services.sync_state import (
+            dataset_has_working_copy,
+            get_last_error,
+            get_phase,
+            mark_dirty,
+            mark_ready,
+        )
+
+        phase = get_phase()
+        error = get_last_error()
+        has_data = dataset_has_working_copy()
+
+        if phase == SyncSessionState.PHASE_WRITING:
+            # Crash mid write-back: keep data, mark dirty for retry.
+            msg = error or "Write-back precedente interrotto."
+            mark_dirty(msg)
+            new_status = ImportStatus.READY
+            new_error = msg
+        elif phase == SyncSessionState.PHASE_DIRTY:
+            new_status = ImportStatus.READY
+            new_error = error
+        elif phase == SyncSessionState.PHASE_READY:
+            new_status = ImportStatus.READY
+            new_error = ""
+        elif phase == SyncSessionState.PHASE_LOADING and has_data:
+            # Import interrupted but data survived — resume as ready.
+            mark_ready()
+            new_status = ImportStatus.READY
+            new_error = ""
+        elif has_data:
+            # Anomalous: data without a matching phase — preserve it.
+            mark_ready(error or "Working copy recuperata dopo restart.")
+            new_status = ImportStatus.READY
+            new_error = error
+        else:
+            new_status = ImportStatus.NOT_STARTED
+            new_error = ""
+
+        with _lock:
+            _status = new_status
+            _error_detail = new_error
+            _hydrated_from_db = True
+        logger.info(
+            "Import status idratato da DB: phase=%s → %s (has_data=%s)",
+            phase,
+            new_status.value,
+            has_data,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Impossibile idratare lo stato sync dal DB: %s", exc)
+        with _lock:
+            _hydrated_from_db = True
+
+
 def get_status() -> ImportStatus:
     """Return the current import status in a thread-safe manner.
 
     Returns:
         ImportStatus: The current status value.
     """
+    hydrate_status_from_db()
     with _lock:
         return _status
 
@@ -81,6 +149,7 @@ def get_error_detail() -> str:
     Returns:
         str: The error message, or an empty string if no error occurred.
     """
+    hydrate_status_from_db()
     with _lock:
         return _error_detail
 
@@ -109,14 +178,38 @@ def is_mpp_stale() -> bool:
 def _set_status(status: ImportStatus, error: str = "") -> None:
     """Update the module-level status in a thread-safe manner.
 
+    Also mirrors the status onto :class:`~ui.models.SyncSessionState` so it
+    survives process restarts.
+
     Args:
         status: The new status to set.
         error: Optional human-readable error description.
     """
-    global _status, _error_detail
+    global _status, _error_detail, _hydrated_from_db
     with _lock:
         _status = status
         _error_detail = error
+        _hydrated_from_db = True
+
+    try:
+        from ui.models import SyncSessionState
+        from ui.services import sync_state
+
+        if status == ImportStatus.NOT_STARTED:
+            sync_state.mark_idle()
+        elif status == ImportStatus.LOADING:
+            sync_state.mark_loading()
+        elif status == ImportStatus.READY:
+            if error:
+                sync_state.mark_dirty(error)
+            else:
+                sync_state.mark_ready()
+        elif status == ImportStatus.WRITING:
+            sync_state.mark_writing()
+        elif status == ImportStatus.ERROR:
+            sync_state.set_phase(SyncSessionState.PHASE_DIRTY, error)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Impossibile persistente SyncSessionState: %s", exc)
 
 
 _on_complete_callback: Optional[Callable] = None
