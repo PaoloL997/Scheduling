@@ -177,11 +177,6 @@
           </div>
         </article>
         {% endfor %}
-      {% else %}
-        <div class="pian-empty-state" id="pian-empty-jobs">
-          <p>Nessuna commessa disponibile.</p>
-          <button class="btn btn-primary" onclick="openAddCommessaModal()">Nuova commessa</button>
-        </div>
       {% endif %}
     </div>
 
@@ -360,8 +355,8 @@
           </div>
         </div>
         <div class="wiz-field">
-          <label>Item</label>
-          <input id="s1-item" type="number" min="1" placeholder="1" value="1" oninput="_s1CommessaItemChange()">
+          <label>Disegno+item</label>
+          <input id="s1-item" type="text" placeholder="es. DG123+01" value="1" oninput="_s1CommessaItemChange()">
         </div>
         <div class="wiz-field">
           <label>Attività <span class="req">*</span></label>
@@ -802,7 +797,7 @@ const WIZ = {
   stabilimento:'', responsabile:'',
   tmpPath:'', wpsName:'',
   parsed:{}, gemini:{}, bore:{},
-  modello_testa:'', commessa:'', item:1, attivita:'',
+  modello_testa:'', commessa:'', item:'1', attivita:'',
   dataInizio:'', dataFine:'',
   newJob: null,
   predecessors: [],
@@ -814,7 +809,11 @@ const WIZ = {
 const _WIZ_TITLES = ['Nuova commessa','WPS','Predecessore','Info attività','Pianificazione','Risorse','Riepilogo'];
 const _enc = v => encodeURIComponent((v || '').trim());
 const buildJobId = (commessa) => _enc(commessa);
-const buildActivityId = (commessa, item, attivita) => `${_enc(commessa)}-${String(parseInt(item || 1, 10) || 1).padStart(2, '0')}-${_enc(attivita || '')}`;
+const _normalizeItem = (item, fallback = '1') => {
+  const value = String(item ?? '').trim();
+  return value || fallback;
+};
+const buildActivityId = (commessa, item, attivita) => `${_enc(commessa)}-${_enc(_normalizeItem(item))}-${_enc(attivita || '')}`;
 let _selectedPianCommessa = '';
 let _pianDetachedActivities = null;
 let _pianLockedJob = null;
@@ -1132,7 +1131,7 @@ function openAddModal(opts) {
   Object.assign(WIZ, {
     stabilimento:'', responsabile:'',
     tmpPath:'', wpsName:'', parsed:{}, gemini:{}, bore:{},
-    modello_testa:'', commessa:'', item:1, attivita:'',
+    modello_testa:'', commessa:'', item:'1', attivita:'',
     dataInizio:'', dataFine:'',
     newJob: null,
     predecessors: [],
@@ -1255,7 +1254,7 @@ async function _s1Upload(file) {
 
 async function _s1CheckCommessa(commessa, itemVal) {
   const status = document.getElementById('s1-commessa-status');
-  const item = parseInt(itemVal || document.getElementById('s1-item').value || 1, 10) || 1;
+  const item = _normalizeItem(itemVal || document.getElementById('s1-item').value);
   WIZ.predecessors = [];
   WIZ.predecessorItems = [];
   if (!commessa) {
@@ -1495,7 +1494,7 @@ function _s1ContinueToPredecessor() {
   const commessa = document.getElementById('s1-commessa').value.trim();
   WIZ.modello_testa = document.getElementById('s1-testa').value.trim();
   WIZ.commessa      = commessa;
-  WIZ.item          = parseInt(document.getElementById('s1-item').value) || 1;
+  WIZ.item          = _normalizeItem(document.getElementById('s1-item').value);
   WIZ.attivita      = document.getElementById('s1-attivita').value.trim();
   const _n = v => { const f = parseFloat(v); return isNaN(f) ? null : f; };
   WIZ.bore = Object.assign(WIZ.bore || {}, {
@@ -3072,7 +3071,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 const TASK_FIELDS = [
   { label:'Commessa',      key:'commessa',      readonly:true },
-  { label:'Item',          key:'item',          readonly:true },
+  { label:'Disegno+item',  key:'item',          readonly:true },
   { label:'Attività',      key:'activity',      readonly:false },
   { label:'Predecessore',  key:'predecessors',  readonly:false, isPredecessor:true },
   { label:'Inizio',        key:'start',         readonly:false, isDate:true },
@@ -3333,10 +3332,9 @@ async function saveEdit() {
 
   let url, payload;
   if (entityType === 'task') {
-    // Validate item is a valid integer.
-    const itemNum = parseInt(newData.item, 10);
-    if (!Number.isInteger(itemNum) || itemNum < 1) {
-      _showPianDetError('Il campo Item deve essere un numero intero positivo.');
+    const itemValue = _normalizeItem(newData.item, '');
+    if (!itemValue) {
+      _showPianDetError('Il campo Disegno+item è obbligatorio.');
       saveBtn.disabled = false;
       saveBtn.textContent = 'Salva';
       return;
@@ -3346,7 +3344,7 @@ async function saveEdit() {
       source:        originalData.source,
       orm_id:        originalData.ormId,
       commessa:      newData.commessa,
-      item:          itemNum,
+      item:          itemValue,
       activity:      newData.activity,
       start:         newData.start,
       finish:        newData.finish,
@@ -3407,10 +3405,10 @@ async function saveEdit() {
       return;
     }
 
-    // For tasks, normalise item to zero-padded display format.
+    // For tasks, normalise item to a non-empty string.
     if (entityType === 'task') {
-      const savedItem = json.item ?? parseInt(newData.item, 10);
-      newData.item = String(savedItem).padStart(2, '0');
+      const savedItem = json.item ?? itemValue;
+      newData.item = _normalizeItem(savedItem);
       newData.jobId = json.job_id || buildJobId(newData.commessa);
       newData.activityId = json.activity_id || buildActivityId(newData.commessa, newData.item, newData.activity);
       if (json.resources_by_tipo) {

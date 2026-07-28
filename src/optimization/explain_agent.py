@@ -1,3 +1,4 @@
+import logging
 import os
 
 from langchain.agents import create_agent
@@ -6,6 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL")
 
@@ -44,6 +46,29 @@ REGOLE:
 """
 
 
+def _openai_error_message(exc: Exception) -> str:
+    """Map OpenAI/LangChain exceptions to a clear Italian message."""
+    text = str(exc).lower()
+    if "insufficient_quota" in text or "exceeded your current quota" in text:
+        return (
+            "Quota OpenAI esaurita (insufficient_quota). "
+            "Controlla piano/billing su platform.openai.com oppure aggiorna OPENAI_API_KEY."
+        )
+    if "rate_limit" in text or "429" in text:
+        return (
+            "Limite di richieste OpenAI raggiunto (rate limit). "
+            "Riprova tra qualche minuto."
+        )
+    if "invalid_api_key" in text or "authentication" in text:
+        return "OPENAI_API_KEY non valida. Verifica la chiave nel file .env."
+    if "model" in text and ("not found" in text or "does not exist" in text):
+        return (
+            f"Modello OpenAI non disponibile ({OPENAI_MODEL}). "
+            "Verifica OPENAI_MODEL nel file .env."
+        )
+    return f"Errore chiamata OpenAI: {exc}"
+
+
 class ExplainResultsAgent:
     def __init__(self):
         if not os.getenv("OPENAI_API_KEY"):
@@ -59,6 +84,12 @@ class ExplainResultsAgent:
         )
 
     def run(self, input: str) -> str:
-        result = self.agent.invoke({"messages": [{"role": "user", "content": input}]})
+        try:
+            result = self.agent.invoke(
+                {"messages": [{"role": "user", "content": input}]}
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("ExplainResultsAgent fallito")
+            raise RuntimeError(_openai_error_message(exc)) from exc
         last = result["messages"][-1]
         return last.content

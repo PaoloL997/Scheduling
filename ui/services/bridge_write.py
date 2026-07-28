@@ -90,13 +90,13 @@ def update_attivita(orm_id: int, data: dict) -> dict:
         if new_commessa:
             a.commessa = new_commessa
     if "item" in data:
-        try:
-            a.item = int(data["item"])
-        except (ValueError, TypeError) as exc:
+        item_value = str(data["item"]).strip()
+        if not item_value:
             raise BridgeWriteError(
-                "Il valore di item non è un numero intero valido.",
+                "Il valore di item è obbligatorio.",
                 status_code=400,
-            ) from exc
+            )
+        a.item = item_value
     if "activity" in data:
         from ui.services.activity_inventory import validate_activity_type
 

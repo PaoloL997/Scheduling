@@ -47,18 +47,18 @@ def build_job_id(commessa: str) -> str:
 def build_activity_id(commessa: str, item: int | str, activity: str) -> str:
     """Return the canonical activity identifier.
 
-    The format is ``commessa-item-activity`` where commessa and activity are
-    URL-encoded and item is zero-padded to two digits.
+    The format is ``commessa-item-activity`` where commessa, item and activity
+    are URL-encoded.
 
     Args:
         commessa (str): The commessa name.
-        item (int | str): The item number within the commessa.
+        item (int | str): The item identifier within the commessa.
         activity (str): The activity name.
 
     Returns:
         str: Canonical activity identifier.
     """
-    return f"{_enc(commessa)}-{int(item):02d}-{_enc(activity)}"
+    return f"{_enc(commessa)}-{_enc(str(item))}-{_enc(activity)}"
 
 
 def parse_job_id(job_id: str) -> str:
@@ -73,7 +73,7 @@ def parse_job_id(job_id: str) -> str:
     return _dec(job_id or "")
 
 
-def parse_activity_id(activity_id: str) -> tuple[str, int, str]:
+def parse_activity_id(activity_id: str) -> tuple[str, str, str]:
     """Parse canonical ``activity_id`` returning ``(commessa, item, activity)``.
 
     Args:
@@ -81,7 +81,7 @@ def parse_activity_id(activity_id: str) -> tuple[str, int, str]:
             ``commessa-item-activity`` format.
 
     Returns:
-        tuple[str, int, str]: Decoded ``(commessa, item, activity)`` tuple.
+        tuple[str, str, str]: Decoded ``(commessa, item, activity)`` tuple.
 
     Raises:
         ValueError: When the activity_id does not contain exactly three parts.
@@ -90,4 +90,4 @@ def parse_activity_id(activity_id: str) -> tuple[str, int, str]:
     if len(parts) != 3:
         raise ValueError("activity_id non valido")
     commessa_raw, item_raw, activity_raw = parts
-    return _dec(commessa_raw), int(item_raw), _dec(activity_raw)
+    return _dec(commessa_raw), _dec(item_raw), _dec(activity_raw)

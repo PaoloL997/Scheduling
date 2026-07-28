@@ -162,8 +162,8 @@ class Activity(BaseModel):
     @model_validator(mode="after")
     def check_required_quantities(self):
         for qty in self.required_quantities.values():
-            if qty < 1:
-                raise ValueError("Required quantities must be >= 1.")
+            if qty < 0:
+                raise ValueError("Required quantities must be >= 0.")
         return self
 
 

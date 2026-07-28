@@ -300,10 +300,7 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
             {"ok": False, "error": "Commessa obbligatoria."}, status=400
         )
 
-    try:
-        item = int(data.get("item", 1))
-    except (ValueError, TypeError):
-        item = 1
+    item = str(data.get("item", "")).strip() or "1"
 
     from ui.services.activity_inventory import validate_activity_type
 

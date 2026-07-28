@@ -500,7 +500,7 @@ def _attivita_to_task_dict(a) -> dict:
         "activity_id": a.activity_id,
         "job_id": a.job_id,
         "commessa": a.commessa,
-        "item": str(a.item).zfill(2),
+        "item": str(a.item),
         "activity": a.activity,
         "duration_min": a.duration_min,
         "start": a.data_inizio.isoformat() if a.data_inizio else None,
@@ -1017,10 +1017,7 @@ def api_jobs_check(request: HttpRequest) -> JsonResponse:
         return JsonResponse(
             {"ok": False, "error": "commessa (o job_id) è obbligatoria."}, status=400
         )
-    try:
-        item = int(item_raw)
-    except (TypeError, ValueError):
-        item = 1
+    item = str(item_raw).strip() or "1"
     exists = (
         Job.objects.filter(commessa=commessa).exists()
         if commessa
@@ -1251,7 +1248,7 @@ def _load_gantt_data(plant_colors: dict) -> tuple[list, dict]:
         tasks.append(
             {
                 "commessa": att.commessa,
-                "item": str(att.item).zfill(2),
+                "item": str(att.item),
                 "job_id": att.job_id,
                 "activity_id": att.activity_id,
                 "activity": att.activity or "",

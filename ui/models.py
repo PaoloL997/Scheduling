@@ -23,7 +23,7 @@ class Attivita(models.Model):
     """
 
     commessa = models.CharField(max_length=100)
-    item = models.IntegerField()
+    item = models.CharField(max_length=50, default="1")
     activity = models.CharField(max_length=200, blank=True, default="")
     job_id = models.CharField(max_length=250, db_index=True, blank=True, default="")
     activity_id = models.CharField(max_length=500, unique=True, blank=True, default="")
@@ -486,7 +486,7 @@ class RisoluzioneProblema(models.Model):
     """
 
     commessa = models.CharField(max_length=100)
-    item = models.IntegerField()
+    item = models.CharField(max_length=50, default="1")
     activity = models.CharField(max_length=200, blank=True, default="")
     tipo = models.CharField(max_length=20)
     risorsa_tipo = models.CharField(max_length=20)

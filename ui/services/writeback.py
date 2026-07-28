@@ -53,6 +53,7 @@ def write_pending_changes(project_wrapper) -> None:
 
     logger.info("Scrittura di %d voci su .mpp...", len(entries))
     total = len(entries)
+    failures = 0
     with logging_redirect_tqdm():
         with tqdm(
             entries, desc="Scrittura .mpp", unit="op", ncols=72, leave=True
@@ -78,15 +79,21 @@ def write_pending_changes(project_wrapper) -> None:
                         pass  # consumato silenziosamente, xlsx usa full-overwrite
                     else:
                         logger.warning("Operazione sconosciuta nella coda: %s", op)
+                    entry.delete()
                 except Exception as exc:  # noqa: BLE001
+                    failures += 1
                     logger.error(
                         "Errore applicando MppSyncQueue entry %s (%s): %s",
                         entry.pk,
                         entry.operation,
                         exc,
                     )
-                finally:
-                    entry.delete()
+
+    if failures:
+        raise RuntimeError(
+            f"Write-back incompleto: {failures}/{total} operazioni non applicate. "
+            "Le entry fallite restano in coda e il dataset non verrà resettato."
+        )
 
     logger.info("Scrittura .mpp completata (%d voci).", total)
 
@@ -96,26 +103,39 @@ def write_pending_changes(project_wrapper) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _task_mpp_name(commessa: str, item: int, activity: str) -> str:
+def _format_mpp_item(item: int | str) -> str:
+    """Normalize an item for MS Project task names.
+
+    Numeric items keep the historical zero-padded form (``1`` → ``01``) so
+    existing ``.mpp`` tasks remain matchable. Non-numeric items are kept as-is.
+    """
+    text = str(item).strip()
+    if text.isdigit():
+        return f"{int(text):02d}"
+    return text
+
+
+def _task_mpp_name(commessa: str, item: int | str, activity: str) -> str:
     """Build the canonical MS Project task name using underscore separators.
 
-    The canonical format is ``{commessa}_{item:02d}_{activity}`` when an
-    activity is present, or ``{commessa}_{item:02d}`` otherwise.
+    The canonical format is ``{commessa}_{item}_{activity}`` when an
+    activity is present, or ``{commessa}_{item}`` otherwise.
 
     Args:
         commessa: The job identifier (e.g. ``"25033"``).
-        item: The numeric item index.
+        item: The item identifier.
         activity: The activity label, or an empty string.
 
     Returns:
         str: The canonical task name.
     """
+    item_txt = _format_mpp_item(item)
     if activity:
-        return f"{commessa}_{int(item):02d}_{activity}"
-    return f"{commessa}_{int(item):02d}"
+        return f"{commessa}_{item_txt}_{activity}"
+    return f"{commessa}_{item_txt}"
 
 
-def _find_mpp_task(project_wrapper, commessa: str, item: int, activity: str):
+def _find_mpp_task(project_wrapper, commessa: str, item: int | str, activity: str):
     """Locate a COM task object, trying canonical (``_``) and legacy (``-``) formats.
 
     MS Project files created before the underscore-separator convention used
@@ -125,7 +145,7 @@ def _find_mpp_task(project_wrapper, commessa: str, item: int, activity: str):
     Args:
         project_wrapper: Open :class:`~src.data.project.Project` instance.
         commessa: The job identifier.
-        item: The numeric item index.
+        item: The item identifier.
         activity: The activity label, or an empty string.
 
     Returns:
@@ -134,23 +154,30 @@ def _find_mpp_task(project_wrapper, commessa: str, item: int, activity: str):
     Raises:
         ValueError: If the task is not found under either name format.
     """
-    name_new = _task_mpp_name(commessa, item, activity)
-    com_task = project_wrapper._find_task_or_none(name_new)
-    if com_task is not None:
-        return com_task, name_new
+    candidates: list[str] = []
+    item_txt = str(item).strip()
+    formatted = _format_mpp_item(item)
+    for item_variant in dict.fromkeys([formatted, item_txt]):
+        name_new = (
+            f"{commessa}_{item_variant}_{activity}"
+            if activity
+            else f"{commessa}_{item_variant}"
+        )
+        candidates.append(name_new)
+        name_legacy = (
+            f"{commessa}-{item_variant}-{activity}"
+            if activity
+            else f"{commessa}-{item_variant}"
+        )
+        candidates.append(name_legacy)
 
-    sep_legacy = "-"
-    name_legacy = (
-        f"{commessa}{sep_legacy}{int(item):02d}{sep_legacy}{activity}"
-        if activity
-        else f"{commessa}{sep_legacy}{int(item):02d}"
-    )
-    com_task = project_wrapper._find_task_or_none(name_legacy)
-    if com_task is not None:
-        return com_task, name_legacy
+    for name in candidates:
+        com_task = project_wrapper._find_task_or_none(name)
+        if com_task is not None:
+            return com_task, name
 
     raise ValueError(
-        f"Task '{name_new}' (o '{name_legacy}') non trovato nel file .mpp."
+        f"Task '{candidates[0]}' (o varianti) non trovato nel file .mpp."
     )
 
 
@@ -199,19 +226,17 @@ def _activity_ids_to_mpp_predecessors(
             logger.warning("activity_id predecessore non valido: %s", activity_id)
             continue
 
-        mpp_name = _task_mpp_name(commessa, item, activity)
-        com_task = project_wrapper._find_task_or_none(mpp_name)
-        if com_task is None:
-            legacy_name = f"{commessa}-{int(item):02d}-{activity}"
-            com_task = project_wrapper._find_task_or_none(legacy_name)
-        if com_task is not None:
-            row_ids.append(str(com_task.ID))
-        else:
-            logger.warning(
-                "Predecessore '%s' non trovato nel .mpp (cercato come '%s').",
-                activity_id,
-                mpp_name,
+        try:
+            com_task, mpp_name = _find_mpp_task(
+                project_wrapper, commessa, item, activity
             )
+        except ValueError:
+            logger.warning(
+                "Predecessore '%s' non trovato nel .mpp.",
+                activity_id,
+            )
+            continue
+        row_ids.append(str(com_task.ID))
 
     return ";".join(row_ids) if row_ids else None
 

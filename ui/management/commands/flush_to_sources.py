@@ -123,11 +123,7 @@ class Command(BaseCommand):
         finally:
             if app is not None:
                 try:
-                    app.FileCloseEx(Save=0)
-                except Exception:  # noqa: BLE001
-                    pass
-                try:
-                    app.Quit()
+                    project_module._safe_close_and_quit(app)
                 except Exception:  # noqa: BLE001
                     pass
             pythoncom.CoUninitialize()

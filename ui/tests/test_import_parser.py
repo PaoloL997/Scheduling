@@ -61,7 +61,7 @@ class ParseWpsNameTests(SimpleTestCase):
             {
                 "modello_testa": "HT200",
                 "commessa": "25033",
-                "item": 2,
+                "item": "02",
                 "attivita": "",
             },
         )
@@ -72,7 +72,7 @@ class ParseWpsNameTests(SimpleTestCase):
             {
                 "modello_testa": "HT200",
                 "commessa": "25033",
-                "item": 1,
+                "item": "1",
                 "attivita": "",
             },
         )
@@ -83,7 +83,7 @@ class ParseWpsNameTests(SimpleTestCase):
             {
                 "modello_testa": "HT200",
                 "commessa": "25033",
-                "item": 1,
+                "item": "1",
                 "attivita": "",
             },
         )

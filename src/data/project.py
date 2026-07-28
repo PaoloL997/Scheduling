@@ -89,6 +89,27 @@ def _dispatch_msp() -> object:
     )
 
 
+def _safe_close_and_quit(app) -> None:
+    """Close the active project and quit MS Project without raising.
+
+    ``FileCloseEx`` is unreliable across MS Project builds and can abort the
+    whole import/write-back if left uncaught. Prefer a best-effort close and
+    always attempt ``Quit`` so zombie ``WINPROJ.EXE`` processes are not left
+    behind.
+    """
+    try:
+        app.FileCloseEx(0)
+    except Exception:
+        try:
+            app.FileClose(0)
+        except Exception as exc:
+            logger.warning("FileClose fallito: %s", exc)
+    try:
+        app.Quit()
+    except Exception as exc:
+        logger.warning("Quit fallito: %s", exc)
+
+
 def _to_msp_start_datetime(d: date) -> datetime:
     """Convert a calendar start date to a COM datetime at 09:00."""
     return datetime(d.year, d.month, d.day, _MSP_START_HOUR, 0)
@@ -127,11 +148,7 @@ class Project:
                 pass
             raise
         if project.ReadOnly:
-            try:
-                app.FileCloseEx(Save=0)
-            except Exception:
-                pass
-            app.Quit()
+            _safe_close_and_quit(app)
             raise PermissionError(
                 f"Il file '{path}' è aperto in un'altra applicazione ed è in sola lettura. "
                 "Chiuderlo prima di procedere."
@@ -396,11 +413,15 @@ class Project:
 
         Args:
             save: If True (default), saves the file before closing.
+
+        Notes:
+            Close/Quit failures are logged and swallowed so callers (import and
+            write-back) are not aborted after data has already been read or
+            written. Save failures still propagate when ``save=True``.
         """
         if save:
             self.app.FileSave()
-        self.app.FileCloseEx(Save=0)  # 0 = do not prompt, discard unsaved changes
-        self.app.Quit()
+        _safe_close_and_quit(self.app)
 
     def get_task_id(self, name: str) -> Optional[int]:
         """Return the MS Project ID of a task by name, or None if not found.

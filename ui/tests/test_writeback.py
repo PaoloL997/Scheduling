@@ -341,7 +341,7 @@ class WritePendingChangesTests(TestCase):
         wrapper.add_task.assert_not_called()
 
     def test_failed_entry_does_not_block_remaining(self):
-        """A failing entry is logged but remaining entries are still processed."""
+        """A failing entry is kept; successful ones are deleted; overall raises."""
         from ui.models import MppSyncQueue
 
         self._make_entry(
@@ -359,6 +359,15 @@ class WritePendingChangesTests(TestCase):
         )
         wrapper = MagicMock()
         wrapper._find_task_or_none.return_value = None  # causes update_task to fail
-        write_pending_changes(wrapper)
+        with self.assertRaises(RuntimeError):
+            write_pending_changes(wrapper)
         wrapper.add_task.assert_called_once()
-        self.assertEqual(MppSyncQueue.objects.count(), 0)
+        remaining = list(MppSyncQueue.objects.values_list("operation", flat=True))
+        self.assertEqual(remaining, ["update_task"])
+
+    def test_string_item_kept_as_is(self):
+        """Non-numeric item identifiers are not zero-padded."""
+        self.assertEqual(
+            _task_mpp_name("25078", "1-SNA", "produzione"),
+            "25078_1-SNA_produzione",
+        )

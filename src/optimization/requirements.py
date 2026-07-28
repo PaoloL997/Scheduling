@@ -34,10 +34,13 @@ def generate_requirements(activity: Activity) -> list[Requirement]:
 
     if activity.bore_min is not None and activity.bore_max is not None:
         for resource_type in BORE_RESOURCE_TYPES:
+            quantity = _quantity_for(activity, resource_type)
+            if quantity <= 0:
+                continue
             requirements.append(
                 Requirement(
                     resource_type=resource_type,
-                    quantity=_quantity_for(activity, resource_type),
+                    quantity=quantity,
                     bore_min=activity.bore_min,
                     bore_mid=activity.bore_mid,
                     bore_max=activity.bore_max,
@@ -45,20 +48,25 @@ def generate_requirements(activity: Activity) -> list[Requirement]:
             )
 
     if activity.tube_pitch is not None:
-        requirements.append(
-            Requirement(
-                resource_type=ResourceType.MASCHERA,
-                quantity=_quantity_for(activity, ResourceType.MASCHERA),
-                tube_pitch=activity.tube_pitch,
+        quantity = _quantity_for(activity, ResourceType.MASCHERA)
+        if quantity > 0:
+            requirements.append(
+                Requirement(
+                    resource_type=ResourceType.MASCHERA,
+                    quantity=quantity,
+                    tube_pitch=activity.tube_pitch,
+                )
             )
-        )
 
     if activity.head_model is not None:
         for resource_type in HEAD_RESOURCE_TYPES:
+            quantity = _quantity_for(activity, resource_type)
+            if quantity <= 0:
+                continue
             requirements.append(
                 Requirement(
                     resource_type=resource_type,
-                    quantity=_quantity_for(activity, resource_type),
+                    quantity=quantity,
                     head_model=activity.head_model,
                 )
             )

@@ -96,10 +96,10 @@ class AttivitaWpsConfermaForm(forms.Form):
         max_length=100,
         widget=forms.TextInput(attrs={"autocomplete": "off"}),
     )
-    item = forms.IntegerField(
-        label="Numero item",
-        min_value=1,
-        widget=forms.NumberInput(attrs={"min": "1"}),
+    item = forms.CharField(
+        label="Item",
+        max_length=50,
+        widget=forms.TextInput(attrs={"autocomplete": "off"}),
     )
     attivita = forms.ChoiceField(
         label="Attività",

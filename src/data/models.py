@@ -1,30 +1,12 @@
-import re
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, Union
 from datetime import date
 
 
-NAME_PATTERN = re.compile(
-    r"^[A-Za-z0-9]+"  # codice_commessa (alfanumerico)
-    r"([-_][A-Za-z0-9]+"  # -/_ numero_item    (alfanumerico, opzionale)
-    r"([-_][A-Za-z0-9][A-Za-z0-9 _\-]*)?"  # -/_ attività (alfanumerico con spazi/sep, opzionale)
-    r")?$"
-)
-
-
 class Task(BaseModel):
     """Model for creating a new task."""
 
-    name: str = Field(
-        ...,
-        description=(
-            "Activity name — accepted formats:\n"
-            "  {codice_commessa}                           e.g. AB123\n"
-            "  {codice_commessa}_{numero_item}             e.g. AB123_01\n"
-            "  {codice_commessa}_{numero_item}_{attività}  e.g. AB123_01_Montaggio\n"
-            "  Legacy hyphen format also accepted:         e.g. AB123-01-Montaggio"
-        ),
-    )
+    name: str = Field(..., description="MS Project task name (no format restriction)")
     start: date = Field(..., description="Start date")
     end: date = Field(..., description="End date")
     predecessors: Optional[str] = Field(
@@ -48,20 +30,6 @@ class Task(BaseModel):
     tube_pitch: Optional[float] = Field(
         None, description="Number4 — tube pitch (distanza interasse)"
     )
-
-    @field_validator("name")
-    @classmethod
-    def validate_name(cls, v: str) -> str:
-        if not NAME_PATTERN.match(v):
-            raise ValueError(
-                f"Invalid name format: '{v}'.\n"
-                "Accepted formats:\n"
-                "  {codice_commessa}                           e.g. AB123\n"
-                "  {codice_commessa}_{numero_item}             e.g. AB123_01\n"
-                "  {codice_commessa}_{numero_item}_{attività}  e.g. AB123_01_Montaggio\n"
-                "  Legacy hyphen format also accepted:         e.g. AB123-01-Montaggio"
-            )
-        return v
 
     @model_validator(mode="after")
     def validate_dates(self) -> "Task":

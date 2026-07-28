@@ -252,8 +252,8 @@ def import_from_mpp(mpp_path: str) -> None:
     The tables are assumed to be empty at call time (ensured by
     :func:`~ui.services.reset.reset_app_dataset`).
 
-    Tasks with a non-numeric or empty ``item`` segment (e.g. MS Project
-    summary rows) are silently skipped.
+    Tasks with an empty ``item`` segment (e.g. MS Project summary rows) are
+    silently skipped. Item values are preserved as strings.
 
     The file is opened in read-only mode (never saved) so that the import
     does not leave a dirty modification timestamp on the ``.mpp``.
@@ -289,12 +289,11 @@ def import_from_mpp(mpp_path: str) -> None:
     row_id_to_activity_id: dict[int, str] = {}
     for row_id, task in tasks_with_ids:
         r = _task_to_row(task)
-        try:
-            item_int = int(r.item)
-        except (ValueError, TypeError):
+        item = (r.item or "").strip()
+        if not item:
             continue
         row_id_to_activity_id[row_id] = build_activity_id(
-            r.commessa, item_int, r.activity
+            r.commessa, item, r.activity
         )
 
     attivita_objects: list[Attivita] = []
@@ -302,23 +301,22 @@ def import_from_mpp(mpp_path: str) -> None:
 
     for _row_id, task in tasks_with_ids:
         r = _task_to_row(task)
-        try:
-            item_int = int(r.item)
-        except (ValueError, TypeError):
+        item = (r.item or "").strip()
+        if not item:
             continue
 
         resource_uids = [u for u in (r.resources or "").split(";") if u]
-        key = (r.commessa, item_int, r.activity)
+        key = (r.commessa, item, r.activity)
         if resource_uids:
             task_resource_map[key] = resource_uids
 
         attivita_objects.append(
             Attivita(
                 commessa=r.commessa,
-                item=item_int,
+                item=item,
                 activity=r.activity,
                 job_id=build_job_id(r.commessa),
-                activity_id=build_activity_id(r.commessa, item_int, r.activity),
+                activity_id=build_activity_id(r.commessa, item, r.activity),
                 duration_min=r.duration_min,
                 data_inizio=_parse_date(r.start),
                 data_fine=_parse_date(r.finish),

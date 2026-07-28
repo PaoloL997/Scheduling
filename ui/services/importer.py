@@ -132,6 +132,19 @@ def begin_writeback() -> None:
     _set_status(ImportStatus.WRITING)
 
 
+def end_writeback(success: bool, error: str = "") -> None:
+    """Finalize write-back status without forcing a dataset reset.
+
+    Args:
+        success: Whether the write-back completed successfully.
+        error: Optional diagnostic detail when ``success`` is ``False``.
+    """
+    if success:
+        _set_status(ImportStatus.READY)
+        return
+    _set_status(ImportStatus.READY, error)
+
+
 def set_files_readonly() -> None:
     """Mark the configured source files as read-only at the OS level.
 

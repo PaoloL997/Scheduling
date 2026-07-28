@@ -38,20 +38,20 @@ from ui.models import (
 MINUTES_PER_WORKING_DAY = 8 * 60
 
 _DB_PROBLEM_ACTIVITY_ID_RE = re.compile(
-    r"^(?P<commessa>.+)-(?P<item>\d+)-(?P<activity>[A-Za-z0-9_]+)-(?P<pk>\d+)(?:-c\d+)?$"
+    r"^(?P<commessa>.+)-(?P<item>[^-]+)-(?P<activity>[A-Za-z0-9_]+)-(?P<pk>\d+)(?:-c\d+)?$"
 )
 
 
 def _parse_db_problem_activity_id(
     activity_id: str,
-) -> tuple[str, int, str, int] | None:
+) -> tuple[str, str, str, int] | None:
     """Parse activity ids produced by ``src.optimization.db_problem``."""
     match = _DB_PROBLEM_ACTIVITY_ID_RE.match(activity_id or "")
     if not match:
         return None
     return (
         match.group("commessa"),
-        int(match.group("item")),
+        match.group("item"),
         match.group("activity").replace("_", " "),
         int(match.group("pk")),
     )
@@ -181,10 +181,10 @@ def _fetch_required_quantities() -> dict[str, dict[ResourceType, int]]:
     quantities: dict[str, dict[ResourceType, int]] = {}
     for cfg in ConfigurazioneTesta.objects.all():
         quantities[cfg.modello_testa] = {
-            ResourceType.MANDRINO: max(1, cfg.min_mandrini),
-            ResourceType.TASTATORE: max(1, cfg.min_tastatori),
-            ResourceType.MASCHERA: max(1, cfg.min_maschere),
-            ResourceType.GENERATORE: max(1, cfg.min_generatori),
+            ResourceType.MANDRINO: max(0, cfg.min_mandrini),
+            ResourceType.TASTATORE: max(0, cfg.min_tastatori),
+            ResourceType.MASCHERA: max(0, cfg.min_maschere),
+            ResourceType.GENERATORE: max(0, cfg.min_generatori),
             ResourceType.TESTA: 1,
         }
     return quantities
@@ -739,7 +739,7 @@ def attivita_to_gantt_task(att: Attivita, plant_colors: dict[str, str]) -> dict:
     plant = att.stabilimento or None
     return {
         "commessa": att.commessa,
-        "item": str(att.item).zfill(2),
+        "item": str(att.item),
         "job_id": att.job_id,
         "activity_id": att.activity_id,
         "activity": att.activity or "",

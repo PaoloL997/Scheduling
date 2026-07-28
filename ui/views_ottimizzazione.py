@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, timedelta
 from typing import Any
 
@@ -43,6 +44,8 @@ from ui.services.resource_conflicts import (
     format_conflict_message,
 )
 from ui.views import _fetch_grouped, _has_plannable_activities
+
+logger = logging.getLogger(__name__)
 
 SESSION_DRAFT_KEY = "ottimizzazione_draft"
 SESSION_RESULT_KEY = "ottimizzazione_result"
@@ -113,21 +116,43 @@ def _store_optimization_result(
     request.session.modified = True
 
 
+def _fallback_explanation(reason: str) -> str:
+    """Build a minimal markdown note when the LLM explanation is unavailable."""
+    return (
+        "## Risultato ottimizzazione\n\n"
+        "La proposta di pianificazione è disponibile qui sotto.\n\n"
+        "### Spiegazione automatica non disponibile\n\n"
+        f"{reason}\n"
+    )
+
+
 def _complete_optimization_session(
     request: HttpRequest,
     result_payload: dict,
 ) -> str | None:
-    """Store optimization result and generated explanation. Returns error message or None."""
+    """Store optimization result and explanation.
+
+    The optimization result is always stored. If the LLM explanation fails, a
+    fallback note is saved so the results page remains usable.
+
+    Returns:
+        Optional warning message (``None`` when the LLM explanation succeeded).
+    """
     try:
         explanation = generate_optimization_explanation(result_payload)
-    except RuntimeError as exc:
-        return str(exc)
-    except ValueError as exc:
-        return str(exc)
-    except Exception:
-        return "Errore durante la generazione della spiegazione."
+        warning = None
+    except (RuntimeError, ValueError) as exc:
+        logger.warning("Spiegazione ottimizzazione non disponibile: %s", exc)
+        explanation = _fallback_explanation(str(exc))
+        warning = str(exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Errore imprevisto durante la generazione della spiegazione")
+        explanation = _fallback_explanation(
+            "Errore durante la generazione della spiegazione."
+        )
+        warning = "Errore durante la generazione della spiegazione."
     _store_optimization_result(request, result_payload, explanation=explanation)
-    return None
+    return warning
 
 
 def _clear_wizard_session(request: HttpRequest) -> None:
@@ -360,10 +385,9 @@ def ottimizzazione_run(request: HttpRequest) -> HttpResponse:
         )
         return redirect("ottimizzazione")
 
-    explain_error = _complete_optimization_session(request, outcome["result_payload"])
-    if explain_error:
-        messages.error(request, explain_error)
-        return redirect("ottimizzazione")
+    explain_warning = _complete_optimization_session(request, outcome["result_payload"])
+    if explain_warning:
+        messages.warning(request, explain_warning)
     return redirect("ottimizzazione_risultati")
 
 
@@ -429,17 +453,16 @@ def api_ottimizzazione_solve(request: HttpRequest) -> JsonResponse:
             }
         )
 
-    explain_error = _complete_optimization_session(request, outcome["result_payload"])
-    if explain_error:
-        return JsonResponse({"ok": False, "error": explain_error}, status=503)
+    explain_warning = _complete_optimization_session(request, outcome["result_payload"])
 
-    return JsonResponse(
-        {
-            "ok": True,
-            "feasible": True,
-            "redirect_url": reverse("ottimizzazione_risultati"),
-        }
-    )
+    payload = {
+        "ok": True,
+        "feasible": True,
+        "redirect_url": reverse("ottimizzazione_risultati"),
+    }
+    if explain_warning:
+        payload["warning"] = explain_warning
+    return JsonResponse(payload)
 
 
 @login_required

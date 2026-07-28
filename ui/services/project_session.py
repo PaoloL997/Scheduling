@@ -249,6 +249,7 @@ class ProjectSession:
         from ui.services.importer import (
             ImportStatus,
             begin_writeback,
+            end_writeback,
             get_status,
             set_files_writable,
             trigger_reimport,
@@ -263,20 +264,27 @@ class ProjectSession:
 
         pythoncom.CoInitialize()
         released = False
+        writeback_ok = False
         try:
             # If the import has not started yet (first login or server restart
             # with surviving session cookie), reset stale ORM data and kick off
-            # the import now.  Also handles WRITING status left from a failed
-            # or interrupted write-back attempt.
-            if get_status() in (ImportStatus.NOT_STARTED, ImportStatus.WRITING):
+            # the import now.
+            status = get_status()
+            if status == ImportStatus.NOT_STARTED:
                 logger.info(
                     "Status '%s' — reset dataset app e avvio import da _hold_thread.",
-                    get_status().value,
+                    status.value,
                 )
                 from ui.services.reset import reset_app_dataset
 
                 reset_app_dataset()
                 trigger_reimport()
+            elif status == ImportStatus.WRITING:
+                logger.warning(
+                    "Stato WRITING rilevato a inizio sessione: write-back precedente "
+                    "interrotto/non concluso. Dataset preservato per retry."
+                )
+                end_writeback(False, "Write-back precedente interrotto.")
 
             # --- Wait for any running import to finish -----------------
             while get_status() == ImportStatus.LOADING:
@@ -342,6 +350,7 @@ class ProjectSession:
                 if save_ok:
                     app.FileSave()
                     logger.info("Write-back completato. File .mpp salvato.")
+                    writeback_ok = True
                 else:
                     logger.warning("Write-back non riuscito — file .mpp NON salvato.")
 
@@ -350,22 +359,23 @@ class ProjectSession:
             finally:
                 if app is not None:
                     try:
-                        app.FileCloseEx(Save=0)
-                    except Exception:  # noqa: BLE001
-                        pass
-                    try:
-                        app.Quit()
+                        project_module._safe_close_and_quit(app)
                     except Exception:  # noqa: BLE001
                         pass
                     logger.info("COM session chiusa.")
 
-            # Export the current Job table to .xlsx (full overwrite)
-            try:
-                from src.data.export_xlsx import export_to_xlsx
+            if writeback_ok:
+                # Export the current Job table to .xlsx (full overwrite)
+                try:
+                    from src.data.export_xlsx import export_to_xlsx
 
-                export_to_xlsx(xlsx_path)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Errore durante l'export xlsx: %s", exc)
+                    export_to_xlsx(xlsx_path)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Errore durante l'export xlsx: %s", exc)
+            else:
+                logger.warning(
+                    "Write-back incompleto: export .xlsx saltato, dataset mantenuto."
+                )
 
         except Exception as exc:  # noqa: BLE001
             logger.error("Errore nel thread di lock .mpp: %s", exc)
@@ -373,7 +383,7 @@ class ProjectSession:
             # Full cleanup only when all users have disconnected.  For early
             # exits (import error, file locked by another process) we leave
             # the data intact so active sessions can continue.
-            if released:
+            if released and writeback_ok:
                 try:
                     from ui.services.reset import reset_app_dataset
                     from ui.services.importer import cleanup_for_next_session
@@ -382,6 +392,12 @@ class ProjectSession:
                     cleanup_for_next_session()
                 except Exception as exc:  # noqa: BLE001
                     logger.error("Errore durante il cleanup finale: %s", exc)
+            elif released:
+                end_writeback(False, "Write-back non completato: dataset preservato.")
+                logger.error(
+                    "Write-back fallito/interrotto: nessun reset eseguito. "
+                    "I dati locali e la coda restano per tentare nuovamente."
+                )
 
             with self._lock:
                 self._hold_active = False

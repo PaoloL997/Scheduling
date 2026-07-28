@@ -11,21 +11,21 @@ def parse_wps_name(filename: str) -> dict:
         {modello_testa}_{commessa}[_{item}].pdf
 
     All separators are underscores.  The optional item field is detected by
-    being a purely numeric token; if absent, item defaults to 1.  Any extra
+    being a purely numeric token; if absent, item defaults to ``"1"``. Any extra
     tokens after item are ignored (activity names are no longer read from the
     filename).
 
     For example:
-    - ``HT200_AB123.pdf``                → modello=HT200, commessa=AB123, item=1
-    - ``HT200_AB123_02.pdf``             → modello=HT200, commessa=AB123, item=2
-    - ``HT200_AB123_Saldatura.pdf``      → modello=HT200, commessa=AB123, item=1
+    - ``HT200_AB123.pdf``                → modello=HT200, commessa=AB123, item="1"
+    - ``HT200_AB123_02.pdf``             → modello=HT200, commessa=AB123, item="02"
+    - ``HT200_AB123_Saldatura.pdf``      → modello=HT200, commessa=AB123, item="1"
 
     Args:
         filename: The original filename of the uploaded WPS PDF.
 
     Returns:
         dict: With keys ``modello_testa`` (str), ``commessa`` (str),
-            ``item`` (int), and ``attivita`` (always ``""`` for compatibility).
+            ``item`` (str), and ``attivita`` (always ``""`` for compatibility).
     """
     stem = re.sub(r"\.pdf$", "", filename, flags=re.IGNORECASE)
     parts = stem.split("_")
@@ -33,9 +33,9 @@ def parse_wps_name(filename: str) -> dict:
     modello = parts[0] if len(parts) >= 1 else ""
     commessa = parts[1] if len(parts) >= 2 else ""
 
-    item = 1
+    item = "1"
     if len(parts) >= 3 and parts[2].isdigit():
-        item = int(parts[2])
+        item = parts[2]
 
     return {
         "modello_testa": modello,

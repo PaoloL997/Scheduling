@@ -215,10 +215,10 @@ def _fetch_required_quantities(
         if model is None:
             continue
         quantities[model] = {
-            ResourceType.MANDRINO: max(1, int(row["min_mandrini"] or 1)),
-            ResourceType.TASTATORE: max(1, int(row["min_tastatori"] or 1)),
-            ResourceType.MASCHERA: max(1, int(row["min_maschere"] or 1)),
-            ResourceType.GENERATORE: max(1, int(row["min_generatori"] or 1)),
+            ResourceType.MANDRINO: max(0, int(row["min_mandrini"] or 0)),
+            ResourceType.TASTATORE: max(0, int(row["min_tastatori"] or 0)),
+            ResourceType.MASCHERA: max(0, int(row["min_maschere"] or 0)),
+            ResourceType.GENERATORE: max(0, int(row["min_generatori"] or 0)),
             ResourceType.TESTA: 1,
         }
     return quantities
