@@ -219,6 +219,18 @@
     return !!(t && t.actual_finish);
   }
 
+  /** Same late/overdue rules as the home ``updateStats`` counters. */
+  function taskIsLate(t, today) {
+    if (!t) return false;
+    const actS = t.actual_start ? new Date(t.actual_start + 'T00:00:00') : null;
+    const actF = t.actual_finish ? new Date(t.actual_finish + 'T00:00:00') : null;
+    const planS = t.start ? new Date(t.start + 'T00:00:00') : null;
+    if (actS && actF) return false;
+    const startedLate = !!(actS && planS && actS > planS);
+    const overdue = !!(!actS && planS && today > planS);
+    return startedLate || overdue;
+  }
+
   function parseIsoNoon(raw) {
     const s = String(raw || '').trim().slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
@@ -400,6 +412,8 @@
       this.highlightChanges = options.highlightChanges || null;
       this.compareMode = !!options.compareMode;
       this.compareTasks = options.compareTasks || [];
+      // Home stats filter: null | 'late' | 'wip' (totals card clears the filter).
+      this.statFilter = null;
       this._dataMinD = null;
       this._dataMaxD = null;
       this._bound = false;
@@ -422,11 +436,56 @@
     _allGroupKeys() {
       const keys = [];
       const seen = {};
-      (this.tasks || []).forEach(t => {
+      this.displayTasks().forEach(t => {
         const k = this._groupKey(t);
         if (!seen[k]) { seen[k] = true; keys.push(k); }
       });
       return keys;
+    }
+
+    displayTasks() {
+      const all = this.tasks || [];
+      if (!this.statFilter) return all;
+      if (this.statFilter === 'wip') return all.filter(taskIsWip);
+      if (this.statFilter === 'late') {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return all.filter(t => taskIsLate(t, today));
+      }
+      return all;
+    }
+
+    _renderCurrent() {
+      this.render(this.displayTasks(), this.view);
+    }
+
+    setStatFilter(filterKey) {
+      if (!this.enableStats) return;
+      let next = filterKey || null;
+      if (next === 'total') next = null;
+      if (next !== null && next !== 'late' && next !== 'wip') next = null;
+      // Toggle off when clicking the active filter again.
+      if (next && this.statFilter === next) next = null;
+      this.statFilter = next;
+      this._syncStatFilterUI();
+      if (!this._fitLocked) {
+        const visible = this.displayTasks();
+        const basis = visible.length ? visible : this.tasks;
+        if (this.view === 'horizon') this.applyHorizonToData(basis);
+        else if (this.fitToData) this.applyFitToData(basis);
+      }
+      this._renderCurrent();
+    }
+
+    _syncStatFilterUI() {
+      document.querySelectorAll('#stats-row .stat-card[data-stat-filter]').forEach(card => {
+        const key = card.getAttribute('data-stat-filter');
+        const active = this.statFilter
+          ? key === this.statFilter
+          : key === 'total';
+        card.classList.toggle('is-active', active);
+        card.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
     }
 
     toggleGroup(key) {
@@ -434,21 +493,21 @@
       if (this._expandedGroups.has(key)) this._expandedGroups.delete(key);
       else this._expandedGroups.add(key);
       this._syncExpandToggleBtn();
-      this.render(this.tasks, this.view);
+      this._renderCurrent();
     }
 
     expandAllGroups() {
       if (!this.collapsibleGroups) return;
       this._allGroupKeys().forEach(k => this._expandedGroups.add(k));
       this._syncExpandToggleBtn();
-      this.render(this.tasks, this.view);
+      this._renderCurrent();
     }
 
     collapseAllGroups() {
       if (!this.collapsibleGroups) return;
       this._expandedGroups.clear();
       this._syncExpandToggleBtn();
-      this.render(this.tasks, this.view);
+      this._renderCurrent();
     }
 
     _syncExpandToggleBtn() {
@@ -619,12 +678,12 @@
         if (!barsEl) return;
         attempts += 1;
         if (barsEl.clientWidth > 0 && barsEl.clientHeight > 0) {
-          self.render(self.tasks, self.view);
+          self._renderCurrent();
           self._observeLayout();
           return;
         }
         if (attempts < 80) requestAnimationFrame(tryRender);
-        else self.render(self.tasks, self.view);
+        else self._renderCurrent();
       };
       requestAnimationFrame(tryRender);
     }
@@ -633,7 +692,7 @@
       const self = this;
       clearTimeout(self._resizeTimer);
       self._resizeTimer = setTimeout(() => {
-        if (self.tasks.length && !self._rendering) self.render(self.tasks, self.view);
+        if (self.tasks.length && !self._rendering) self._renderCurrent();
       }, 120);
     }
 
@@ -660,20 +719,15 @@
       let total = 0, late = 0, wip = 0;
       tasks.forEach(t => {
         total++;
-        const actS = t.actual_start ? new Date(t.actual_start + 'T00:00:00') : null;
-        const actF = t.actual_finish ? new Date(t.actual_finish + 'T00:00:00') : null;
-        const planS = t.start ? new Date(t.start + 'T00:00:00') : null;
-        if (actS && actF) return;
-        if (actS && !actF) wip++;
-        const isLate = !!(actS && planS && actS > planS);
-        const isOverdue = !!((!actS) && planS && today > planS);
-        if (isLate || isOverdue) late++;
+        if (taskIsWip(t)) wip++;
+        if (taskIsLate(t, today)) late++;
       });
       totalEl.textContent = total;
       const lateEl = this.el('stat-late');
       const wipEl = this.el('stat-wip');
       if (lateEl) lateEl.textContent = late;
       if (wipEl) wipEl.textContent = wip;
+      this._syncStatFilterUI();
     }
 
     showTip(taskData, clientX, clientY) {
@@ -1497,7 +1551,7 @@
         if (deadline) self.deadlines[jobId] = deadline;
         else delete self.deadlines[jobId];
         self.closeDeadlineEditor();
-        self.render(self.tasks, self.view);
+        self._renderCurrent();
       });
     }
 
@@ -1524,7 +1578,7 @@
             self._dataMaxD = null;
             self._fitRestore = null;
           }
-          self.render(self.tasks, self.view);
+          self._renderCurrent();
         });
       });
 
@@ -1537,7 +1591,7 @@
         } else {
           self.offset -= (self.view === 'year') ? 1 : self.offsetStep(self.view);
         }
-        self.render(self.tasks, self.view);
+        self._renderCurrent();
       });
       if (next) next.addEventListener('click', () => {
         if (self.fitToData && self._dataMinD) {
@@ -1545,19 +1599,19 @@
         } else {
           self.offset += (self.view === 'year') ? 1 : self.offsetStep(self.view);
         }
-        self.render(self.tasks, self.view);
+        self._renderCurrent();
       });
       if (todayBtn) todayBtn.addEventListener('click', () => {
         if (self.view === 'horizon' || self.fitToData) {
           if (self.view === 'horizon') self.applyHorizonToData(self.tasks);
           else if (self._fitRestore) self.applyFitViewport(self._fitRestore);
           else self.applyFitToData(self.tasks);
-          self.render(self.tasks, self.view);
+          self._renderCurrent();
           return;
         }
         if (self.offset === 0) return;
         self.offset = 0;
-        self.render(self.tasks, self.view);
+        self._renderCurrent();
       });
 
       const expandToggle = this.el('nav-expand-toggle');
@@ -1583,6 +1637,18 @@
     bindIndexPage() {
       this.bindControls();
       const self = this;
+      document.querySelectorAll('#stats-row .stat-card[data-stat-filter]').forEach(card => {
+        card.addEventListener('click', () => {
+          self.setStatFilter(card.getAttribute('data-stat-filter'));
+        });
+        card.addEventListener('keydown', e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            self.setStatFilter(card.getAttribute('data-stat-filter'));
+          }
+        });
+      });
+      this._syncStatFilterUI();
       document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
           self.closeDeadlineEditor();
@@ -1590,10 +1656,10 @@
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
         if (e.key === 'ArrowLeft') {
           self.offset -= (self.view === 'year') ? 1 : self.offsetStep(self.view);
-          self.render(self.tasks, self.view);
+          self._renderCurrent();
         } else if (e.key === 'ArrowRight') {
           self.offset += (self.view === 'year') ? 1 : self.offsetStep(self.view);
-          self.render(self.tasks, self.view);
+          self._renderCurrent();
         }
       });
       const saveBtn = document.getElementById('dl-save-btn');
