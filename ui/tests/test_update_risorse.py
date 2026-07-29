@@ -70,6 +70,24 @@ class UpdateAttivitaRisorseTest(TestCase):
         payload = json.loads(entry.payload_json)
         self.assertEqual(payload["resources"], ["T002", "M1"])
 
+    def test_update_predecessors_enqueued_for_mpp_writeback(self) -> None:
+        pred = Attivita.objects.create(
+            commessa="C100",
+            item=2,
+            activity="Prep",
+            data_inizio=date(2026, 5, 1),
+            data_fine=date(2026, 5, 3),
+        )
+        update_attivita(
+            self.att.pk,
+            {"predecessors": [pred.activity_id]},
+        )
+        self.att.refresh_from_db()
+        self.assertEqual(self.att.predecessors, pred.activity_id)
+        entry = MppSyncQueue.objects.get(operation="update_task")
+        payload = json.loads(entry.payload_json)
+        self.assertEqual(payload["predecessors"], pred.activity_id)
+
     def test_update_risorse_conflict_raises(self) -> None:
         other = Attivita.objects.create(
             commessa="C200",

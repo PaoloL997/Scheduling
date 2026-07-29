@@ -188,6 +188,60 @@ class ApplyAddTaskTests(TestCase):
         _apply_add_task(wrapper, payload)
         wrapper.add_task.assert_not_called()
 
+    def test_add_task_applies_predecessors(self):
+        """Predecessor activity_ids are converted to MPP row IDs before add."""
+        wrapper = self._new_wrapper()
+        pred_task = MagicMock()
+        pred_task.ID = 7
+
+        def _find_or_none(name):
+            if name == "25033_01_prep":
+                return pred_task
+            return None
+
+        wrapper._find_task_or_none.side_effect = _find_or_none
+        payload = {
+            "commessa": "25033",
+            "item": 2,
+            "activity": "saldatura",
+            "data_inizio": "2025-01-01",
+            "data_fine": "2025-02-01",
+            "predecessors": "25033-1-prep",
+        }
+        _apply_add_task(wrapper, payload)
+        task_arg = wrapper.add_task.call_args[0][0]
+        self.assertEqual(task_arg.predecessors, "7")
+
+    def test_add_task_existing_still_refreshes_predecessors(self):
+        """If the task already exists, predecessors from the payload are still applied."""
+        wrapper = MagicMock()
+        existing = MagicMock()
+        pred_task = MagicMock()
+        pred_task.ID = 3
+
+        def _find_or_none(name):
+            if name == "25033_02_saldatura":
+                return existing
+            if name == "25033_01_prep":
+                return pred_task
+            return None
+
+        wrapper._find_task_or_none.side_effect = _find_or_none
+        payload = {
+            "commessa": "25033",
+            "item": 2,
+            "activity": "saldatura",
+            "data_inizio": "2025-01-01",
+            "data_fine": "2025-02-01",
+            "predecessors": "25033-1-prep",
+        }
+        _apply_add_task(wrapper, payload)
+        wrapper.add_task.assert_not_called()
+        wrapper.update_task.assert_called_once_with(
+            "25033_02_saldatura",
+            predecessors="3",
+        )
+
 
 class ApplyUpdateTaskTests(TestCase):
     """Tests for :func:`_apply_update_task`."""
@@ -277,6 +331,56 @@ class ApplyUpdateTaskTests(TestCase):
         wrapper.set_task_resources.assert_called_once_with(
             "25033_01_qualifica", ["T1", "M2"]
         )
+
+    def test_update_applies_predecessors(self):
+        """``predecessors`` in the payload are converted and written to MPP."""
+        wrapper = MagicMock()
+        target = MagicMock()
+        pred = MagicMock()
+        pred.ID = 12
+
+        def _find_or_none(name):
+            if name == "25033_02_saldatura":
+                return target
+            if name == "25033_01_prep":
+                return pred
+            return None
+
+        wrapper._find_task_or_none.side_effect = _find_or_none
+        payload = {
+            "commessa": "25033",
+            "item": 2,
+            "activity": "saldatura",
+            "predecessors": "25033-1-prep",
+        }
+        _apply_update_task(wrapper, payload)
+        kwargs = wrapper.update_task.call_args[1]
+        self.assertEqual(kwargs["predecessors"], "12")
+
+    def test_update_clears_predecessors_when_empty(self):
+        """Empty predecessors clear existing links in MS Project."""
+        wrapper = self._wrapper_with("25033_01_qualifica")
+        payload = {
+            "commessa": "25033",
+            "item": 1,
+            "activity": "qualifica",
+            "predecessors": "",
+        }
+        _apply_update_task(wrapper, payload)
+        kwargs = wrapper.update_task.call_args[1]
+        self.assertEqual(kwargs["predecessors"], "")
+
+    def test_update_omits_predecessors_when_not_in_payload(self):
+        """Predecessors are left unchanged when the key is absent."""
+        wrapper = self._wrapper_with("25033_01_qualifica")
+        payload = {
+            "commessa": "25033",
+            "item": 1,
+            "activity": "qualifica",
+        }
+        _apply_update_task(wrapper, payload)
+        kwargs = wrapper.update_task.call_args[1]
+        self.assertNotIn("predecessors", kwargs)
 
 
 class ApplyDeleteTaskTests(TestCase):

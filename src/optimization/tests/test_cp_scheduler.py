@@ -161,3 +161,94 @@ def test_head_model_requires_testa_and_generatore():
     outcome = solve(_problem([make_job("j1", [a1], due_date=FAR_DUE)], resources))
     assert outcome.feasible
     assert set(outcome.activity_resources["a1"]) == {"h1", "g1"}
+
+
+def test_predecessor_pair_prefers_same_resources():
+    """Linked activities reuse the same compatible testa/generatore when possible."""
+    a1 = make_activity("a1", "j1", 1, head_model="TP60", predecessors=[])
+    a2 = make_activity("a2", "j1", 2, head_model="TP60", predecessors=["a1"])
+    resources = [
+        make_resource("h1", ResourceType.TESTA, model="TP60"),
+        make_resource("h2", ResourceType.TESTA, model="TP60"),
+        make_resource("g1", ResourceType.GENERATORE, model="P6"),
+        make_resource("g2", ResourceType.GENERATORE, model="P6"),
+    ]
+    outcome = solve(_problem([make_job("j1", [a1, a2], due_date=FAR_DUE)], resources))
+    assert outcome.feasible
+    assert set(outcome.activity_resources["a1"]) == set(
+        outcome.activity_resources["a2"]
+    )
+
+
+def test_continuity_skipped_when_resources_incompatible():
+    """Different bore ranges → no shared candidates; schedule stays feasible."""
+    a1 = make_activity(
+        "a1",
+        "j1",
+        1,
+        bore_min=10,
+        bore_max=12,
+        predecessors=[],
+    )
+    a2 = make_activity(
+        "a2",
+        "j1",
+        2,
+        bore_min=18,
+        bore_max=20,
+        predecessors=["a1"],
+    )
+    resources = [
+        make_resource("m1", ResourceType.MANDRINO, bore=11),
+        make_resource("m2", ResourceType.MANDRINO, bore=19),
+        make_resource("t1", ResourceType.TASTATORE, bore=11),
+        make_resource("t2", ResourceType.TASTATORE, bore=19),
+    ]
+    outcome = solve(_problem([make_job("j1", [a1, a2], due_date=FAR_DUE)], resources))
+    assert outcome.feasible
+    assert set(outcome.activity_resources["a1"]) == {"m1", "t1"}
+    assert set(outcome.activity_resources["a2"]) == {"m2", "t2"}
+
+
+def test_continuity_does_not_worsen_penalty():
+    """Phase A dominates: continuity must not force waiting that increases penalty."""
+    from src.optimization.data_model import ResourceReservation
+
+    a1 = make_activity(
+        "a1", "j1", 1, duration_days=1, head_model="TP60", predecessors=[]
+    )
+    a2 = make_activity(
+        "a2", "j1", 2, duration_days=1, head_model="TP60", predecessors=["a1"]
+    )
+    # Tight due date: a1 then a2 must finish within the first two working days.
+    job = make_job("j1", [a1, a2], due_date=date(2026, 1, 2), penalty_per_week=100)
+    resources = [
+        make_resource("h1", ResourceType.TESTA, model="TP60"),
+        make_resource("h2", ResourceType.TESTA, model="TP60"),
+        make_resource("g1", ResourceType.GENERATORE, model="P6"),
+    ]
+    # After day 0, h1 is blocked for a long window. Continuity would prefer
+    # keeping h1 on a2, but that would delay a2 and create penalty. Phase A
+    # must keep a2 on h2 immediately after a1.
+    reservations = [
+        ResourceReservation(
+            resource_id="h1",
+            start_index=1,
+            duration_days=20,
+            activity_id="external",
+        )
+    ]
+    problem = SchedulingProblem(
+        jobs=[job],
+        resources=resources,
+        horizon_start=date(2026, 1, 1),
+        resource_reservations=reservations,
+    )
+    outcome = solve(problem)
+    assert outcome.feasible
+    assert outcome.total_penalty_cents == 0
+    # Continuity prefers sharing h2 (h1 is blocked after day 0), without delay.
+    assert "h2" in outcome.activity_resources["a1"]
+    assert "h2" in outcome.activity_resources["a2"]
+    assert outcome.activity_starts["a1"] == 0
+    assert outcome.activity_starts["a2"] == 1

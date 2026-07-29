@@ -196,6 +196,29 @@ class BuildSchedulingProblemTest(TestCase):
         problem = build_scheduling_problem([a1.job_id])
         self.assertEqual(problem.jobs[0].activities[0].predecessors, [])
 
+    def test_head_model_from_configurazione_testa(self) -> None:
+        """head_model is kept only when present in ConfigurazioneTesta."""
+        from ui.models import ConfigurazioneTesta
+
+        ConfigurazioneTesta.objects.create(
+            modello_testa="TS2000",
+            min_mandrini=0,
+            min_tastatori=0,
+            min_maschere=0,
+            min_generatori=1,
+        )
+        configured = _make_activity("T001", 1, "work")
+        configured.modello_testa = "TS2000"
+        configured.save()
+        unknown = _make_activity("T001", 2, "work")
+        unknown.modello_testa = "UNKNOWN_HEAD"
+        unknown.save()
+
+        problem = build_scheduling_problem([configured.job_id])
+        by_id = {a.activity_id: a for a in problem.jobs[0].activities}
+        self.assertEqual(by_id[configured.activity_id].head_model, "TS2000")
+        self.assertIsNone(by_id[unknown.activity_id].head_model)
+
     def test_gantt_after_excludes_fixed_activity(self) -> None:
         from src.optimization.output_model import (
             ActivitySchedule,
@@ -357,6 +380,7 @@ class OptimizationWizardTest(TestCase):
         resp = self.client.get(reverse("ottimizzazione"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Seleziona tutte")
+        self.assertContains(resp, "Includi spiegazione")
         self.assertContains(resp, "ott-filter-btn")
         self.assertContains(resp, "ott-job-list")
         self.assertContains(resp, "Vincoli")
@@ -405,12 +429,13 @@ class OptimizationWizardTest(TestCase):
         "ui.views_ottimizzazione.generate_optimization_explanation",
         return_value=_MOCK_EXPLANATION,
     )
-    def test_run_solve_redirects_to_results(self, _mock_explain) -> None:
+    def test_run_solve_redirects_to_results(self, mock_explain) -> None:
         with override_settings(SOLVER_TIME_LIMIT="5"):
             horizon = (localdate() + timedelta(days=1)).isoformat()
             payload = {
                 **self.draft,
                 "horizon_start": horizon,
+                "include_explanation": True,
             }
             resp = self.client.post(
                 reverse("ottimizzazione_run"),
@@ -425,19 +450,45 @@ class OptimizationWizardTest(TestCase):
             self.client.session.get(SESSION_EXPLANATION_KEY),
             _MOCK_EXPLANATION,
         )
+        mock_explain.assert_called_once()
+
+    @patch("ui.views_ottimizzazione.generate_optimization_explanation")
+    def test_run_skips_explanation_when_flag_off(self, mock_explain) -> None:
+        with override_settings(SOLVER_TIME_LIMIT="5"):
+            horizon = (localdate() + timedelta(days=1)).isoformat()
+            payload = {
+                **self.draft,
+                "horizon_start": horizon,
+                "include_explanation": False,
+            }
+            resp = self.client.post(
+                reverse("ottimizzazione_run"),
+                data={"draft_json": json.dumps(payload)},
+            )
+        if resp.status_code == 302 and resp.url == reverse("ottimizzazione"):
+            self.skipTest("Solver did not find a feasible solution in test env.")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, reverse("ottimizzazione_risultati"))
+        self.assertIn(SESSION_RESULT_KEY, self.client.session)
+        self.assertNotIn(SESSION_EXPLANATION_KEY, self.client.session)
+        mock_explain.assert_not_called()
+
+        results = self.client.get(reverse("ottimizzazione_risultati"))
+        self.assertEqual(results.status_code, 200)
+        self.assertNotContains(results, 'data-ott-view="spiegazione"')
 
     def test_results_page_requires_session(self) -> None:
         resp = self.client.get(reverse("ottimizzazione_risultati"))
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp.url, reverse("ottimizzazione"))
 
-    def test_results_page_requires_explanation(self) -> None:
+    def test_results_page_allows_missing_explanation(self) -> None:
         session = self.client.session
         session[SESSION_RESULT_KEY] = {"tasks_before": [], "tasks_after": []}
         session.save()
         resp = self.client.get(reverse("ottimizzazione_risultati"))
-        self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp.url, reverse("ottimizzazione"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'data-ott-view="spiegazione"')
 
     def test_stale_draft_job_ids_removed_on_page_load(self) -> None:
         session = self.client.session
@@ -468,11 +519,13 @@ class OptimizationWizardTest(TestCase):
         "ui.views_ottimizzazione.generate_optimization_explanation",
         return_value=_MOCK_EXPLANATION,
     )
-    def test_api_solve_still_works(self, _mock_explain) -> None:
+    def test_api_solve_still_works(self, mock_explain) -> None:
         with override_settings(SOLVER_TIME_LIMIT="5"):
             resp = self.client.post(
                 reverse("api_ottimizzazione_solve"),
-                data=json.dumps({"job_ids": [self.job_id]}),
+                data=json.dumps(
+                    {"job_ids": [self.job_id], "include_explanation": True}
+                ),
                 content_type="application/json",
             )
         self.assertEqual(resp.status_code, 200)
@@ -480,3 +533,8 @@ class OptimizationWizardTest(TestCase):
         self.assertTrue(data["ok"])
         if data.get("feasible"):
             self.assertIn("redirect_url", data)
+            mock_explain.assert_called_once()
+            self.assertEqual(
+                self.client.session.get(SESSION_EXPLANATION_KEY),
+                _MOCK_EXPLANATION,
+            )

@@ -11,7 +11,9 @@
       <div class="ott-res-view-switch toggle-group" role="group" aria-label="Visualizzazione risultato">
         <button type="button" class="toggle-btn active" data-ott-view="gantt" aria-pressed="true">Gantt</button>
         <button type="button" class="toggle-btn" data-ott-view="table" aria-pressed="false">Tabella</button>
+        {% if include_explanation %}
         <button type="button" class="toggle-btn" data-ott-view="spiegazione" aria-pressed="false">Spiegazione</button>
+        {% endif %}
       </div>
       <button type="button" id="ott-res-accept" class="btn ott-res-accept-btn">Accetta</button>
     </div>
@@ -122,6 +124,7 @@
     </div>
   </div>
 
+  {% if include_explanation %}
   <div class="ott-res-view-pane" id="ott-res-spiegazione-view" hidden aria-label="Spiegazione">
     <div class="ott-res-spiegazione">
       <div class="ott-res-spiegazione-card">
@@ -129,6 +132,7 @@
       </div>
     </div>
   </div>
+  {% endif %}
   </div>
 
 </main>
@@ -419,7 +423,7 @@
   const viewBtns = document.querySelectorAll('[data-ott-view]');
   const spiegazioneBody = document.getElementById('ott-res-spiegazione-body');
 
-  if (spiegazioneBody) {
+  if (spiegazioneBody && EXPLANATION) {
     spiegazioneBody.innerHTML = formatExplanationHtml(EXPLANATION);
   }
 

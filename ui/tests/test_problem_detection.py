@@ -132,6 +132,199 @@ class DetectShortfallProblemsTest(TestCase):
             ).exists()
         )
 
+    def test_full_selection_auto_resolves_stale_shortfall(self) -> None:
+        detect_and_save_problems(
+            self.att,
+            {
+                "teste": ["T1"],
+                "mandrini": ["M1"],
+                "tastatori": ["TA1"],
+                "maschere": ["MA1", "MA2"],
+                "generatori": ["G1"],
+            },
+        )
+        self.assertEqual(
+            ProblemaAttivita.objects.filter(
+                attivita=self.att, tipo=ProblemaAttivita.TIPO_ACQUISTO, risolto=False
+            ).count(),
+            1,
+        )
+
+        detect_and_save_problems(
+            self.att,
+            {
+                "teste": ["T1"],
+                "mandrini": ["M1", "M2"],
+                "tastatori": ["TA1"],
+                "maschere": ["MA1", "MA2"],
+                "generatori": ["G1"],
+            },
+        )
+        open_acq = ProblemaAttivita.objects.filter(
+            attivita=self.att, tipo=ProblemaAttivita.TIPO_ACQUISTO, risolto=False
+        )
+        self.assertFalse(open_acq.exists())
+        closed = ProblemaAttivita.objects.get(
+            attivita=self.att, tipo=ProblemaAttivita.TIPO_ACQUISTO, risolto=True
+        )
+        self.assertIn("non piu verificata", closed.note_risoluzione.lower())
+
+    def test_shortfall_description_updates_when_selection_changes(self) -> None:
+        detect_and_save_problems(
+            self.att,
+            {
+                "teste": ["T1"],
+                "mandrini": [],
+                "tastatori": ["TA1"],
+                "maschere": ["MA1", "MA2"],
+                "generatori": ["G1"],
+            },
+        )
+        problema = ProblemaAttivita.objects.get(
+            attivita=self.att, risorsa_tipo="mandrino", risolto=False
+        )
+        self.assertIn("0/2", problema.descrizione)
+
+        detect_and_save_problems(
+            self.att,
+            {
+                "teste": ["T1"],
+                "mandrini": ["M1"],
+                "tastatori": ["TA1"],
+                "maschere": ["MA1", "MA2"],
+                "generatori": ["G1"],
+            },
+        )
+        problema.refresh_from_db()
+        self.assertFalse(problema.risolto)
+        self.assertIn("1/2", problema.descrizione)
+
+    def test_shortfall_reappears_after_auto_resolve(self) -> None:
+        full = {
+            "teste": ["T1"],
+            "mandrini": ["M1", "M2"],
+            "tastatori": ["TA1"],
+            "maschere": ["MA1", "MA2"],
+            "generatori": ["G1"],
+        }
+        short = {
+            "teste": ["T1"],
+            "mandrini": ["M1"],
+            "tastatori": ["TA1"],
+            "maschere": ["MA1", "MA2"],
+            "generatori": ["G1"],
+        }
+        detect_and_save_problems(self.att, short)
+        detect_and_save_problems(self.att, full)
+        created = detect_and_save_problems(self.att, short)
+        self.assertEqual(created, 1)
+        self.assertEqual(
+            ProblemaAttivita.objects.filter(
+                attivita=self.att,
+                tipo=ProblemaAttivita.TIPO_ACQUISTO,
+                risolto=False,
+            ).count(),
+            1,
+        )
+
+
+class DetectSpostamentoProblemsTest(TestCase):
+    """detect_and_save_problems flags and clears wrong-plant assignments."""
+
+    def setUp(self) -> None:
+        from ui.models import TestaItem
+
+        TestaItem.objects.create(uid="T1", model="IRIS", plant="Osio")
+        self.att = Attivita.objects.create(
+            commessa="C001",
+            item=1,
+            activity="Saldatura",
+            modello_testa="IRIS",
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 10),
+        )
+        self.risorse = {
+            "teste": ["T1"],
+            "mandrini": ["M1"],
+            "tastatori": ["TA1"],
+            "maschere": ["MA1"],
+            "generatori": ["G1"],
+        }
+
+    def test_wrong_plant_creates_spostamento(self) -> None:
+        count = detect_and_save_problems(self.att, self.risorse)
+        self.assertEqual(count, 1)
+        problema = ProblemaAttivita.objects.get(
+            attivita=self.att, tipo=ProblemaAttivita.TIPO_SPOSTAMENTO
+        )
+        self.assertEqual(problema.risorsa_uid, "T1")
+        self.assertIn("Osio", problema.descrizione)
+
+    def test_aligned_plant_auto_resolves_spostamento(self) -> None:
+        detect_and_save_problems(self.att, self.risorse)
+        self.att.stabilimento = "Osio"
+        self.att.save(update_fields=["stabilimento"])
+        detect_and_save_problems(self.att, self.risorse)
+        self.assertFalse(
+            ProblemaAttivita.objects.filter(
+                attivita=self.att,
+                tipo=ProblemaAttivita.TIPO_SPOSTAMENTO,
+                risolto=False,
+            ).exists()
+        )
+
+
+class DetectForAllActivitiesRefreshTest(TestCase):
+    """detect_for_all_activities reconciles stale open notes from DB resources."""
+
+    def setUp(self) -> None:
+        ConfigurazioneTesta.objects.create(
+            modello_testa="IRIS",
+            min_mandrini=2,
+            min_maschere=2,
+        )
+        self.att = Attivita.objects.create(
+            commessa="C001",
+            item=1,
+            activity="Saldatura",
+            modello_testa="IRIS",
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 10),
+        )
+        for tipo, uid in (
+            ("testa", "T1"),
+            ("mandrino", "M1"),
+            ("mandrino", "M2"),
+            ("tastatore", "TA1"),
+            ("maschera", "MA1"),
+            ("maschera", "MA2"),
+            ("generatore", "G1"),
+        ):
+            RisorsaAttivita.objects.create(
+                attivita=self.att, tipo=tipo, risorsa_id=uid
+            )
+        ProblemaAttivita.objects.create(
+            attivita=self.att,
+            tipo=ProblemaAttivita.TIPO_ACQUISTO,
+            risorsa_tipo="mandrino",
+            risorsa_uid="",
+            descrizione="stale shortfall",
+        )
+
+    def test_detect_for_all_closes_stale_acquisto(self) -> None:
+        from ui.services.problem_detection import detect_for_all_activities
+
+        detect_for_all_activities()
+        self.assertFalse(
+            ProblemaAttivita.objects.filter(
+                attivita=self.att,
+                tipo=ProblemaAttivita.TIPO_ACQUISTO,
+                risolto=False,
+            ).exists()
+        )
+
 
 class DetectOverlapProblemsTest(TestCase):
     """detect_overlap_problems flags successors sharing occupied resources."""

@@ -327,9 +327,10 @@ def _build_jobs(
             shift = timedelta(days=clone_index * clone_spacing_days)
             activities: list[Activity] = []
             for order, row in enumerate(sorted(rows, key=lambda r: (r.item, r.id)), 1):
-                quantities = quantity_by_head_model.get(
-                    row.modello_testa or "", {}
-                ).copy()
+                raw_head = row.modello_testa or ""
+                quantities = quantity_by_head_model.get(raw_head, {}).copy()
+                # Only models present in ConfigurazioneTesta are used as head_model.
+                head_model = raw_head if raw_head in quantity_by_head_model else None
                 activities.append(
                     Activity(
                         activity_id=_activity_id(row, clone_index),
@@ -350,7 +351,7 @@ def _build_jobs(
                         bore_mid=row.bore_mid,
                         bore_max=row.bore_max,
                         tube_pitch=row.tube_pitch,
-                        head_model=row.modello_testa,
+                        head_model=head_model,
                         required_quantities=quantities,
                     )
                 )

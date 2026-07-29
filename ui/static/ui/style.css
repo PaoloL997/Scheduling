@@ -1134,6 +1134,8 @@ body.light .pian-activity-row:hover {
 .status-pill--completata             { background: var(--green); }
 .status-pill--in_ritardo,
 .status-pill--in_lavorazione_ritardo { background: var(--red); }
+.status-pill--rischio_penale         { background: hsl(18, 90%, 48%); }
+.status-pill--in_tempo               { background: var(--green); }
 .status-pill--in_lavorazione,
 .status-pill--pianificata,
 .status-pill--da_iniziare            { background: var(--text-subtle); }
@@ -4056,6 +4058,13 @@ body.light .auth-error { background: #fef2f2; border-color: #fecaca; color: #b91
 }
 .ott-job-count-sel { color: var(--accent); font-weight: 600; }
 
+.ott-job-list-bar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .ott-job-select-all {
   display: inline-flex;
   align-items: center;

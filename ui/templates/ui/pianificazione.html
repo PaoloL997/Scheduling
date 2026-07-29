@@ -186,20 +186,20 @@
 <div id="pian-filter-panel" class="ott-wiz-filter-panel" role="dialog" aria-label="Filtra commesse per stato" hidden>
   <p class="ott-wiz-filter-title">Filtra per stato</p>
   <label class="ott-wiz-filter-check">
+    <input type="checkbox" id="pian-filter-rischio_penale" value="rischio_penale">
+    <span>Rischio penale</span>
+  </label>
+  <label class="ott-wiz-filter-check">
     <input type="checkbox" id="pian-filter-in_ritardo" value="in_ritardo">
     <span>In ritardo</span>
   </label>
   <label class="ott-wiz-filter-check">
-    <input type="checkbox" id="pian-filter-in_lavorazione" value="in_lavorazione">
-    <span>In corso</span>
+    <input type="checkbox" id="pian-filter-in_tempo" value="in_tempo">
+    <span>In tempo</span>
   </label>
   <label class="ott-wiz-filter-check">
     <input type="checkbox" id="pian-filter-pianificata" value="pianificata">
     <span>Pianificate</span>
-  </label>
-  <label class="ott-wiz-filter-check">
-    <input type="checkbox" id="pian-filter-completata" value="completata">
-    <span>Completate</span>
   </label>
   <div class="ott-wiz-filter-actions">
     <button type="button" id="pian-filter-clear" class="btn btn-ghost">Azzera</button>
@@ -286,7 +286,10 @@
     <div class="wiz-grid-3 s0-fields">
       <div class="wiz-field">
         <label>Data consegna <span class="req">*</span></label>
-        <input id="s0-deadline" type="date" oninput="if(WIZ.newJob) WIZ.newJob.delivery_date = this.value">
+        <input id="s0-deadline" type="date"
+               oninput="_s0SyncDeadline(this)"
+               onchange="_s0SyncDeadline(this)"
+               onblur="_s0SyncDeadline(this)">
       </div>
       <div class="wiz-field">
         <label>Costo totale (€)</label>
@@ -302,8 +305,10 @@
     </div>
     <div id="s0-error" class="wiz-error" style="display:none;"></div>
     <div class="wiz-footer">
-      <button class="wiz-btn-back" onclick="step0Back()">← Indietro</button>
-      <button class="wiz-btn-next" onclick="step0Next()">Avanti</button>
+      <button type="button" class="wiz-btn-back" onclick="step0Back()">← Indietro</button>
+      <button type="button" class="wiz-btn-next"
+              onmousedown="document.getElementById('s0-deadline')?.blur()"
+              onclick="step0Next()">Avanti</button>
     </div>
   </div>
 
@@ -931,9 +936,64 @@ function _pianActivityState(row) {
   return 'non_pianificata';
 }
 
+function _pianParseIsoDay(raw) {
+  const s = String(raw || '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function _pianIsWorkingDay(day) {
+  const wd = day.getDay();
+  return wd >= 1 && wd <= 5;
+}
+
+function _countWorkingDaysInclusive(start, end) {
+  if (!start || !end) return 0;
+  if (end < start) return 1;
+  let working = 0;
+  const cur = new Date(start.getTime());
+  const last = new Date(end.getTime());
+  while (cur <= last) {
+    if (_pianIsWorkingDay(cur)) working += 1;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return Math.max(1, working);
+}
+
+function _activityWorkProgress(row) {
+  const planStart = _pianParseIsoDay(row.dataset.start);
+  const planFinish = _pianParseIsoDay(row.dataset.finish);
+  if (!planStart || !planFinish) return { done: 0, total: 0 };
+  const total = _countWorkingDaysInclusive(planStart, planFinish);
+  if (_pianParseIsoDay(row.dataset.actualFinish)) return { done: total, total };
+  const actualStart = _pianParseIsoDay(row.dataset.actualStart);
+  if (!actualStart) return { done: 0, total };
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  if (today < actualStart) return { done: 0, total };
+  const worked = _countWorkingDaysInclusive(actualStart, today);
+  return { done: Math.min(total, worked), total };
+}
+
 function _pianJobStats(commessa) {
   const rows = _pianRowsForCommessa(commessa);
-  const stats = { total: rows.length, completed: 0, openProblems: 0, late: 0, working: 0, planned: 0 };
+  const group = _pianGroupByCommessa(commessa);
+  const card = group ? _pianCardFromGroup(group) : null;
+  const deadline = _pianParseIsoDay(card ? (card.dataset.deliveryDate || '') : '');
+  const stats = {
+    total: rows.length,
+    completed: 0,
+    openProblems: 0,
+    late: 0,
+    working: 0,
+    planned: 0,
+    started: 0,
+    penaltyRisk: false,
+    workDone: 0,
+    workTotal: 0,
+    progressPct: 0,
+  };
   rows.forEach(row => {
     const wc = parseInt(row.dataset.warningCount || '0', 10) || 0;
     const state = _pianActivityState(row);
@@ -942,24 +1002,45 @@ function _pianJobStats(commessa) {
     if (state === 'in_ritardo') stats.late += 1;
     if (state === 'in_lavorazione') stats.working += 1;
     if (state === 'pianificata') stats.planned += 1;
+    if (row.dataset.actualStart) stats.started += 1;
+    const progress = _activityWorkProgress(row);
+    stats.workDone += progress.done;
+    stats.workTotal += progress.total;
+
+    if (deadline) {
+      const planS = _pianParseIsoDay(row.dataset.start);
+      const planF = _pianParseIsoDay(row.dataset.finish);
+      const actS = _pianParseIsoDay(row.dataset.actualStart);
+      const actF = _pianParseIsoDay(row.dataset.actualFinish);
+      if (planS && planF) {
+        const durMs = planF - planS;
+        let end = null;
+        if (actF) end = actF;
+        else if (actS) end = new Date(actS.getTime() + durMs);
+        if (end && end > deadline) stats.penaltyRisk = true;
+      }
+    }
   });
+  stats.progressPct = stats.workTotal
+    ? Math.round(stats.workDone / stats.workTotal * 100)
+    : 0;
   return stats;
 }
 
 function _pianAggregateStatus(stats) {
   if (!stats.total) return { key: 'non_pianificata', label: 'NON PIANIFICATA' };
+  if (stats.penaltyRisk) return { key: 'rischio_penale', label: 'RISCHIO PENALE' };
   if (stats.late > 0) return { key: 'in_ritardo', label: 'IN RITARDO' };
-  if (stats.working > 0) return { key: 'in_lavorazione', label: 'IN LAVORAZIONE' };
-  if (stats.completed === stats.total) return { key: 'completata', label: 'COMPLETATA' };
+  if (stats.started > 0) return { key: 'in_tempo', label: 'IN TEMPO' };
   return { key: 'pianificata', label: 'PIANIFICATA' };
 }
 
 const _PIAN_STATUS_SORT_ORDER = {
-  in_ritardo: 0,
-  in_lavorazione: 1,
-  pianificata: 2,
-  non_pianificata: 3,
-  completata: 4,
+  rischio_penale: 0,
+  in_ritardo: 1,
+  in_tempo: 2,
+  pianificata: 3,
+  non_pianificata: 4,
 };
 
 function _pianGroupStatusKey(group) {
@@ -968,14 +1049,45 @@ function _pianGroupStatusKey(group) {
   return _pianAggregateStatus(stats).key;
 }
 
+function _pianEarliestStartMs(commessa) {
+  let min = Infinity;
+  _pianRowsForCommessa(commessa).forEach(row => {
+    const d = _pianParseIsoDay(row.dataset.start) || _pianParseIsoDay(row.dataset.actualStart);
+    if (d) {
+      const ms = d.getTime();
+      if (ms < min) min = ms;
+    }
+  });
+  return min;
+}
+
+function _pianRowStartMs(row) {
+  const d = _pianParseIsoDay(row.dataset.start) || _pianParseIsoDay(row.dataset.actualStart);
+  return d ? d.getTime() : Number.POSITIVE_INFINITY;
+}
+
+function sortPianActivitiesInHost(host) {
+  if (!host) return;
+  const head = host.querySelector('.pian-activity-table-head');
+  const rows = Array.from(host.querySelectorAll('.pian-activity-row'));
+  rows.sort((a, b) => {
+    const startA = _pianRowStartMs(a);
+    const startB = _pianRowStartMs(b);
+    if (startA !== startB) return startA - startB;
+    return String(a.dataset.activityId || '').localeCompare(String(b.dataset.activityId || ''), 'it');
+  });
+  rows.forEach(row => host.appendChild(row));
+  if (head) host.insertBefore(head, host.firstChild);
+}
+
 function sortPianGroupList() {
   const list = document.getElementById('pian-group-list');
   if (!list) return;
   const groups = Array.from(list.querySelectorAll('.pian-group'));
   groups.sort((a, b) => {
-    const rankA = _PIAN_STATUS_SORT_ORDER[_pianGroupStatusKey(a)] ?? 99;
-    const rankB = _PIAN_STATUS_SORT_ORDER[_pianGroupStatusKey(b)] ?? 99;
-    if (rankA !== rankB) return rankA - rankB;
+    const startA = _pianEarliestStartMs(a.dataset.commessa || '');
+    const startB = _pianEarliestStartMs(b.dataset.commessa || '');
+    if (startA !== startB) return startA - startB;
     const nameA = (a.dataset.commessa || '').toLowerCase();
     const nameB = (b.dataset.commessa || '').toLowerCase();
     return nameA.localeCompare(nameB, 'it');
@@ -1001,7 +1113,7 @@ function _refreshPianJobCard(group) {
   const progressFills = group.querySelectorAll('[data-job-progress-fill]');
   const progressBars = group.querySelectorAll('.pian-progress[role="progressbar"]');
   const progressPcts = group.querySelectorAll('[data-job-progress-pct]');
-  const pct = stats.total ? Math.round(stats.completed / stats.total * 100) : 0;
+  const pct = stats.progressPct;
   totalEls.forEach(el => { el.textContent = stats.total; });
   alertsEls.forEach(el => { el.textContent = stats.openProblems; });
   workingEls.forEach(el => { el.textContent = stats.working; });
@@ -1309,18 +1421,67 @@ function _s1OpenCommessaStep(commessa) {
   wizGoTo(0);
 }
 
+function _normalizeIsoDate(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const d = new Date(`${s}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return '';
+    if (d.getFullYear() !== Number(s.slice(0, 4))
+        || (d.getMonth() + 1) !== Number(s.slice(5, 7))
+        || d.getDate() !== Number(s.slice(8, 10))) return '';
+    return s;
+  }
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (!m) return '';
+  const dd = Number(m[1]), mm = Number(m[2]), yyyy = Number(m[3]);
+  const d = new Date(yyyy, mm - 1, dd);
+  if (Number.isNaN(d.getTime()) || d.getFullYear() !== yyyy
+      || (d.getMonth() + 1) !== mm || d.getDate() !== dd) return '';
+  return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+}
+
+function _s0SyncDeadline(el) {
+  if (!WIZ.newJob || !el) return;
+  // While the user is still typing an incomplete date, browsers expose an empty
+  // value (and often validity.badInput). Do not wipe a previously committed date.
+  if (el.type === 'date' && el.validity && el.validity.badInput) return;
+  const iso = _normalizeIsoDate(el.value);
+  if (iso) WIZ.newJob.delivery_date = iso;
+}
+
+function _s0ReadDeadline() {
+  const dl = document.getElementById('s0-deadline');
+  if (dl && document.activeElement === dl) dl.blur();
+  _s0SyncDeadline(dl);
+  const fromInput = _normalizeIsoDate(dl && dl.value);
+  if (fromInput) {
+    if (WIZ.newJob) WIZ.newJob.delivery_date = fromInput;
+    if (dl && dl.type === 'date') dl.value = fromInput;
+    return fromInput;
+  }
+  return (WIZ.newJob && WIZ.newJob.delivery_date) || '';
+}
+
 function step0Next() {
   const dl = document.getElementById('s0-deadline');
   const errEl = document.getElementById('s0-error');
-  if (!dl || !dl.value) {
-    if (errEl) { errEl.textContent = 'Data di consegna obbligatoria.'; errEl.style.display = ''; }
+  const iso = _s0ReadDeadline();
+  if (!iso) {
+    const badInput = dl && dl.validity && dl.validity.badInput;
+    if (errEl) {
+      errEl.textContent = badInput
+        ? 'Data non valida. Completa giorno, mese e anno oppure usa il calendario.'
+        : 'Data di consegna obbligatoria.';
+      errEl.style.display = '';
+    }
     if (dl) { dl.style.borderColor = '#ef4444'; dl.focus(); }
     return;
   }
   if (errEl) errEl.style.display = 'none';
   if (dl) dl.style.borderColor = '';
   if (WIZ.newJob) {
-    WIZ.newJob.delivery_date = dl.value;
+    WIZ.newJob.delivery_date = iso;
     WIZ.newJob.total_cost    = (document.getElementById('s0-cost')    || {}).value || '';
     WIZ.newJob.penalty       = (document.getElementById('s0-penalty') || {}).value || '';
   }
@@ -1329,10 +1490,9 @@ function step0Next() {
 
 function step0Back() {
   if (WIZ.newJob) {
-    const dl = document.getElementById('s0-deadline');
+    _s0ReadDeadline();
     const co = document.getElementById('s0-cost');
     const pe = document.getElementById('s0-penalty');
-    if (dl) WIZ.newJob.delivery_date = dl.value;
     if (co) WIZ.newJob.total_cost    = co.value;
     if (pe) WIZ.newJob.penalty       = pe.value;
   }
@@ -1351,14 +1511,16 @@ function _s1PredecessorsHtml(items) {
       <div class="s1-predecessor-list" role="radiogroup" aria-label="Predecessor attività">
         <label class="s1-predecessor-item is-none">
           <input type="radio" name="s1-predecessor" value="" checked onchange="_s1SelectPredecessor(this.value)">
-          <span><strong>Nessuno</strong><small>L'attività non dipende da un'altra attività dello stesso item</small></span>
+          <span><strong>Nessuno</strong><small>L'attività non dipende da un'altra della stessa commessa</small></span>
         </label>
         ${items.map(a => {
           const label = a.activity || a.activity_id;
+          const itemLbl = a.item != null && a.item !== '' ? `item ${a.item}` : '';
           const dates = [a.start, a.finish].filter(Boolean).join(' → ');
+          const meta = [itemLbl, a.activity_id, dates].filter(Boolean).join(' · ');
           return `<label class="s1-predecessor-item">
             <input type="radio" name="s1-predecessor" value="${esc(a.activity_id)}" onchange="_s1SelectPredecessor(this.value)">
-            <span><strong>${esc(label)}</strong><small>${esc(a.activity_id)}${dates ? ' · ' + esc(dates) : ''}</small></span>
+            <span><strong>${esc(label)}</strong><small>${esc(meta)}</small></span>
           </label>`;
         }).join('')}
       </div>
@@ -1616,14 +1778,16 @@ function _renderPredecessorStep() {
     <div class="s1-predecessor-list" role="radiogroup" aria-label="Predecessore attività">
       <label class="s1-predecessor-item is-none">
         <input type="radio" name="s2-pred" value="" checked onchange="_s2SelectPredecessor(this.value)">
-        <span><strong>Nessuno</strong><small>L'attività non dipende da un'altra dello stesso item</small></span>
+        <span><strong>Nessuno</strong><small>L'attività non dipende da un'altra della stessa commessa</small></span>
       </label>
       ${items.map(a => {
         const label = a.activity || a.activity_id;
+        const itemLbl = a.item != null && a.item !== '' ? `item ${a.item}` : '';
         const dates = [a.start, a.finish].filter(Boolean).join(' → ');
+        const meta = [itemLbl, a.activity_id, dates].filter(Boolean).join(' · ');
         return `<label class="s1-predecessor-item">
           <input type="radio" name="s2-pred" value="${esc(a.activity_id)}" onchange="_s2SelectPredecessor(this.value)">
-          <span><strong>${esc(label)}</strong><small>${esc(a.activity_id)}${dates ? ' · ' + esc(dates) : ''}</small></span>
+          <span><strong>${esc(label)}</strong><small>${esc(meta)}</small></span>
         </label>`;
       }).join('')}
     </div>`;
@@ -2529,6 +2693,10 @@ async function step6Save() {
   document.getElementById('s6-error').style.display = 'none';
   btn.disabled = true;
   btn.textContent = 'Salvataggio…';
+  if (WIZ.newJob) {
+    const iso = _s0ReadDeadline();
+    if (iso) WIZ.newJob.delivery_date = iso;
+  }
   const payload = {
     stabilimento:  WIZ.stabilimento,
     responsabile:  WIZ.responsabile,
@@ -2741,7 +2909,10 @@ function _wizAppendRow(ormId, warningCount, noteCount) {
   const placeholder = host ? host.querySelector('.pian-no-activities') : null;
   if (placeholder) placeholder.remove();
 
-  if (host) host.prepend(div);
+  if (host) {
+    host.appendChild(div);
+    sortPianActivitiesInHost(host);
+  }
   refreshPianSummary();
   sortPianGroupList();
   filterPianGroups(document.getElementById('pian-search').value);
@@ -2798,7 +2969,7 @@ function _closePianFilterPanel() {
 }
 
 function _readPianFilterCheckboxes() {
-  const keys = ['in_ritardo', 'in_lavorazione', 'pianificata', 'completata'];
+  const keys = ['rischio_penale', 'in_ritardo', 'in_tempo', 'pianificata'];
   const selected = new Set();
   keys.forEach(key => {
     const cb = document.getElementById('pian-filter-' + key);
@@ -2808,7 +2979,7 @@ function _readPianFilterCheckboxes() {
 }
 
 function _syncPianFilterCheckboxes() {
-  ['in_ritardo', 'in_lavorazione', 'pianificata', 'completata'].forEach(key => {
+  ['rischio_penale', 'in_ritardo', 'in_tempo', 'pianificata'].forEach(key => {
     const cb = document.getElementById('pian-filter-' + key);
     if (cb) cb.checked = _pianStatusFilter.has(key);
   });
@@ -3294,8 +3465,10 @@ async function enterEditMode() {
         .concat(activities.map(a => {
           const sel = a.activity_id === currentPred ? ' selected' : '';
           const dates = [a.start, a.finish].filter(Boolean).join(' → ');
+          const itemLbl = a.item != null && a.item !== '' ? `item ${a.item}` : '';
           const lbl = a.activity || a.activity_id;
-          return `<option value="${esc(a.activity_id)}"${sel}>${esc(lbl)}${dates ? ' · ' + esc(dates) : ''}</option>`;
+          const meta = [itemLbl, dates].filter(Boolean).join(' · ');
+          return `<option value="${esc(a.activity_id)}"${sel}>${esc(lbl)}${meta ? ' · ' + esc(meta) : ''}</option>`;
         }))
         .join('');
       wrap.innerHTML = `<span class="det-label">Predecessore</span>
@@ -4120,7 +4293,7 @@ async function saveNewCommessa() {
   const payload = {
     commessa,
     item: 1,
-    delivery_date: document.getElementById('jc-deadline')?.value || null,
+    delivery_date: _normalizeIsoDate(document.getElementById('jc-deadline')?.value || '') || null,
     total_cost: document.getElementById('jc-cost')?.value || null,
     penalty:    document.getElementById('jc-penalty')?.value || null,
   };

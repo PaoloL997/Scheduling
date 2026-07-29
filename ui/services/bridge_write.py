@@ -137,7 +137,7 @@ def update_attivita(orm_id: int, data: dict) -> dict:
         ]
         if predecessor_ids:
             valid = set(
-                Attivita.objects.filter(commessa=a.commessa, item=a.item)
+                Attivita.objects.filter(commessa=a.commessa)
                 .exclude(pk=a.pk)
                 .values_list("activity_id", flat=True)
             )
@@ -249,6 +249,8 @@ def update_attivita(orm_id: int, data: dict) -> dict:
         "plant": a.stabilimento or None,
         "responsible": a.responsabile or None,
     }
+    if "predecessors" in data:
+        mpp_payload["predecessors"] = a.predecessors or ""
     if new_risorse_pairs is not None:
         mpp_payload["resources"] = [rid for _, rid in new_risorse_pairs]
 

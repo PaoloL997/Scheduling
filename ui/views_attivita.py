@@ -8,7 +8,7 @@ modal wizard embedded in the ``pianificazione`` page.
 import json
 import logging
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
@@ -322,7 +322,7 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
 
     if predecessor_ids:
         valid_predecessors = set(
-            Attivita.objects.filter(commessa=commessa, item=item).values_list(
+            Attivita.objects.filter(commessa=commessa).values_list(
                 "activity_id", flat=True
             )
         )
@@ -331,17 +331,36 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
             return JsonResponse(
                 {
                     "ok": False,
-                    "error": "Predecessor non validi per commessa e item selezionati.",
+                    "error": "Predecessor non validi per la commessa selezionata.",
                 },
                 status=400,
             )
 
     from ui.models import Job
 
+    def _parse_delivery_date(raw) -> str | None:
+        """Normalize delivery date to ISO ``YYYY-MM-DD``.
+
+        Accepts ISO and common Italian formats (``DD/MM/YYYY``, ``DD-MM-YYYY``).
+        """
+        if raw in (None, ""):
+            return None
+        text = str(raw).strip()
+        try:
+            return date.fromisoformat(text).isoformat()
+        except ValueError:
+            pass
+        for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y"):
+            try:
+                return datetime.strptime(text, fmt).date().isoformat()
+            except ValueError:
+                continue
+        return None
+
     job_exists = Job.objects.filter(commessa=commessa).exists()
     new_job = data.get("new_job")
     if not job_exists:
-        if not new_job or new_job.get("delivery_date") in (None, ""):
+        if not new_job:
             return JsonResponse(
                 {
                     "ok": False,
@@ -349,13 +368,16 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
                 },
                 status=400,
             )
-        try:
-            date.fromisoformat(new_job.get("delivery_date"))
-        except (TypeError, ValueError):
+        delivery_date = _parse_delivery_date(new_job.get("delivery_date"))
+        if not delivery_date:
             return JsonResponse(
-                {"ok": False, "error": "Data di consegna non valida."},
+                {
+                    "ok": False,
+                    "error": "Per una nuova commessa devi indicare una data di consegna valida.",
+                },
                 status=400,
             )
+        new_job = {**new_job, "delivery_date": delivery_date}
         raw_cost = new_job.get("total_cost")
         if raw_cost not in (None, "") and _float_or_none(raw_cost) is None:
             return JsonResponse(

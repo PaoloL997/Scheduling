@@ -11,7 +11,6 @@ from typing import Any, Iterable
 from src.optimization.calendar import WorkingCalendar, working_days_in_calendar_span
 from src.optimization.compatibility import configure_generator_compatibility
 from src.optimization.data_model import (
-    HEAD_MODELS,
     PLANTS,
     Activity,
     Job,
@@ -451,7 +450,8 @@ def _to_opt_activity(
     predecessors: list[str],
 ) -> Activity:
     raw_head = (att.modello_testa or "").strip() or None
-    head_model = raw_head if raw_head in HEAD_MODELS else None
+    # Only models configured in ConfigurazioneTesta drive testa/generatore needs.
+    head_model = raw_head if raw_head and raw_head in quantities_by_head else None
     quantities = quantities_by_head.get(raw_head or "", {}).copy()
     earliest = earliest_start_overrides.get(att.activity_id)
 

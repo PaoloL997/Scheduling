@@ -25,11 +25,6 @@ PLANTS = [
     "Milano",
 ]
 
-HEAD_MODELS = [
-    "TP60",
-    "SPX",
-]
-
 
 class ResourceType(str, Enum):
     MANDRINO = "mandrino"
@@ -149,14 +144,6 @@ class Activity(BaseModel):
                 self.bore_min <= self.bore_mid <= self.bore_max
             ):
                 raise ValueError("bore_mid must be between bore_min and bore_max.")
-        return self
-
-    @model_validator(mode="after")
-    def check_head_model(self):
-        if self.head_model is not None and self.head_model not in HEAD_MODELS:
-            raise ValueError(
-                f"Invalid head_model: {self.head_model}. Must be one of {HEAD_MODELS}."
-            )
         return self
 
     @model_validator(mode="after")

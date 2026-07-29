@@ -110,7 +110,7 @@ def _lookup_plant(categoria: str, uid: str) -> str | None:
 
 
 def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> int:
-    """Detect operational problems for an activity and persist new ones.
+    """Detect operational problems for an activity and sync open notes.
 
     Two types of problem are detected:
 
@@ -119,9 +119,13 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
     * **acquisto** — no resource was selected for a given category.  One must
       be sourced externally (purchase, rental, or loan).
 
-    This function is **idempotent**: problems whose signature
-    (tipo + risorsa_tipo + risorsa_uid) already exists for the activity are
-    skipped, so calling it multiple times will not create duplicates.
+    Open ``acquisto`` / ``spostamento`` notes are reconciled with the current
+    selection: stale ones are auto-resolved, still-valid ones get an updated
+    description when needed, and missing ones are created.  Creation is
+    idempotent against **open** signatures only, so a condition that returns
+    after an auto-resolve can raise a new open note.  Auto-resolves are not
+    mirrored to :class:`~ui.models.RisoluzioneProblema` (unlike manual
+    resolutions) so a re-import can surface the issue again if it returns.
 
     Args:
         attivita: The :class:`~ui.models.Attivita` instance.
@@ -134,6 +138,7 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
     Returns:
         int: The number of new :class:`~ui.models.ProblemaAttivita` rows created.
     """
+    from django.utils import timezone
     from ui.models import ProblemaAttivita
     from ui.services.activity_inventory import get_testa_min_requirements
 
@@ -186,19 +191,58 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
                     )
                 )
 
-    if not problems:
-        return 0
+    current_by_sig: dict[tuple[str, str, str], ProblemaAttivita] = {
+        (p.tipo, p.risorsa_tipo, p.risorsa_uid): p for p in problems
+    }
+    current_sigs = set(current_by_sig)
 
-    # Idempotency: skip problems whose signature already exists for this activity.
-    existing_sigs: set[tuple[str, str, str]] = set(
-        ProblemaAttivita.objects.filter(attivita=attivita).values_list(
-            "tipo", "risorsa_tipo", "risorsa_uid"
-        )
+    open_types = (
+        ProblemaAttivita.TIPO_ACQUISTO,
+        ProblemaAttivita.TIPO_SPOSTAMENTO,
+    )
+    stale_note = (
+        "Condizione non piu verificata dopo aggiornamento attivita."
+    )
+    for problema in ProblemaAttivita.objects.filter(
+        attivita=attivita,
+        tipo__in=open_types,
+        risolto=False,
+    ):
+        sig = (problema.tipo, problema.risorsa_tipo, problema.risorsa_uid)
+        if sig not in current_sigs:
+            problema.risolto = True
+            problema.note_risoluzione = stale_note
+            problema.data_risoluzione = timezone.now()
+            problema.save(
+                update_fields=["risolto", "note_risoluzione", "data_risoluzione"]
+            )
+            continue
+
+        desired = current_by_sig[sig]
+        updates: list[str] = []
+        if problema.descrizione != desired.descrizione:
+            problema.descrizione = desired.descrizione
+            updates.append("descrizione")
+        if (
+            desired.stabilimento_origine
+            and problema.stabilimento_origine != desired.stabilimento_origine
+        ):
+            problema.stabilimento_origine = desired.stabilimento_origine
+            updates.append("stabilimento_origine")
+        if updates:
+            problema.save(update_fields=updates)
+
+    open_sigs: set[tuple[str, str, str]] = set(
+        ProblemaAttivita.objects.filter(
+            attivita=attivita,
+            tipo__in=open_types,
+            risolto=False,
+        ).values_list("tipo", "risorsa_tipo", "risorsa_uid")
     )
     new_problems = [
         p
         for p in problems
-        if (p.tipo, p.risorsa_tipo, p.risorsa_uid) not in existing_sigs
+        if (p.tipo, p.risorsa_tipo, p.risorsa_uid) not in open_sigs
     ]
 
     if new_problems:
@@ -536,14 +580,14 @@ def refresh_overlap_warnings() -> int:
 def detect_for_all_activities() -> int:
     """Run problem detection for every activity in the database.
 
-    Called after a dataset re-import so that all freshly created
-    :class:`~ui.models.Attivita` rows get their problems populated.
-    The underlying :func:`detect_and_save_problems` is idempotent, so
-    activities that already have problems are not duplicated.
+    Called after a dataset re-import and on Pianificazione page load so that
+    open ``acquisto`` / ``spostamento`` notes stay aligned with current
+    assignments.  Stale open notes are auto-resolved; new conditions create
+    fresh rows.  Overlap warnings are refreshed at the end.
 
     Returns:
         int: Total number of new :class:`~ui.models.ProblemaAttivita` rows
-            created across all activities.
+            created across all activities (plus overlap refresh counts).
     """
     from ui.models import Attivita
 

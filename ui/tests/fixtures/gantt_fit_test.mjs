@@ -57,7 +57,20 @@ function runBasicFitTest() {
   if (!fit) throw new Error('computeFitViewport returned null');
 
   const spanDays = Math.ceil((fit.maxD - fit.minD) / 86400000);
-  if (spanDays > 25) throw new Error(`viewport too wide: ${spanDays} days`);
+  // Months window centred on a ~2-week span → about 3 months.
+  if (spanDays < 60 || spanDays > 120) {
+    throw new Error(`expected ~3-month centred window, got ${spanDays} days`);
+  }
+  if (fit.view !== 'month') {
+    throw new Error(`expected month view, got ${fit.view}`);
+  }
+  // Activities (Jun 1–15) should sit near the middle of the window.
+  const midAct = new Date('2026-06-08T00:00:00').getTime();
+  const midWin = fit.minD.getTime() + (fit.maxD.getTime() - fit.minD.getTime()) / 2;
+  const driftDays = Math.abs(midAct - midWin) / 86400000;
+  if (driftDays > 20) {
+    throw new Error(`window not centred on activities: drift ${driftDays.toFixed(1)} days`);
+  }
 
   const chart = new GanttChart({ prefix: 'gantt-before', simplified: true, fitToData: false });
   chart.applyFitViewport(fit);

@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import date, timedelta
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
@@ -269,6 +270,12 @@ def _fetch_grouped() -> list[dict]:
             },
         )
         activities = groups_map.get(commessa, [])
+        activities.sort(
+            key=lambda t: (
+                _parse_iso_day(t.get("start")) or _parse_iso_day(t.get("actual_start")) or date.max,
+                str(t.get("activity_id") or ""),
+            )
+        )
         job = {
             **job,
             "n_open_problems": sum(a.get("warning_count") or 0 for a in activities),
@@ -276,11 +283,23 @@ def _fetch_grouped() -> list[dict]:
         result.append({"job": job, "activities": activities})
     result.sort(
         key=lambda g: (
-            _JOB_STATUS_SORT_ORDER.get(_aggregate_job_status(g["activities"]), 99),
+            _earliest_activity_start(g["activities"]) or date.max,
             (g["job"].get("commessa") or "").lower(),
         )
     )
     return result
+
+
+def _earliest_activity_start(activities: list[dict]) -> date | None:
+    """Return the earliest planned (or actual) start among activities."""
+    earliest: date | None = None
+    for task in activities or []:
+        day = _parse_iso_day(task.get("start")) or _parse_iso_day(task.get("actual_start"))
+        if day is None:
+            continue
+        if earliest is None or day < earliest:
+            earliest = day
+    return earliest
 
 
 def _fetch_tasks() -> list[dict]:
@@ -303,13 +322,15 @@ def _fetch_tasks() -> list[dict]:
 
     from ui.models import Attivita
 
-    from ui.services.problem_detection import refresh_overlap_warnings
+    from ui.services.problem_detection import detect_for_all_activities
 
-    refresh_overlap_warnings()
+    # Recalculate acquisto/spostamento/sovrapposizione so the page reflects
+    # the current schedule and resource assignments after edits.
+    detect_for_all_activities()
 
     activities = list(
         Attivita.objects.prefetch_related("risorse", "problemi").order_by(
-            "job_id", "activity_id"
+            "job_id", "data_inizio", "activity_id"
         )
     )
     id_to_name = {a.activity_id: a.activity for a in activities}
@@ -408,12 +429,24 @@ def _compute_activity_status(
 
 
 _JOB_STATUS_SORT_ORDER = {
-    "in_ritardo": 0,
-    "in_lavorazione": 1,
-    "pianificata": 2,
-    "non_pianificata": 3,
-    "completata": 4,
+    "rischio_penale": 0,
+    "in_ritardo": 1,
+    "in_tempo": 2,
+    "pianificata": 3,
+    "non_pianificata": 4,
 }
+
+
+def _parse_iso_day(value):
+    """Parse YYYY-MM-DD (or date) to ``date``, else None."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
 
 
 def _activity_state_key(task: dict) -> str:
@@ -430,25 +463,52 @@ def _activity_state_key(task: dict) -> str:
     return "non_pianificata"
 
 
-def _aggregate_job_status(activities: list[dict]) -> str:
-    """Return aggregate commessa status key (mirrors client _pianAggregateStatus)."""
+def _aggregate_job_status(
+    activities: list[dict],
+    delivery_date: str | date | None = None,
+) -> str:
+    """Return aggregate commessa status (same rules as Gantt / client).
+
+    Priority: rischio_penale → in_ritardo → in_tempo → pianificata.
+    """
     if not activities:
         return "non_pianificata"
-    late = working = completed = 0
+
+    deadline = _parse_iso_day(delivery_date)
+    late = 0
+    started = 0
+    penalty_risk = False
+
     for task in activities:
         state = _activity_state_key(task)
-        if state == "completata":
-            completed += 1
         if state == "in_ritardo":
             late += 1
-        if state == "in_lavorazione":
-            working += 1
+        if task.get("actual_start"):
+            started += 1
+
+        if deadline is None:
+            continue
+        plan_s = _parse_iso_day(task.get("start"))
+        plan_f = _parse_iso_day(task.get("finish"))
+        act_s = _parse_iso_day(task.get("actual_start"))
+        act_f = _parse_iso_day(task.get("actual_finish"))
+        if plan_s is None or plan_f is None:
+            continue
+        dur_days = (plan_f - plan_s).days
+        end = None
+        if act_f is not None:
+            end = act_f
+        elif act_s is not None:
+            end = act_s + timedelta(days=dur_days)
+        if end is not None and end > deadline:
+            penalty_risk = True
+
+    if penalty_risk:
+        return "rischio_penale"
     if late > 0:
         return "in_ritardo"
-    if working > 0:
-        return "in_lavorazione"
-    if completed == len(activities):
-        return "completata"
+    if started > 0:
+        return "in_tempo"
     return "pianificata"
 
 
@@ -1007,40 +1067,41 @@ def api_jobs_update(request: HttpRequest) -> JsonResponse:
 
 @login_required
 def api_jobs_check(request: HttpRequest) -> JsonResponse:
-    """Check whether a job (commessa) already exists in the database.
+    """Check whether a job (commessa) already exists and list predecessor candidates.
 
     Used by the add-activity wizard after WPS analysis to determine
     whether the user needs to create a new commessa or can proceed.
+    Predecessor candidates are all activities of the same ``commessa``.
 
     Args:
         request: GET request with ``commessa`` query parameter.
 
     Returns:
-        JsonResponse: ``{"ok": True, "exists": bool}`` where ``exists``
-        is ``True`` when a :class:`~ui.models.Job` with the given
-        ``commessa`` value is already present.
+        JsonResponse: ``{"ok": True, "exists": bool, "predecessors": [...]}``
+        where ``exists`` is ``True`` when a :class:`~ui.models.Job` with the
+        given ``commessa`` value is already present.
     """
     commessa = (request.GET.get("commessa") or "").strip()
     job_id = (request.GET.get("job_id") or "").strip()
-    item_raw = request.GET.get("item") or "1"
     if not commessa and not job_id:
         return JsonResponse(
             {"ok": False, "error": "commessa (o job_id) è obbligatoria."}, status=400
         )
-    item = str(item_raw).strip() or "1"
     exists = (
         Job.objects.filter(commessa=commessa).exists()
         if commessa
         else Job.objects.filter(job_id=job_id).exists()
     )
-    predecessor_qs = Attivita.objects.filter(commessa=commessa, item=item).order_by(
-        "data_inizio", "id"
+    # Any activity of the same commessa can be chosen as predecessor.
+    predecessor_qs = Attivita.objects.filter(commessa=commessa).order_by(
+        "item", "data_inizio", "id"
     )
     predecessors = [
         {
             "id": a.pk,
             "activity_id": a.activity_id,
             "activity": a.activity,
+            "item": a.item,
             "start": a.data_inizio.isoformat() if a.data_inizio else None,
             "finish": a.data_fine.isoformat() if a.data_fine else None,
         }

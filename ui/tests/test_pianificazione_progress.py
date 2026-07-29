@@ -1,10 +1,11 @@
 """Tests for the pianificazione job header metrics."""
 
-from datetime import date
+from datetime import date, timedelta
 
 from django.contrib.auth.models import User
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils.timezone import localdate
 
 from ui.models import Attivita, Job, ProblemaAttivita
 
@@ -36,6 +37,23 @@ class PianificazioneProgressBarTests(TestCase):
         self.assertIn("data-job-progress-fill", html)
         self.assertIn("data-job-progress-pct", html)
         self.assertIn("Completamento", html)
+        self.assertIn("function _countWorkingDaysInclusive(", html)
+        self.assertIn("function _activityWorkProgress(", html)
+        self.assertIn("stats.progressPct", html)
+
+    def test_progress_bar_still_rendered_for_in_progress_activity(self) -> None:
+        """In-progress activities (actual_start only) still render the progress bar."""
+        att = Attivita.objects.get(commessa="C001")
+        att.actual_start = localdate() - timedelta(days=2)
+        att.save(update_fields=["actual_start"])
+
+        resp = self.client.get(reverse("pianificazione"))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('data-actual-start="', html)
+        self.assertIn('class="pian-head-progress"', html)
+        self.assertIn("data-job-progress-fill", html)
+        self.assertIn("_activityWorkProgress(", html)
 
     def test_open_problems_count_in_job_header(self) -> None:
         att = Attivita.objects.get(commessa="C001")

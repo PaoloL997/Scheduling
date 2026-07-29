@@ -102,6 +102,21 @@ def _get_draft(request: HttpRequest) -> dict | None:
     return draft
 
 
+def _parse_include_explanation(data: dict) -> bool:
+    """Return whether the client requested an LLM explanation.
+
+    Defaults to ``False`` (opt-in). Accepts common truthy string forms.
+    """
+    raw = data.get("include_explanation", False)
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    if isinstance(raw, str):
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
 def _store_optimization_result(
     request: HttpRequest,
     payload: dict,
@@ -129,15 +144,22 @@ def _fallback_explanation(reason: str) -> str:
 def _complete_optimization_session(
     request: HttpRequest,
     result_payload: dict,
+    *,
+    include_explanation: bool = False,
 ) -> str | None:
-    """Store optimization result and explanation.
+    """Store optimization result and optionally generate an LLM explanation.
 
-    The optimization result is always stored. If the LLM explanation fails, a
-    fallback note is saved so the results page remains usable.
+    The optimization result is always stored. When ``include_explanation`` is
+    false, OpenAI is not called. When true and the LLM fails, a fallback note
+    is saved so the results page remains usable.
 
     Returns:
-        Optional warning message (``None`` when the LLM explanation succeeded).
+        Optional warning message (``None`` when skipped or LLM succeeded).
     """
+    if not include_explanation:
+        _store_optimization_result(request, result_payload, explanation=None)
+        return None
+
     try:
         explanation = generate_optimization_explanation(result_payload)
         warning = None
@@ -385,7 +407,12 @@ def ottimizzazione_run(request: HttpRequest) -> HttpResponse:
         )
         return redirect("ottimizzazione")
 
-    explain_warning = _complete_optimization_session(request, outcome["result_payload"])
+    include_explanation = _parse_include_explanation(data)
+    explain_warning = _complete_optimization_session(
+        request,
+        outcome["result_payload"],
+        include_explanation=include_explanation,
+    )
     if explain_warning:
         messages.warning(request, explain_warning)
     return redirect("ottimizzazione_risultati")
@@ -395,9 +422,9 @@ def ottimizzazione_run(request: HttpRequest) -> HttpResponse:
 def ottimizzazione_risultati(request: HttpRequest) -> HttpResponse:
     """Step 3: full-screen before/after comparison."""
     payload = request.session.get(SESSION_RESULT_KEY)
-    explanation = request.session.get(SESSION_EXPLANATION_KEY)
-    if not payload or not explanation:
+    if not payload:
         return redirect("ottimizzazione")
+    explanation = request.session.get(SESSION_EXPLANATION_KEY)
     tasks_before = payload.get("tasks_before")
     if tasks_before:
         hydrate_gantt_tasks_resources(tasks_before)
@@ -410,6 +437,7 @@ def ottimizzazione_risultati(request: HttpRequest) -> HttpResponse:
         {
             "result_json": json.dumps(payload),
             "explanation_json": json.dumps(explanation),
+            "include_explanation": bool(explanation),
         },
     )
 
@@ -453,7 +481,11 @@ def api_ottimizzazione_solve(request: HttpRequest) -> JsonResponse:
             }
         )
 
-    explain_warning = _complete_optimization_session(request, outcome["result_payload"])
+    explain_warning = _complete_optimization_session(
+        request,
+        outcome["result_payload"],
+        include_explanation=_parse_include_explanation(data),
+    )
 
     payload = {
         "ok": True,

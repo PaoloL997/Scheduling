@@ -68,7 +68,8 @@ class AddActivityFlowTests(TestCase):
             content_type="application/json",
         )
 
-    def test_jobs_check_returns_same_item_predecessors(self) -> None:
+    def test_jobs_check_returns_same_commessa_predecessors(self) -> None:
+        """Predecessor candidates include every activity of the same commessa."""
         Job.objects.create(commessa="C001")
         prev = Attivita.objects.create(
             commessa="C001",
@@ -77,15 +78,25 @@ class AddActivityFlowTests(TestCase):
             data_inizio=date(2026, 6, 1),
             data_fine=date(2026, 6, 3),
         )
-        Attivita.objects.create(commessa="C001", item=1, activity="Altro item")
+        other = Attivita.objects.create(
+            commessa="C001",
+            item=1,
+            activity="Altro item",
+            data_inizio=date(2026, 6, 4),
+            data_fine=date(2026, 6, 5),
+        )
 
         resp = self.client.get("/api/jobs/check/?commessa=C001&item=2")
 
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertTrue(payload["exists"])
-        self.assertEqual(len(payload["predecessors"]), 1)
-        self.assertEqual(payload["predecessors"][0]["activity_id"], prev.activity_id)
+        pred_ids = {p["activity_id"] for p in payload["predecessors"]}
+        self.assertEqual(pred_ids, {prev.activity_id, other.activity_id})
+        self.assertEqual(
+            {p["item"] for p in payload["predecessors"]},
+            {"1", "2"},
+        )
 
     def test_missing_attivita_is_rejected(self) -> None:
         Job.objects.create(commessa="C010")
@@ -157,6 +168,27 @@ class AddActivityFlowTests(TestCase):
         self.assertIsNone(job.penalty)
         self.assertIsNone(job.total_cost)
 
+    def test_new_commessa_accepts_italian_delivery_date(self) -> None:
+        """Italian DD/MM/YYYY delivery dates are normalized to ISO."""
+        resp = self._post_activity(
+            {
+                "commessa": "NEW004",
+                "item": 1,
+                "attivita": "Qualifica",
+                "data_inizio": "2026-06-10",
+                "data_fine": "2026-06-12",
+                "risorse": {},
+                "new_job": {
+                    "commessa": "NEW004",
+                    "delivery_date": "15/07/2026",
+                },
+            }
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        job = Job.objects.get(commessa="NEW004")
+        self.assertEqual(job.delivery_date, "2026-07-15")
+
     def test_new_commessa_metadata_is_created_when_all_fields_are_present(self) -> None:
         """When cost and penalty are supplied they are persisted on the Job."""
         resp = self._post_activity(
@@ -210,3 +242,29 @@ class AddActivityFlowTests(TestCase):
         entry = MppSyncQueue.objects.get(operation="add_task")
         payload = json.loads(entry.payload_json)
         self.assertEqual(payload["predecessors"], prev.activity_id)
+
+    def test_predecessor_from_other_item_same_commessa_is_accepted(self) -> None:
+        Job.objects.create(commessa="C003")
+        prev = Attivita.objects.create(
+            commessa="C003",
+            item="A1",
+            activity="Preparazione",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 3),
+        )
+
+        resp = self._post_activity(
+            {
+                "commessa": "C003",
+                "item": "B2",
+                "attivita": "Qualifica",
+                "data_inizio": "2026-06-10",
+                "data_fine": "2026-06-12",
+                "risorse": {},
+                "predecessors": [prev.activity_id],
+            }
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        att = Attivita.objects.get(commessa="C003", item="B2", activity="Qualifica")
+        self.assertEqual(att.predecessors, prev.activity_id)

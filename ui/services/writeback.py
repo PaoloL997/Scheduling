@@ -268,13 +268,30 @@ def _apply_add_task(project_wrapper, payload: dict) -> None:
     activity = payload.get("activity", "")
     name = _task_mpp_name(commessa, item, activity)
 
+    mpp_predecessors = _activity_ids_to_mpp_predecessors(
+        project_wrapper, payload.get("predecessors") or ""
+    )
+
     # Idempotent: a retry after FileSave must not create duplicates.
+    # Still refresh predecessors so a previous partial write is repaired.
     try:
-        _find_mpp_task(project_wrapper, commessa, item, activity)
+        existing_task, existing_name = _find_mpp_task(
+            project_wrapper, commessa, item, activity
+        )
     except ValueError:
-        pass
-    else:
-        logger.debug("Task '%s' già presente nel .mpp, skip add_task.", name)
+        existing_task = None
+        existing_name = None
+
+    if existing_task is not None:
+        logger.debug(
+            "Task '%s' già presente nel .mpp, aggiorno predecessori e skip add.",
+            name,
+        )
+        if "predecessors" in payload:
+            project_wrapper.update_task(
+                existing_name,
+                predecessors=mpp_predecessors or "",
+            )
         attivita_id = payload.get("attivita_id")
         if attivita_id:
             from ui.models import Attivita
@@ -288,10 +305,6 @@ def _apply_add_task(project_wrapper, payload: dict) -> None:
         else None
     )
     end = date.fromisoformat(payload["data_fine"]) if payload.get("data_fine") else None
-
-    mpp_predecessors = _activity_ids_to_mpp_predecessors(
-        project_wrapper, payload.get("predecessors") or ""
-    )
 
     task = Task(
         name=name,
@@ -364,6 +377,12 @@ def _apply_update_task(project_wrapper, payload: dict) -> None:
             if payload.get("actual_finish")
             else None
         )
+    if "predecessors" in payload:
+        mpp_predecessors = _activity_ids_to_mpp_predecessors(
+            project_wrapper, payload.get("predecessors") or ""
+        )
+        # Empty string clears existing links in MS Project.
+        update_kwargs["predecessors"] = mpp_predecessors or ""
 
     project_wrapper.update_task(current_name, **update_kwargs)
     task_name = rename_to or current_name

@@ -419,10 +419,14 @@
       <button id="nav-today" class="nbtn" aria-label="Oggi">Oggi</button>
       <button id="nav-next" class="nbtn" aria-label="Periodo successivo">&#8250;</button>
     </div>
+    <div id="nav-group">
+      <button id="nav-expand-toggle" class="nbtn" type="button" data-mode="expand">Espandi tutto</button>
+    </div>
     <div id="toggle-group">
+      <button class="tbtn active" data-view="horizon">Panoramica</button>
       <button class="tbtn" data-view="week">Settimana</button>
       <button class="tbtn" data-view="month">Mese</button>
-      <button class="tbtn active" data-view="year">Anno</button>
+      <button class="tbtn" data-view="year">Anno</button>
     </div>
   </div>
 
@@ -510,8 +514,10 @@
 const _homeGantt = new GanttChart({
   prefix: '',
   enableStats: true,
-  enableDeadlineEditor: true,
+  enableDeadlineEditor: false,
   enableWarningNav: true,
+  collapsibleGroups: true,
+  initialView: 'horizon',
 });
 _homeGantt.bindIndexPage();
 _homeGantt.bindControls();

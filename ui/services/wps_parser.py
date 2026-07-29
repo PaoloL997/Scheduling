@@ -8,17 +8,18 @@ def parse_wps_name(filename: str) -> dict:
 
     The expected filename format is::
 
-        {modello_testa}_{commessa}[_{item}].pdf
+        {modello_testa}_{commessa}[_{itemdisegno}].{ext}
 
-    All separators are underscores.  The optional item field is detected by
-    being a purely numeric token; if absent, item defaults to ``"1"``. Any extra
-    tokens after item are ignored (activity names are no longer read from the
-    filename).
+    All separators are underscores.  ``itemdisegno`` is everything after the
+    second underscore up to (but not including) the file extension; it may
+    contain underscores and any characters.  If absent, item defaults to
+    ``"1"``.
 
     For example:
-    - ``HT200_AB123.pdf``                → modello=HT200, commessa=AB123, item="1"
-    - ``HT200_AB123_02.pdf``             → modello=HT200, commessa=AB123, item="02"
-    - ``HT200_AB123_Saldatura.pdf``      → modello=HT200, commessa=AB123, item="1"
+    - ``HT200_AB123.pdf``                    → modello=HT200, commessa=AB123, item="1"
+    - ``HT200_AB123_02.pdf``                 → modello=HT200, commessa=AB123, item="02"
+    - ``HT200_AB123_Saldatura.pdf``          → modello=HT200, commessa=AB123, item="Saldatura"
+    - ``HT200_25033_02_qualifica.pdf``       → modello=HT200, commessa=25033, item="02_qualifica"
 
     Args:
         filename: The original filename of the uploaded WPS PDF.
@@ -27,15 +28,12 @@ def parse_wps_name(filename: str) -> dict:
         dict: With keys ``modello_testa`` (str), ``commessa`` (str),
             ``item`` (str), and ``attivita`` (always ``""`` for compatibility).
     """
-    stem = re.sub(r"\.pdf$", "", filename, flags=re.IGNORECASE)
+    stem = re.sub(r"\.[^.]+$", "", filename)
     parts = stem.split("_")
 
     modello = parts[0] if len(parts) >= 1 else ""
     commessa = parts[1] if len(parts) >= 2 else ""
-
-    item = "1"
-    if len(parts) >= 3 and parts[2].isdigit():
-        item = parts[2]
+    item = "_".join(parts[2:]) or "1"
 
     return {
         "modello_testa": modello,

@@ -1,10 +1,11 @@
-"""CP-SAT scheduling model: build, solve (two-phase lexicographic), extract.
+"""CP-SAT scheduling model: build, solve (three-phase lexicographic), extract.
 
 Time is modelled in working-day indices. Each activity is a fixed-size interval;
 each (activity, compatible resource) pair is an optional interval whose presence
 literal selects that physical resource. Unit capacity is enforced with
 ``NoOverlap`` per resource. The objective is solved lexicographically: first the
-total tardiness penalty, then a bore-mid tie-breaker that can never worsen it.
+total tardiness penalty, then a bore-mid tie-breaker, then resource continuity
+along precedence edges — later phases never worsen earlier objectives.
 """
 
 from __future__ import annotations
@@ -53,6 +54,7 @@ class _SchedulingModel:
         self.start: dict[str, cp_model.IntVar] = {}
         self.assign: dict[tuple[str, str], cp_model.IntVar] = {}
         self._tie_break_literals: list[cp_model.IntVar] = []
+        self._continuity_literals: list[cp_model.IntVar] = []
         self._penalty_components: list[tuple[int, cp_model.IntVar]] = []
 
         self._build()
@@ -63,6 +65,7 @@ class _SchedulingModel:
         self._create_activity_intervals()
         self._add_precedences()
         self._add_assignments_and_capacity()
+        self._add_continuity_literals()
         self._add_penalties()
 
     def _create_activity_intervals(self) -> None:
@@ -137,6 +140,37 @@ class _SchedulingModel:
 
             self.model.Add(sum(literals) == requirement.quantity)
 
+    def _add_continuity_literals(self) -> None:
+        """Soft preference: reuse the same resource across precedence edges.
+
+        For each predecessor→successor pair and each resource ``R`` that is a
+        candidate for both activities, introduce a boolean that is true iff both
+        assign ``R``. Phase C maximises the sum of these booleans without
+        worsening penalty or bore-mid objectives.
+        """
+        for job in self.problem.jobs:
+            for prev, curr in precedence_pairs(job):
+                prev_ids = {
+                    rid
+                    for (aid, rid) in self.assign
+                    if aid == prev.activity_id
+                }
+                curr_ids = {
+                    rid
+                    for (aid, rid) in self.assign
+                    if aid == curr.activity_id
+                }
+                for resource_id in prev_ids & curr_ids:
+                    lit_prev = self.assign[(prev.activity_id, resource_id)]
+                    lit_curr = self.assign[(curr.activity_id, resource_id)]
+                    same = self.model.NewBoolVar(
+                        f"same_{prev.activity_id}_{curr.activity_id}_{resource_id}"
+                    )
+                    self.model.Add(same <= lit_prev)
+                    self.model.Add(same <= lit_curr)
+                    self.model.Add(same >= lit_prev + lit_curr - 1)
+                    self._continuity_literals.append(same)
+
     def _add_penalties(self) -> None:
         offsets = self.calendar.calendar_offsets(self.horizon)
         for job in self.problem.jobs:
@@ -170,6 +204,9 @@ class _SchedulingModel:
             weight * solver.Value(weeks) for weight, weeks in self._penalty_components
         )
 
+    def _tie_break_value(self, solver: cp_model.CpSolver) -> int:
+        return sum(solver.Value(lit) for lit in self._tie_break_literals)
+
     # -- solving -----------------------------------------------------------
 
     def solve(self, time_limit: float | None) -> SolveOutcome:
@@ -183,15 +220,34 @@ class _SchedulingModel:
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return SolveOutcome(status=solver.StatusName(status), feasible=False)
 
+        current_penalty = self._penalty_value(solver)
+        bore_bound: int | None = None
+
         # Phase B: only when phase A is provably optimal, minimize the
         # tie-breaker subject to keeping the optimal penalty.
         if status == cp_model.OPTIMAL and self._tie_break_literals:
-            optimal_penalty = self._penalty_value(solver)
-            self.model.Add(self._total_penalty_expr() <= optimal_penalty)
+            self.model.Add(self._total_penalty_expr() <= current_penalty)
             self.model.Minimize(sum(self._tie_break_literals))
             phase_b_status = solver.Solve(self.model)
             if phase_b_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 status = phase_b_status
+                current_penalty = self._penalty_value(solver)
+                if phase_b_status == cp_model.OPTIMAL:
+                    bore_bound = self._tie_break_value(solver)
+
+        # Phase C: maximize resource continuity along precedence edges,
+        # without worsening penalty (or bore-mid, when phase B was optimal).
+        if self._continuity_literals and status in (
+            cp_model.OPTIMAL,
+            cp_model.FEASIBLE,
+        ):
+            self.model.Add(self._total_penalty_expr() <= current_penalty)
+            if bore_bound is not None:
+                self.model.Add(sum(self._tie_break_literals) <= bore_bound)
+            self.model.Maximize(sum(self._continuity_literals))
+            phase_c_status = solver.Solve(self.model)
+            if phase_c_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+                status = phase_c_status
 
         return self._extract(solver, status)
 

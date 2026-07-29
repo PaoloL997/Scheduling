@@ -25,6 +25,15 @@
       gridLine: isLight ? 'hsl(220,12%,84%)' : 'hsl(220,10%,15%)',
       axisText: isLight ? 'hsl(220,10%,42%)' : 'hsl(220,10%,46%)',
       axisTextWeekend: isLight ? 'hsl(220,8%,52%)' : 'hsl(220,10%,32%)',
+      metaText: isLight ? 'hsl(220,16%,26%)' : 'hsl(220,14%,86%)',
+      // Status label next to commessa summary: In tempo / Pianificata / …
+      // Light theme uses a dark stand-in for "white" so the text stays readable.
+      statusColors: {
+        'In tempo': isLight ? 'hsl(220,14%,18%)' : '#ffffff',
+        'Pianificata': isLight ? 'hsl(220,8%,48%)' : 'hsl(220,8%,58%)',
+        'In ritardo': isLight ? 'hsl(28,90%,42%)' : 'hsl(28,95%,55%)',
+        'Rischio penale': isLight ? 'hsl(0,75%,46%)' : 'hsl(0,80%,58%)',
+      },
       weekendFill: isLight ? 'hsl(220,14%,88%)' : 'hsl(220,30%,80%)',
       weekendOpacity: isLight ? '0.45' : '0.06',
       todayFill: isLight ? 'hsl(0,82%,48%)' : 'hsl(0,80%,50%)',
@@ -175,15 +184,164 @@
   }
 
   function suggestViewForSpanDays(spanDays) {
-    if (spanDays <= 14) return 'week';
-    if (spanDays <= 75) return 'month';
+    if (spanDays <= 45) return 'week';
+    if (spanDays <= 280) return 'month';
     return 'year';
   }
 
   function tickViewForWindowDays(windowDays) {
     if (windowDays <= 14) return 'week';
-    if (windowDays <= 75) return 'month';
+    if (windowDays <= 100) return 'month';
     return 'year';
+  }
+
+  function earliestCommessaStartMs(tasks) {
+    let min = Infinity;
+    (tasks || []).forEach(t => {
+      const s = parseDate(t && (t.start || t.actual_start));
+      if (!isNaN(s)) {
+        const ms = s.getTime();
+        if (ms < min) min = ms;
+      }
+    });
+    return min;
+  }
+
+  function taskIsWip(t) {
+    return !!(t && t.actual_start && !t.actual_finish);
+  }
+
+  function taskIsIncomplete(t) {
+    return !!(t && !t.actual_finish);
+  }
+
+  function taskIsCompleted(t) {
+    return !!(t && t.actual_finish);
+  }
+
+  function parseIsoNoon(raw) {
+    const s = String(raw || '').trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const d = new Date(s + 'T12:00:00');
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function isWorkingDay(day) {
+    const wd = day.getDay();
+    return wd >= 1 && wd <= 5;
+  }
+
+  function countWorkingDaysInclusive(start, end) {
+    if (!start || !end) return 0;
+    if (end < start) return 1;
+    let working = 0;
+    const cur = new Date(start.getTime());
+    const last = new Date(end.getTime());
+    while (cur <= last) {
+      if (isWorkingDay(cur)) working += 1;
+      cur.setDate(cur.getDate() + 1);
+    }
+    return Math.max(1, working);
+  }
+
+  // Same formula as pianificazione `_activityWorkProgress` / `_pianJobStats`.
+  function activityWorkProgress(task) {
+    const planStart = parseIsoNoon(task && task.start);
+    const planFinish = parseIsoNoon(task && task.finish);
+    if (!planStart || !planFinish) return { done: 0, total: 0 };
+    const total = countWorkingDaysInclusive(planStart, planFinish);
+    if (parseIsoNoon(task.actual_finish)) return { done: total, total };
+    const actualStart = parseIsoNoon(task.actual_start);
+    if (!actualStart) return { done: 0, total };
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    if (today < actualStart) return { done: 0, total };
+    const worked = countWorkingDaysInclusive(actualStart, today);
+    return { done: Math.min(total, worked), total };
+  }
+
+  function summarizeCommessaTasks(tasks, deadlineStr) {
+    const list = tasks || [];
+    const total = list.length;
+    let completed = 0;
+    let wip = 0;
+    let workDone = 0;
+    let workTotal = 0;
+    let anyLate = false;
+    let anyPenaltyRisk = false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const deadline = parseIsoNoon(deadlineStr) || parseDate(deadlineStr);
+    const hasDeadline = deadline && !isNaN(deadline.getTime());
+
+    list.forEach(t => {
+      if (taskIsCompleted(t)) completed += 1;
+      else if (taskIsWip(t)) wip += 1;
+      const progress = activityWorkProgress(t);
+      workDone += progress.done;
+      workTotal += progress.total;
+
+      const planS = parseDate(t.start);
+      const planF = parseDate(t.finish);
+      const actS = t.actual_start ? parseDate(t.actual_start) : null;
+      const actF = t.actual_finish ? parseDate(t.actual_finish) : null;
+      if (!isNaN(planS)) {
+        if (actS && actS > planS) anyLate = true;
+        else if (!actS && !actF && today >= planS) anyLate = true;
+      }
+
+      if (hasDeadline && !isNaN(planS) && !isNaN(planF)) {
+        const durMs = planF - planS;
+        let end = null;
+        if (actF && !isNaN(actF)) end = actF;
+        else if (actS && !isNaN(actS)) end = new Date(actS.getTime() + durMs);
+        if (end && end > deadline) anyPenaltyRisk = true;
+      }
+    });
+
+    const pct = workTotal ? Math.round(workDone / workTotal * 100) : 0;
+    let status = 'Pianificata';
+    if (anyPenaltyRisk) status = 'Rischio penale';
+    else if (anyLate) status = 'In ritardo';
+    else if (wip > 0 || completed > 0) status = 'In tempo';
+    return { total, completed, wip, pct, status, workDone, workTotal };
+  }
+
+  function computeHorizonViewport(tasks) {
+    // Wide default window: left = first in-progress activity, right ≈ +6 months.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let left = null;
+
+    (tasks || []).forEach(t => {
+      if (!taskIsWip(t)) return;
+      const s = parseDate(t.actual_start);
+      if (!isNaN(s) && (!left || s < left)) left = new Date(s);
+    });
+
+    if (!left) {
+      // Fallback: earliest incomplete activity (planned or actual start).
+      (tasks || []).forEach(t => {
+        if (!taskIsIncomplete(t)) return;
+        const s = parseDate(t.actual_start || t.start);
+        if (!isNaN(s) && (!left || s < left)) left = new Date(s);
+      });
+    }
+
+    if (!left) left = today;
+
+    // Small left pad so the first bar is not flush against the edge.
+    const minD = addDays(left, -5);
+    const maxD = addMonths(minD, 6);
+    const windowDays = Math.max(1, (maxD - minD) / 86400000);
+
+    return {
+      minD,
+      maxD,
+      spanDays: windowDays,
+      view: 'horizon',
+      tickView: tickViewForWindowDays(windowDays),
+    };
   }
 
   function computeFitViewport() {
@@ -196,16 +354,30 @@
       if (ext.max) max = max ? (ext.max > max ? ext.max : max) : ext.max;
     }
     if (!min || !max) return null;
+    if (max < min) { const tmp = min; min = max; max = tmp; }
+
     const spanDays = Math.max(1, Math.ceil((max - min) / 86400000) + 1);
-    const padDays = Math.min(7, Math.max(2, Math.ceil(spanDays * 0.05)));
-    const minD = addDays(min, -padDays);
-    const maxD = addDays(max, padDays);
-    const windowDays = (maxD - minD) / 86400000;
+    const mid = new Date(min.getTime() + (max.getTime() - min.getTime()) / 2);
+
+    // Pad so activities sit near the centre of a months window (not glued to the edges).
+    const sidePad = Math.max(21, Math.ceil(spanDays * 0.25));
+    let minD = floorMonth(addDays(min, -sidePad));
+    let maxD = addMonths(floorMonth(addDays(max, sidePad)), 1);
+
+    // Prefer at least a 3-month window centred on the activity midpoint.
+    const minMonths = 3;
+    let windowDays = (maxD - minD) / 86400000;
+    if (windowDays < minMonths * 28) {
+      minD = addMonths(floorMonth(mid), -1);
+      maxD = addMonths(floorMonth(mid), 2);
+      windowDays = (maxD - minD) / 86400000;
+    }
+
     return {
       minD,
       maxD,
       spanDays,
-      view: suggestViewForSpanDays(spanDays),
+      view: suggestViewForSpanDays(windowDays),
       tickView: tickViewForWindowDays(windowDays),
     };
   }
@@ -224,14 +396,68 @@
       this.enableWarningNav = !!options.enableWarningNav;
       this.simplified = !!options.simplified;
       this.fitToData = options.fitToData ?? !!options.simplified;
+      this.collapsibleGroups = !!options.collapsibleGroups;
       this.highlightChanges = options.highlightChanges || null;
       this.compareMode = !!options.compareMode;
       this.compareTasks = options.compareTasks || [];
       this._dataMinD = null;
       this._dataMaxD = null;
       this._bound = false;
+      // Keys = commessa (or job_id). Empty = all collapsed when collapsibleGroups.
+      this._expandedGroups = new Set();
+      if (this.view === 'horizon') this.fitToData = true;
       _activeCharts.add(this);
       bindThemeWatcher();
+    }
+
+    _groupKey(gOrTask) {
+      return gOrTask.commessa || gOrTask.job_id || 'unknown';
+    }
+
+    _isGroupExpanded(key) {
+      if (!this.collapsibleGroups) return true;
+      return this._expandedGroups.has(key);
+    }
+
+    _allGroupKeys() {
+      const keys = [];
+      const seen = {};
+      (this.tasks || []).forEach(t => {
+        const k = this._groupKey(t);
+        if (!seen[k]) { seen[k] = true; keys.push(k); }
+      });
+      return keys;
+    }
+
+    toggleGroup(key) {
+      if (!this.collapsibleGroups || !key) return;
+      if (this._expandedGroups.has(key)) this._expandedGroups.delete(key);
+      else this._expandedGroups.add(key);
+      this._syncExpandToggleBtn();
+      this.render(this.tasks, this.view);
+    }
+
+    expandAllGroups() {
+      if (!this.collapsibleGroups) return;
+      this._allGroupKeys().forEach(k => this._expandedGroups.add(k));
+      this._syncExpandToggleBtn();
+      this.render(this.tasks, this.view);
+    }
+
+    collapseAllGroups() {
+      if (!this.collapsibleGroups) return;
+      this._expandedGroups.clear();
+      this._syncExpandToggleBtn();
+      this.render(this.tasks, this.view);
+    }
+
+    _syncExpandToggleBtn() {
+      const btn = this.el('nav-expand-toggle');
+      if (!btn || !this.collapsibleGroups) return;
+      const keys = this._allGroupKeys();
+      const allOpen = keys.length > 0 && keys.every(k => this._expandedGroups.has(k));
+      btn.textContent = allOpen ? 'Collassa tutto' : 'Espandi tutto';
+      btn.dataset.mode = allOpen ? 'collapse' : 'expand';
     }
 
     id(name) {
@@ -347,7 +573,18 @@
     }
 
     applyFitToData(tasks) {
-      this.applyFitViewport(computeFitViewport(tasks));
+      const fit = computeFitViewport(tasks);
+      this._fitRestore = fit;
+      this.applyFitViewport(fit);
+    }
+
+    applyHorizonToData(tasks) {
+      const fit = computeHorizonViewport(tasks);
+      this._fitRestore = fit;
+      this.applyFitViewport(fit);
+      this.view = 'horizon';
+      this.fitToData = true;
+      this._syncViewButtons();
     }
 
     _shiftFitWindow(direction) {
@@ -365,7 +602,10 @@
     setData(tasks, deadlines) {
       this.tasks = tasks || [];
       this.deadlines = deadlines || {};
-      if (this.fitToData && !this._fitLocked) this.applyFitToData(this.tasks);
+      if (!this._fitLocked) {
+        if (this.view === 'horizon') this.applyHorizonToData(this.tasks);
+        else if (this.fitToData) this.applyFitToData(this.tasks);
+      }
       if (this.enableStats) this.updateStats(this.tasks);
       this.renderWhenReady();
     }
@@ -554,6 +794,13 @@
         gmap[key].tasks.push(t);
         if (t.job_id && !gmap[key].job_ids.includes(t.job_id)) gmap[key].job_ids.push(t.job_id);
       });
+      // Top → bottom by earliest planned start (then by commessa name).
+      groups.sort((a, b) => {
+        const startA = earliestCommessaStartMs(a.tasks);
+        const startB = earliestCommessaStartMs(b.tasks);
+        if (startA !== startB) return startA - startB;
+        return String(a.commessa || '').localeCompare(String(b.commessa || ''), 'it');
+      });
       const colourOf = {};
       groups.forEach((g, i) => { colourOf[g.commessa] = theme.palette[i % theme.palette.length]; });
 
@@ -584,6 +831,7 @@
 
       const groupRows = [];
       let yOffset = 8;
+      const pendingGroups = [];
       groups.forEach(g => {
         const colour = colourOf[g.commessa];
         const visibleTasks = g.tasks.map(t => {
@@ -638,18 +886,41 @@
         });
         if (!allStarts.length || !allFinish.length) return;
 
-        const summaryX1 = Math.max(dateToX(new Date(Math.min(...allStarts))), 0);
-        const summaryX2 = Math.min(dateToX(new Date(Math.max(...allFinish))), totalW);
+        const spanStart = new Date(Math.min(...allStarts.map(d => d.getTime())));
+        const spanEnd = new Date(Math.max(...allFinish.map(d => d.getTime())));
+        const summaryX1 = Math.max(dateToX(spanStart), 0);
+        const summaryX2 = Math.min(dateToX(spanEnd), totalW);
+        const groupKey = g.commessa || g.job_id;
+        const expanded = this._isGroupExpanded(groupKey);
+        const layoutTasks = expanded ? visibleTasks : [];
+        pendingGroups.push({
+          colour, job_id: g.job_id, commessa: g.commessa, job_ids: g.job_ids,
+          groupKey, expanded,
+          layoutTasks, allTasks: g.tasks,
+          summaryX1, summaryX2,
+        });
+      });
+
+      pendingGroups.forEach(meta => {
         const headerY = yOffset;
         yOffset += HEADER_H;
-        const taskEntries = visibleTasks.map(row => {
+        const taskEntries = meta.layoutTasks.map(row => {
           const y = yOffset;
           yOffset += ROW_H;
           return { ...row, y };
         });
         groupRows.push({
-          colour, job_id: g.job_id, commessa: g.commessa, job_ids: g.job_ids,
-          headerY, summaryX1, summaryX2, tasks: taskEntries, allTasks: g.tasks,
+          colour: meta.colour,
+          job_id: meta.job_id,
+          commessa: meta.commessa,
+          job_ids: meta.job_ids,
+          groupKey: meta.groupKey,
+          expanded: meta.expanded,
+          headerY,
+          summaryX1: meta.summaryX1,
+          summaryX2: meta.summaryX2,
+          tasks: taskEntries,
+          allTasks: meta.allTasks,
         });
         yOffset += GROUP_GAP;
       });
@@ -760,6 +1031,7 @@
           const SUMBAR_H = 6;
           const sumY = g.headerY + HEADER_H - SUMBAR_H - 4;
           const sumW = Math.max(g.summaryX2 - g.summaryX1, 20);
+          const toggleKey = g.groupKey || g.commessa || g.job_id;
           const lbl = document.createElementNS(NS, 'text');
           lbl.setAttribute('x', g.summaryX1 + 2);
           lbl.setAttribute('y', sumY - 5);
@@ -767,14 +1039,38 @@
           lbl.setAttribute('font-size', '12');
           lbl.setAttribute('font-weight', '700');
           lbl.setAttribute('font-family', '-apple-system,BlinkMacSystemFont,sans-serif');
-          if (self.enableDeadlineEditor) {
+          if (self.collapsibleGroups) {
             lbl.setAttribute('cursor', 'pointer');
-            lbl.setAttribute('data-dl-job-id', g.job_id);
+            lbl.setAttribute('data-toggle-group', toggleKey);
           }
-          const jobSpan = document.createElementNS(NS, 'tspan');
-          jobSpan.textContent = g.commessa || g.job_id;
-          lbl.appendChild(jobSpan);
+          const nameSpan = document.createElementNS(NS, 'tspan');
+          nameSpan.textContent = g.commessa || g.job_id;
+          lbl.appendChild(nameSpan);
+          // Home (collapsible) shows count / progress / status; compare/opt charts keep the name only.
+          if (self.collapsibleGroups) {
+            const dlForStats = (g.job_ids || [g.job_id]).map(jid => self.deadlines[jid]).filter(Boolean).sort().pop();
+            const stats = summarizeCommessaTasks(g.allTasks || [], dlForStats);
+            const attLabel = stats.total === 1 ? '1 att.' : (stats.total + ' att.');
+            const metaSpan = document.createElementNS(NS, 'tspan');
+            metaSpan.setAttribute('fill', theme.metaText);
+            metaSpan.setAttribute('font-size', '11');
+            metaSpan.setAttribute('font-weight', '650');
+            metaSpan.setAttribute('letter-spacing', '0.01em');
+            metaSpan.textContent = '  ·  ' + attLabel + '  ·  ' + stats.pct + '%';
+            lbl.appendChild(metaSpan);
+            const statusSpan = document.createElementNS(NS, 'tspan');
+            statusSpan.setAttribute(
+              'fill',
+              (theme.statusColors && theme.statusColors[stats.status]) || theme.metaText
+            );
+            statusSpan.setAttribute('font-size', '11');
+            statusSpan.setAttribute('font-weight', '650');
+            statusSpan.setAttribute('letter-spacing', '0.01em');
+            statusSpan.textContent = '  ·  ' + stats.status;
+            lbl.appendChild(statusSpan);
+          }
           barsSvg.appendChild(lbl);
+
           const sumBar = document.createElementNS(NS, 'rect');
           sumBar.setAttribute('x', g.summaryX1);
           sumBar.setAttribute('y', sumY);
@@ -783,55 +1079,65 @@
           sumBar.setAttribute('rx', SUMBAR_H / 2);
           sumBar.setAttribute('fill', g.colour);
           sumBar.setAttribute('opacity', '0.45');
+          if (self.collapsibleGroups) {
+            sumBar.setAttribute('cursor', 'pointer');
+            sumBar.setAttribute('data-toggle-group', toggleKey);
+          }
           barsSvg.appendChild(sumBar);
         }
 
         const dlStr = (g.job_ids || [g.job_id]).map(jid => self.deadlines[jid]).filter(Boolean).sort().pop();
-        if (dlStr) {
+        const showDeadline = !(self.collapsibleGroups && !g.expanded);
+        if (showDeadline && dlStr) {
           const dlDate = parseDate(dlStr);
           if (dlDate >= minD && dlDate <= maxD) {
             const dlX = dateToX(dlDate);
-            const dlTop = g.headerY;
-            const dlBot = g.tasks.length ? g.tasks[g.tasks.length - 1].y + ROW_H : g.headerY + HEADER_H;
             const dlColor = theme.deadlineColor;
+            const dlFmt = dlDate.toLocaleDateString('it-IT', {
+              day: '2-digit', month: '2-digit', year: '2-digit',
+            });
+            const ownH = HEADER_H + (g.tasks.length ? g.tasks.length * ROW_H : 0);
+            const dlTop = g.headerY + HEADER_H;
+            const dlBot = g.headerY + ownH;
 
-            const dlLine = document.createElementNS(NS, 'line');
-            dlLine.setAttribute('x1', dlX);
-            dlLine.setAttribute('y1', dlTop + HEADER_H);
-            dlLine.setAttribute('x2', dlX);
-            dlLine.setAttribute('y2', dlBot);
-            dlLine.setAttribute('stroke', dlColor);
-            dlLine.setAttribute('stroke-width', '1.5');
-            dlLine.setAttribute('stroke-dasharray', '4,3');
-            dlLine.setAttribute('opacity', '0.80');
-            barsSvg.appendChild(dlLine);
+            if (dlBot > dlTop) {
+              const dlLine = document.createElementNS(NS, 'line');
+              dlLine.setAttribute('x1', dlX);
+              dlLine.setAttribute('y1', dlTop);
+              dlLine.setAttribute('x2', dlX);
+              dlLine.setAttribute('y2', dlBot);
+              dlLine.setAttribute('stroke', dlColor);
+              dlLine.setAttribute('stroke-width', '1.5');
+              dlLine.setAttribute('stroke-dasharray', '4,3');
+              dlLine.setAttribute('opacity', '0.80');
+              barsSvg.appendChild(dlLine);
 
-            const tickTop = document.createElementNS(NS, 'line');
-            tickTop.setAttribute('x1', dlX - 5);
-            tickTop.setAttribute('y1', dlTop + HEADER_H);
-            tickTop.setAttribute('x2', dlX + 5);
-            tickTop.setAttribute('y2', dlTop + HEADER_H);
-            tickTop.setAttribute('stroke', dlColor);
-            tickTop.setAttribute('stroke-width', '2');
-            tickTop.setAttribute('opacity', '0.85');
-            barsSvg.appendChild(tickTop);
+              const tickTop = document.createElementNS(NS, 'line');
+              tickTop.setAttribute('x1', dlX - 5);
+              tickTop.setAttribute('y1', dlTop);
+              tickTop.setAttribute('x2', dlX + 5);
+              tickTop.setAttribute('y2', dlTop);
+              tickTop.setAttribute('stroke', dlColor);
+              tickTop.setAttribute('stroke-width', '2');
+              tickTop.setAttribute('opacity', '0.85');
+              barsSvg.appendChild(tickTop);
+            }
 
-            const DIA = 5;
-            const labelY = dlBot + 4;
+            const DIA = 4;
+            const markerY = dlBot;
             const poly = document.createElementNS(NS, 'polygon');
             poly.setAttribute('points',
-              dlX + ',' + labelY + ' ' +
-              (dlX + DIA) + ',' + (labelY + DIA) + ' ' +
-              dlX + ',' + (labelY + DIA * 2) + ' ' +
-              (dlX - DIA) + ',' + (labelY + DIA));
+              dlX + ',' + markerY + ' ' +
+              (dlX + DIA) + ',' + (markerY + DIA) + ' ' +
+              dlX + ',' + (markerY + DIA * 2) + ' ' +
+              (dlX - DIA) + ',' + (markerY + DIA));
             poly.setAttribute('fill', dlColor);
             poly.setAttribute('opacity', '0.9');
             barsSvg.appendChild(poly);
 
-            const dlFmt = dlDate.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit' });
             const dlLbl = document.createElementNS(NS, 'text');
             dlLbl.setAttribute('x', dlX + DIA + 4);
-            dlLbl.setAttribute('y', labelY + DIA + 3.5);
+            dlLbl.setAttribute('y', markerY + DIA + 3);
             dlLbl.setAttribute('fill', dlColor);
             dlLbl.setAttribute('font-size', '9');
             dlLbl.setAttribute('font-weight', '700');
@@ -1132,6 +1438,13 @@
             const dlEl = e.target.closest('[data-dl-job-id]');
             if (dlEl) { self.openDeadlineEditor(dlEl.dataset.dlJobId, e.clientX, e.clientY); return; }
           }
+          if (self.collapsibleGroups) {
+            const toggleEl = e.target.closest('[data-toggle-group]');
+            if (toggleEl) {
+              self.toggleGroup(toggleEl.getAttribute('data-toggle-group'));
+              return;
+            }
+          }
           if (self.enableWarningNav) {
             const warnEl = e.target.closest('[data-warn-ormid]');
             if (warnEl) { window.location.href = '/pianificazione/?focus=' + warnEl.dataset.warnOrmid; return; }
@@ -1143,6 +1456,7 @@
         });
       }
 
+      this._syncExpandToggleBtn();
       this._lastLayoutW = totalW;
       } finally {
         this._rendering = false;
@@ -1200,11 +1514,16 @@
         btn.addEventListener('click', () => {
           tbtnRoot.querySelectorAll('.tbtn').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
-          self.fitToData = false;
-          self._dataMinD = null;
-          self._dataMaxD = null;
           self.view = btn.dataset.view;
           self.offset = 0;
+          if (btn.dataset.view === 'horizon') {
+            self.applyHorizonToData(self.tasks);
+          } else {
+            self.fitToData = false;
+            self._dataMinD = null;
+            self._dataMaxD = null;
+            self._fitRestore = null;
+          }
           self.render(self.tasks, self.view);
         });
       });
@@ -1229,9 +1548,9 @@
         self.render(self.tasks, self.view);
       });
       if (todayBtn) todayBtn.addEventListener('click', () => {
-        if (self.fitToData) {
-          if (!self._fitShifted) return;
-          if (self._fitRestore) self.applyFitViewport(self._fitRestore);
+        if (self.view === 'horizon' || self.fitToData) {
+          if (self.view === 'horizon') self.applyHorizonToData(self.tasks);
+          else if (self._fitRestore) self.applyFitViewport(self._fitRestore);
           else self.applyFitToData(self.tasks);
           self.render(self.tasks, self.view);
           return;
@@ -1240,6 +1559,15 @@
         self.offset = 0;
         self.render(self.tasks, self.view);
       });
+
+      const expandToggle = this.el('nav-expand-toggle');
+      if (expandToggle && this.collapsibleGroups) {
+        expandToggle.addEventListener('click', () => {
+          if (expandToggle.dataset.mode === 'collapse') self.collapseAllGroups();
+          else self.expandAllGroups();
+        });
+        this._syncExpandToggleBtn();
+      }
 
       const barsScroll = this.el('bars-scroll');
       const axisScroll = this.el('axis-scroll');
@@ -1285,6 +1613,8 @@
   }
 
   GanttChart.computeFitViewport = computeFitViewport;
+  GanttChart.computeHorizonViewport = computeHorizonViewport;
+  GanttChart.summarizeCommessaTasks = summarizeCommessaTasks;
   GanttChart.LIGHT_PALETTE = PALETTE_LIGHT;
   global.GanttChart = GanttChart;
 })(typeof window !== 'undefined' ? window : this);

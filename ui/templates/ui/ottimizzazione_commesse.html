@@ -69,11 +69,18 @@
       </div>
       <div class="ott-job-list-bar">
         <p class="ott-job-list-count" id="ott-list-count" aria-live="polite"></p>
-        <label class="ott-job-select-all">
-          <span id="ott-select-all-label">Seleziona tutte</span>
-          <input type="checkbox" id="ott-select-all" class="ott-job-check-input" aria-label="Seleziona tutte le commesse visibili">
-          <span class="ott-job-check-ui" aria-hidden="true"></span>
-        </label>
+        <div class="ott-job-list-bar-actions">
+          <label class="ott-job-select-all">
+            <span>Includi spiegazione</span>
+            <input type="checkbox" id="ott-include-explanation" class="ott-job-check-input" aria-label="Includi spiegazione automatica del risultato">
+            <span class="ott-job-check-ui" aria-hidden="true"></span>
+          </label>
+          <label class="ott-job-select-all">
+            <span id="ott-select-all-label">Seleziona tutte</span>
+            <input type="checkbox" id="ott-select-all" class="ott-job-check-input" aria-label="Seleziona tutte le commesse visibili">
+            <span class="ott-job-check-ui" aria-hidden="true"></span>
+          </label>
+        </div>
       </div>
 
       <div id="ott-card-list" class="ott-job-list"></div>
@@ -167,6 +174,7 @@
   const filterDot = document.getElementById('ott-filter-dot');
   const selectAllCb = document.getElementById('ott-select-all');
   const selectAllLabel = document.getElementById('ott-select-all-label');
+  const includeExplanationCb = document.getElementById('ott-include-explanation');
   const infoOverlay = document.getElementById('ott-info-overlay');
   const vincoliOverlay = document.getElementById('ott-vincoli-overlay');
   const vincoliBody = document.getElementById('ott-vincoli-body');
@@ -506,6 +514,7 @@
       job_ids: [...selected],
       earliest_start_overrides: overrides,
       horizon_start: horizonEl.value,
+      include_explanation: !!(includeExplanationCb && includeExplanationCb.checked),
     };
 
     confirmBtn.disabled = true;

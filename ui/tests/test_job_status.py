@@ -93,16 +93,18 @@ class JobStatusHelpersTest(TestCase):
             )
         )
 
-    def test_aggregate_job_status_completed(self) -> None:
+    def test_aggregate_job_status_completed_on_time(self) -> None:
         today = localdate()
         tasks = [
             {
                 "status_pills": [{"key": "completata", "label": "COMPLETATA"}],
+                "start": today.isoformat(),
+                "finish": (today + timedelta(days=2)).isoformat(),
                 "actual_start": today.isoformat(),
-                "actual_finish": today.isoformat(),
+                "actual_finish": (today + timedelta(days=1)).isoformat(),
             }
         ]
-        self.assertEqual(_aggregate_job_status(tasks), "completata")
+        self.assertEqual(_aggregate_job_status(tasks), "in_tempo")
 
     def test_aggregate_job_status_late_over_planned(self) -> None:
         tasks = [
@@ -111,16 +113,48 @@ class JobStatusHelpersTest(TestCase):
         ]
         self.assertEqual(_aggregate_job_status(tasks), "in_ritardo")
 
-    def test_aggregate_job_status_in_progress(self) -> None:
+    def test_aggregate_job_status_in_tempo(self) -> None:
+        today = localdate()
         tasks = [
-            {"status_pills": [{"key": "in_lavorazione", "label": "IN LAVORAZIONE"}]},
+            {
+                "status_pills": [{"key": "in_lavorazione", "label": "IN LAVORAZIONE"}],
+                "start": today.isoformat(),
+                "finish": (today + timedelta(days=5)).isoformat(),
+                "actual_start": today.isoformat(),
+                "actual_finish": None,
+            },
             {"status_pills": [{"key": "pianificata", "label": "PIANIFICATA"}]},
         ]
-        self.assertEqual(_aggregate_job_status(tasks), "in_lavorazione")
+        self.assertEqual(_aggregate_job_status(tasks), "in_tempo")
+
+    def test_aggregate_job_status_pianificata(self) -> None:
+        future = localdate() + timedelta(days=30)
+        tasks = [
+            {
+                "status_pills": [{"key": "pianificata", "label": "PIANIFICATA"}],
+                "start": future.isoformat(),
+                "finish": (future + timedelta(days=5)).isoformat(),
+            }
+        ]
+        self.assertEqual(_aggregate_job_status(tasks), "pianificata")
+
+    def test_aggregate_job_status_rischio_penale(self) -> None:
+        start = localdate()
+        tasks = [
+            {
+                "status_pills": [{"key": "in_lavorazione", "label": "IN LAVORAZIONE"}],
+                "start": start.isoformat(),
+                "finish": (start + timedelta(days=5)).isoformat(),
+                "actual_start": start.isoformat(),
+                "actual_finish": None,
+            }
+        ]
+        deadline = (start + timedelta(days=2)).isoformat()
+        self.assertEqual(_aggregate_job_status(tasks, deadline), "rischio_penale")
 
 
 class FetchGroupedSortTest(TestCase):
-    """Ensure _fetch_grouped orders commesse by aggregate status."""
+    """Ensure _fetch_grouped orders commesse by earliest start date."""
 
     def setUp(self) -> None:
         today = localdate()
@@ -138,24 +172,48 @@ class FetchGroupedSortTest(TestCase):
 
         _make_att(
             "Z_DONE",
-            di=past,
-            df=past + timedelta(days=5),
-            actual_start=past,
-            actual_finish=past + timedelta(days=5),
+            di=past + timedelta(days=2),
+            df=past + timedelta(days=7),
+            actual_start=past + timedelta(days=2),
+            actual_finish=past + timedelta(days=7),
         )
         _make_att("A_LATE", di=past, df=past + timedelta(days=5))
         _make_att(
             "B_WORK",
-            di=past,
-            df=past + timedelta(days=5),
-            actual_start=past,
+            di=past + timedelta(days=1),
+            df=past + timedelta(days=6),
+            actual_start=past + timedelta(days=1),
         )
         _make_att("C_PLAN", di=future, df=future + timedelta(days=5))
 
-    def test_fetch_grouped_sorts_by_status_then_name(self) -> None:
+    def test_fetch_grouped_sorts_by_earliest_start_then_name(self) -> None:
         groups = _fetch_grouped()
         names = [g["job"]["commessa"] for g in groups]
-        self.assertEqual(names, ["A_LATE", "B_WORK", "C_PLAN", "Z_DONE"])
+        self.assertEqual(names, ["A_LATE", "B_WORK", "Z_DONE", "C_PLAN"])
+
+    def test_activities_within_commessa_sorted_by_start(self) -> None:
+        today = localdate()
+        Job.objects.create(commessa="MULTI", job_id="MULTI")
+        _make_att(
+            "MULTI",
+            item=2,
+            activity="Later",
+            di=today + timedelta(days=10),
+            df=today + timedelta(days=15),
+        )
+        _make_att(
+            "MULTI",
+            item=1,
+            activity="Earlier",
+            di=today + timedelta(days=1),
+            df=today + timedelta(days=5),
+        )
+        groups = {g["job"]["commessa"]: g for g in _fetch_grouped()}
+        acts = groups["MULTI"]["activities"]
+        self.assertEqual(
+            [a["activity"] for a in acts],
+            ["Earlier", "Later"],
+        )
 
 
 class OptimizationExcludeCompletedTest(TestCase):
@@ -243,5 +301,9 @@ class PianificazioneFilterUiTest(TestCase):
         html = response.content.decode()
         self.assertIn('id="pian-filter-btn"', html)
         self.assertIn('id="pian-filter-panel"', html)
+        self.assertIn('id="pian-filter-rischio_penale"', html)
         self.assertIn('id="pian-filter-in_ritardo"', html)
-        self.assertIn('id="pian-filter-completata"', html)
+        self.assertIn('id="pian-filter-in_tempo"', html)
+        self.assertIn('id="pian-filter-pianificata"', html)
+        self.assertNotIn('id="pian-filter-completata"', html)
+        self.assertNotIn('id="pian-filter-in_lavorazione"', html)

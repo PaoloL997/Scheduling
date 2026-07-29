@@ -48,7 +48,7 @@ class WpsUploadForm(forms.Form):
 
     Validates that the uploaded file is a PDF and that its filename follows
     the expected naming convention:
-    ``{modello_testa}_{commessa}[_{item}].pdf``.
+    ``{modello_testa}_{commessa}[_{itemdisegno}].pdf``.
     """
 
     wps_file = forms.FileField(
@@ -74,7 +74,7 @@ class WpsUploadForm(forms.Form):
         stem = f.name[:-4]
         if "_" not in stem:
             raise forms.ValidationError(
-                "Nome file non valido. Formato atteso: modellotesta_commessa[_item].pdf"
+                "Nome file non valido. Formato atteso: modellotesta_commessa[_itemdisegno].pdf"
             )
         return f
 
