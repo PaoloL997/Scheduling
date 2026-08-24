@@ -62,6 +62,9 @@ def test_reservation_blocks_resource_window():
 
 
 def test_reservation_on_unused_resource_is_harmless():
+    # A tight due date proves the reservation does not block m1/t1: only an
+    # immediate start avoids the penalty. (With slack, workload levelling
+    # would legitimately move the activity outside the reserved window.)
     a_free = make_activity("a1", "j1", 1, duration_days=2, bore_min=10, bore_max=20)
     resources = [
         make_resource("m1", ResourceType.MANDRINO, bore=15),
@@ -72,12 +75,13 @@ def test_reservation_on_unused_resource_is_harmless():
     ]
     outcome = solve(
         _problem(
-            [make_job("j1", [a_free], due_date=FAR_DUE)],
+            [make_job("j1", [a_free], due_date=date(2026, 1, 2))],
             resources,
             reservations=reservations,
         )
     )
     assert outcome.feasible
+    assert outcome.total_penalty_cents == 0
     assert outcome.activity_starts["a1"] == 0
 
 

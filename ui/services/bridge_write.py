@@ -220,19 +220,13 @@ def update_attivita(orm_id: int, data: dict) -> dict:
                 RisorsaAttivita.objects.bulk_create(risorsa_rows)
 
     if risorse_data is not None:
-        from ui.services.problem_detection import (
-            detect_and_save_problems,
-            resolve_stale_overlaps,
-        )
+        from ui.services.problem_detection import detect_and_save_problems
 
         detect_and_save_problems(a, risorse_data)
-        resolve_stale_overlaps(a)
+    elif "plant" in data:
+        from ui.services.problem_detection import refresh_problems_for_attivita
 
-    overlaps: list[dict] = []
-    if "actual_start" in data and a.actual_start:
-        from ui.services.problem_detection import detect_overlap_problems
-
-        overlaps = detect_overlap_problems(a)
+        refresh_problems_for_attivita(a)
 
     mpp_payload: dict = {
         "attivita_id": orm_id,
@@ -263,7 +257,6 @@ def update_attivita(orm_id: int, data: dict) -> dict:
         "item": a.item,
         "job_id": a.job_id,
         "activity_id": a.activity_id,
-        "overlaps": overlaps,
     }
     if risorse_data is not None:
         risorse_all = list(RisorsaAttivita.objects.filter(attivita_id=a.pk))

@@ -272,13 +272,15 @@ def _fetch_grouped() -> list[dict]:
         activities = groups_map.get(commessa, [])
         activities.sort(
             key=lambda t: (
-                _parse_iso_day(t.get("start")) or _parse_iso_day(t.get("actual_start")) or date.max,
+                _parse_iso_day(t.get("start"))
+                or _parse_iso_day(t.get("actual_start"))
+                or date.max,
                 str(t.get("activity_id") or ""),
             )
         )
         job = {
             **job,
-            "n_open_problems": sum(a.get("warning_count") or 0 for a in activities),
+            "n_open_problems": _count_job_open_problems(activities),
         }
         result.append({"job": job, "activities": activities})
     result.sort(
@@ -290,11 +292,35 @@ def _fetch_grouped() -> list[dict]:
     return result
 
 
+def _count_job_open_problems(activities: list[dict]) -> int:
+    """Return open problems for a commessa, including resource overlaps.
+
+    Stored problems (acquisto/spostamento) are summed from ``warning_count``.
+    Overlaps are not persisted, so they are counted as unique pairs that
+    touch any activity of this job — both the delayed and the blocked
+    commessa see the conflict.
+    """
+    warnings = sum(a.get("warning_count") or 0 for a in activities)
+    pairs: set[frozenset[int]] = set()
+    for task in activities:
+        orm_id = task.get("orm_id")
+        if orm_id is None:
+            continue
+        for item in task.get("resource_overlaps") or []:
+            peer = item.get("peer_orm_id")
+            if peer is None:
+                continue
+            pairs.add(frozenset((int(orm_id), int(peer))))
+    return warnings + len(pairs)
+
+
 def _earliest_activity_start(activities: list[dict]) -> date | None:
     """Return the earliest planned (or actual) start among activities."""
     earliest: date | None = None
     for task in activities or []:
-        day = _parse_iso_day(task.get("start")) or _parse_iso_day(task.get("actual_start"))
+        day = _parse_iso_day(task.get("start")) or _parse_iso_day(
+            task.get("actual_start")
+        )
         if day is None:
             continue
         if earliest is None or day < earliest:
@@ -321,11 +347,10 @@ def _fetch_tasks() -> list[dict]:
     """
 
     from ui.models import Attivita
-
     from ui.services.problem_detection import detect_for_all_activities
 
-    # Recalculate acquisto/spostamento/sovrapposizione so the page reflects
-    # the current schedule and resource assignments after edits.
+    # Recalculate acquisto/spostamento so the page reflects the current
+    # schedule and resource assignments after edits.
     detect_for_all_activities()
 
     activities = list(
@@ -346,6 +371,7 @@ def _fetch_tasks() -> list[dict]:
         else:
             task["predecessor_names"] = None
         result.append(task)
+    _attach_resource_overlaps(result, activities)
     return result
 
 
@@ -544,7 +570,9 @@ def _attivita_to_task_dict(a) -> dict:
     risorse_all = list(a.risorse.all())
     res_fmt = format_activity_resources(risorse_all)
     resources = ";".join(res_fmt["flat_ids"])
-    problemi_all = list(a.problemi.all())
+    problemi_all = [
+        p for p in a.problemi.all() if p.tipo != ProblemaAttivita.TIPO_SOVRAPPOSIZIONE
+    ]
     warning_count = sum(1 for p in problemi_all if not p.risolto)
     note_count = sum(1 for p in problemi_all if p.risolto)
 
@@ -588,6 +616,47 @@ def _attivita_to_task_dict(a) -> dict:
         "warning_count": warning_count,
         "note_count": note_count,
         "status_pills": status_pills,
+        "resource_overlaps": [],
+        "resource_overlaps_json": "[]",
+    }
+
+
+def _attach_resource_overlaps(tasks: list[dict], activities: list) -> None:
+    """Attach read-only resource-overlap payloads to pianificazione task dicts.
+
+    Overlaps are computed once for the whole set so the page load stays
+    O(n²) over activities rather than repeating the scan per row.
+    """
+    from ui.services.overlap_reassign import enrich_overlaps_with_suggestions
+    from ui.services.problem_detection import find_resource_overlaps
+
+    by_pk = find_resource_overlaps(activities)
+    enrich_overlaps_with_suggestions(by_pk, activities)
+    for task in tasks:
+        items = by_pk.get(task.get("orm_id"), [])
+        task["resource_overlaps"] = items
+        task["resource_overlaps_json"] = json.dumps(items)
+
+
+def _overlap_update_payload(orm_id: int) -> dict:
+    """Return overlap lists for an activity and the peers that share a conflict."""
+    from ui.models import Attivita
+    from ui.services.overlap_reassign import enrich_overlaps_with_suggestions
+    from ui.services.problem_detection import find_resource_overlaps
+
+    activities = list(Attivita.objects.prefetch_related("risorse"))
+    by_pk = find_resource_overlaps(activities)
+    enrich_overlaps_with_suggestions(by_pk, activities)
+    items = by_pk.get(orm_id, [])
+    affected = {orm_id}
+    for item in items:
+        affected.add(item["peer_orm_id"])
+    for pk, lst in by_pk.items():
+        if any(entry["peer_orm_id"] == orm_id for entry in lst):
+            affected.add(pk)
+    return {
+        "resource_overlaps": items,
+        "overlap_updates": {str(pk): by_pk.get(pk, []) for pk in affected},
     }
 
 
@@ -889,6 +958,7 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
         logger.error("Errore aggiornamento Attivita pk=%s: %s", orm_id, exc)
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
 
+    result.update(_overlap_update_payload(int(orm_id)))
     return JsonResponse({"ok": True, **result})
 
 
@@ -1301,6 +1371,7 @@ def _load_gantt_data(plant_colors: dict) -> tuple[list, dict]:
         Tuple of ``(tasks list, deadlines dict)``.
     """
     from ui.models import Attivita
+    from ui.services.problem_detection import find_resource_overlaps
 
     deadlines: dict[str, str] = {
         job["job_id"]: job["delivery_date"]
@@ -1310,11 +1381,19 @@ def _load_gantt_data(plant_colors: dict) -> tuple[list, dict]:
     }
 
     tasks = []
-    for att in (
+    activities = list(
         Attivita.objects.prefetch_related("risorse")
-        .annotate(open_problems=Count("problemi", filter=Q(problemi__risolto=False)))
+        .annotate(
+            open_problems=Count(
+                "problemi",
+                filter=Q(problemi__risolto=False)
+                & ~Q(problemi__tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE),
+            )
+        )
         .order_by("commessa", "item", "activity")
-    ):
+    )
+    overlaps_by_pk = find_resource_overlaps(activities)
+    for att in activities:
         resources_str = ";".join(r.risorsa_id for r in att.risorse.all()) or None
         tasks.append(
             {
@@ -1345,6 +1424,7 @@ def _load_gantt_data(plant_colors: dict) -> tuple[list, dict]:
                 "predecessors": att.predecessors,
                 "orm_id": att.pk,
                 "warning_count": att.open_problems,
+                "resource_overlaps": overlaps_by_pk.get(att.pk, []),
             }
         )
 
@@ -1894,7 +1974,9 @@ def api_attivita_problemi(request: HttpRequest, pk: int) -> JsonResponse:
         return JsonResponse({"ok": False, "error": "Attività non trovata."}, status=404)
 
     problemi = list(
-        att.problemi.order_by("created_at").values(
+        att.problemi.exclude(tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE)
+        .order_by("created_at")
+        .values(
             "id",
             "tipo",
             "risorsa_tipo",
@@ -1923,64 +2005,64 @@ def api_attivita_problemi(request: HttpRequest, pk: int) -> JsonResponse:
 
 
 @login_required
-@csrf_exempt
-@require_http_methods(["PATCH"])
-def api_problema_risolvi(request: HttpRequest, pk: int) -> JsonResponse:
-    """Mark a single ProblemaAttivita as resolved.
+@require_http_methods(["POST"])
+def api_overlap_reassign(request: HttpRequest, pk: int) -> JsonResponse:
+    """Apply a recomputed overlap reassignment on the blocked activity.
 
-    Accepts an optional JSON body with ``note`` (free-text resolution notes).
-    Sets ``risolto=True`` and records the current timestamp.
-
-    Args:
-        request: PATCH request with optional JSON body ``{"note": "..."}``.
-        pk: Primary key of the :class:`~ui.models.ProblemaAttivita`.
-
-    Returns:
-        JsonResponse: ``{"ok": true, "warning_count": N}`` where
-            ``warning_count`` is the remaining number of unresolved problems
-            for the same activity.  Returns 404 if not found.
+    ``pk`` is the activity opened in Problemi (late or blocked).  Body may
+    include ``blocked_orm_id`` when accepting from the late side.
     """
-    from django.utils import timezone
+    from ui.services.overlap_reassign import (
+        OverlapReassignError,
+        apply_overlap_reassignment,
+    )
+    from ui.services.problem_detection import find_resource_overlaps
 
     try:
-        problema = ProblemaAttivita.objects.select_related("attivita").get(pk=pk)
-    except ProblemaAttivita.DoesNotExist:
-        return JsonResponse({"ok": False, "error": "Problema non trovato."}, status=404)
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    activities = list(Attivita.objects.prefetch_related("risorse"))
+    overlaps = find_resource_overlaps(activities)
+    view_items = overlaps.get(pk, [])
+    if not view_items:
+        return JsonResponse(
+            {"ok": False, "error": "Nessuna sovrapposizione su questa attività."},
+            status=400,
+        )
+
+    raw_blocked = payload.get("blocked_orm_id")
+    if raw_blocked in (None, ""):
+        if any(item.get("role") == "blocked" for item in view_items):
+            blocked_id = pk
+        else:
+            blocked_id = view_items[0].get("peer_orm_id")
+    else:
+        try:
+            blocked_id = int(raw_blocked)
+        except (TypeError, ValueError):
+            return JsonResponse(
+                {"ok": False, "error": "blocked_orm_id non valido."}, status=400
+            )
+
+    if blocked_id != pk:
+        if not any(item.get("peer_orm_id") == blocked_id for item in view_items):
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "L'attività bloccata non è in conflitto con questa.",
+                },
+                status=400,
+            )
 
     try:
-        body = json.loads(request.body) if request.body else {}
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        body = {}
+        result = apply_overlap_reassignment(blocked_id)
+    except OverlapReassignError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=exc.status_code)
 
-    note = (body.get("note") or "").strip()
-    problema.risolto = True
-    problema.note_risoluzione = note
-    problema.data_risoluzione = timezone.now()
-    problema.save(update_fields=["risolto", "note_risoluzione", "data_risoluzione"])
-
-    # Persist resolution note in RisoluzioneProblema so it survives re-imports.
-    from ui.models import RisoluzioneProblema
-
-    RisoluzioneProblema.objects.update_or_create(
-        commessa=problema.attivita.commessa,
-        item=problema.attivita.item,
-        activity=problema.attivita.activity,
-        tipo=problema.tipo,
-        risorsa_tipo=problema.risorsa_tipo,
-        risorsa_uid=problema.risorsa_uid,
-        defaults={
-            "note_risoluzione": note,
-            "data_risoluzione": problema.data_risoluzione,
-        },
-    )
-
-    remaining = ProblemaAttivita.objects.filter(
-        attivita=problema.attivita, risolto=False
-    ).count()
-    resolved = ProblemaAttivita.objects.filter(
-        attivita=problema.attivita, risolto=True
-    ).count()
-
-    return JsonResponse(
-        {"ok": True, "warning_count": remaining, "note_count": resolved}
-    )
+    result.update(_overlap_update_payload(blocked_id))
+    result["ok"] = True
+    return JsonResponse(result)

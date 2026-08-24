@@ -555,22 +555,3 @@ def api_bridge_tipi_attivita_detail(request: HttpRequest, pk: int) -> JsonRespon
             pk=pk,
         )
     )
-
-
-# ── Write: problemi ───────────────────────────────────────────────────────────
-
-
-@bridge_write_guard
-@require_http_methods(["POST"])
-def api_bridge_problema_risolvi(request: HttpRequest, pk: int) -> JsonResponse:
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-    inner = _factory.patch(
-        f"/api/bridge/problemi/{pk}/risolvi/",
-        data=json.dumps(parsed).encode(),
-        content_type="application/json",
-    )
-    inner.user = request.user
-    inner.session = request.session
-    return _forward_response(views.api_problema_risolvi(inner, pk=pk))

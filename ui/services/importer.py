@@ -398,9 +398,9 @@ def _run_import() -> None:
         import_from_mpp(_mpp_path)
         import_from_xlsx(_xlsx_path)
 
-        # Detect problems for all imported activities and restore previously
-        # saved resolution notes (they survive the dataset reset via the
-        # RisoluzioneProblema table).
+        # Detect problems for all imported activities. Manual resolution notes
+        # are not restored: acquisto/spostamento close only when the condition
+        # is gone.
         try:
             from ui.services.problem_detection import (
                 detect_for_all_activities,

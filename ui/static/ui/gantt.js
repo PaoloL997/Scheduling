@@ -13,62 +13,35 @@
     'hsl(0,75%,62%)', 'hsl(190,65%,52%)', 'hsl(48,90%,55%)', 'hsl(320,60%,65%)',
     'hsl(100,50%,55%)', 'hsl(230,75%,65%)', 'hsl(15,80%,60%)', 'hsl(170,55%,50%)',
   ];
-  const PALETTE_LIGHT = [
-    'hsl(211,84%,40%)', 'hsl(38,90%,38%)', 'hsl(160,72%,34%)', 'hsl(280,76%,42%)',
-    'hsl(0,80%,40%)', 'hsl(190,78%,34%)', 'hsl(48,92%,36%)', 'hsl(320,76%,42%)',
-    'hsl(100,68%,34%)', 'hsl(230,82%,42%)', 'hsl(15,88%,40%)', 'hsl(170,70%,32%)',
-  ];
 
-  function chartTheme(isLight) {
+  function chartTheme() {
     return {
-      palette: isLight ? PALETTE_LIGHT : PALETTE,
-      gridLine: isLight ? 'hsl(220,12%,84%)' : 'hsl(220,10%,15%)',
-      axisText: isLight ? 'hsl(220,10%,42%)' : 'hsl(220,10%,46%)',
-      axisTextWeekend: isLight ? 'hsl(220,8%,52%)' : 'hsl(220,10%,32%)',
-      metaText: isLight ? 'hsl(220,16%,26%)' : 'hsl(220,14%,86%)',
-      // Status label next to commessa summary: In tempo / Pianificata / …
-      // Light theme uses a dark stand-in for "white" so the text stays readable.
+      palette: PALETTE,
+      gridLine: 'hsl(220,10%,15%)',
+      axisText: 'hsl(220,10%,46%)',
+      axisTextWeekend: 'hsl(220,10%,32%)',
+      metaText: 'hsl(220,14%,86%)',
       statusColors: {
-        'In tempo': isLight ? 'hsl(220,14%,18%)' : '#ffffff',
-        'Pianificata': isLight ? 'hsl(220,8%,48%)' : 'hsl(220,8%,58%)',
-        'In ritardo': isLight ? 'hsl(28,90%,42%)' : 'hsl(28,95%,55%)',
-        'Rischio penale': isLight ? 'hsl(0,75%,46%)' : 'hsl(0,80%,58%)',
+        'In tempo': '#ffffff',
+        'Pianificata': 'hsl(220,8%,58%)',
+        'In ritardo': 'hsl(28,95%,55%)',
+        'Rischio penale': 'hsl(0,80%,58%)',
       },
-      weekendFill: isLight ? 'hsl(220,14%,88%)' : 'hsl(220,30%,80%)',
-      weekendOpacity: isLight ? '0.45' : '0.06',
-      todayFill: isLight ? 'hsl(0,82%,48%)' : 'hsl(0,80%,50%)',
-      todayOpacity: isLight ? '0.22' : '0.10',
-      todayLineColor: isLight ? 'hsl(0,88%,42%)' : 'hsl(0,90%,58%)',
-      todayLineOpacity: isLight ? '0.85' : '0.60',
-      todayLineWidth: isLight ? '2' : '1.5',
-      deadlineColor: isLight ? 'hsl(0,55%,44%)' : 'hsl(0,80%,60%)',
-      changedStroke: isLight ? 'hsl(158,60%,30%)' : 'hsl(160,70%,50%)',
-      barFillOpacity: isLight ? '0.44' : '0.08',
-      barChangedFillOpacity: isLight ? '0.58' : '0.18',
-      barStrokeOpacity: isLight ? '1' : '0.70',
-      currentFillOpacity: isLight ? '0.72' : '0.50',
-      proposedFillOpacity: isLight ? '0.42' : '0.06',
+      weekendFill: 'hsl(220,30%,80%)',
+      weekendOpacity: '0.06',
+      todayFill: 'hsl(0,80%,50%)',
+      todayOpacity: '0.10',
+      todayLineColor: 'hsl(0,90%,58%)',
+      todayLineOpacity: '0.60',
+      todayLineWidth: '1.5',
+      deadlineColor: 'hsl(0,80%,60%)',
+      changedStroke: 'hsl(160,70%,50%)',
+      barFillOpacity: '0.08',
+      barChangedFillOpacity: '0.18',
+      barStrokeOpacity: '0.70',
+      currentFillOpacity: '0.50',
+      proposedFillOpacity: '0.06',
     };
-  }
-
-  const _activeCharts = new Set();
-  let _themeWatcherBound = false;
-  let _lastThemeLight = null;
-
-  function bindThemeWatcher() {
-    if (_themeWatcherBound || typeof MutationObserver === 'undefined') return;
-    if (typeof document === 'undefined' || !document.body) return;
-    _themeWatcherBound = true;
-    _lastThemeLight = document.body.classList.contains('light');
-    const obs = new MutationObserver(() => {
-      const isLight = document.body.classList.contains('light');
-      if (isLight === _lastThemeLight) return;
-      _lastThemeLight = isLight;
-      _activeCharts.forEach(chart => {
-        if (chart.tasks && chart.tasks.length) chart.renderWhenReady();
-      });
-    });
-    obs.observe(document.body, { attributes: true, attributeFilter: ['class'] });
   }
 
   let _globalTipDismissBound = false;
@@ -88,6 +61,74 @@
       document.querySelectorAll('#gantt-tip, #ott-gantt-tip, [id$="-gantt-tip"]').forEach(tip => {
         tip.style.display = 'none';
       });
+    });
+  }
+
+  function svgEl(name, attrs) {
+    const el = document.createElementNS(NS, name);
+    if (attrs) Object.keys(attrs).forEach(k => el.setAttribute(k, attrs[k]));
+    return el;
+  }
+
+  function appendProblemsBadge(parent, x, y, count, ormId) {
+    const label = String(count);
+    const h = 18;
+    const tri = 12;
+    const countW = Math.max(8, label.length * 6.6);
+    const w = 6 + tri + 4 + countW + 8;
+    const g = svgEl('g', {
+      class: 'gantt-problems-badge',
+      'data-warn-ormid': String(ormId),
+      transform: 'translate(' + x + ',' + y + ')',
+    });
+    const tip = svgEl('title');
+    tip.textContent = count === 1 ? '1 problema aperto' : count + ' problemi aperti';
+    g.appendChild(tip);
+    g.appendChild(svgEl('rect', {
+      class: 'gantt-problems-badge__pill',
+      width: String(w),
+      height: String(h),
+      rx: String(h / 2),
+      fill: 'hsla(36,90%,50%,0.18)',
+      stroke: 'hsla(36,85%,58%,0.55)',
+      'stroke-width': '1',
+    }));
+    const tg = svgEl('g', { transform: 'translate(5,3) scale(0.6)' });
+    tg.appendChild(svgEl('path', {
+      d: 'M10 2.15c.47 0 .9.25 1.14.66l7.2 12.85A1.32 1.32 0 0 1 17.2 17.8H2.8a1.32 1.32 0 0 1-1.14-1.98L8.86 2.81c.24-.41.67-.66 1.14-.66z',
+      fill: 'hsl(36,92%,54%)',
+    }));
+    tg.appendChild(svgEl('path', {
+      d: 'M10 7.05c.36 0 .65.28.65.64v3.55c0 .36-.29.64-.65.64s-.65-.28-.65-.64V7.69c0-.36.29-.64.65-.64zm0 6.2a.82.82 0 1 1 0 1.64.82.82 0 0 1 0-1.64z',
+      fill: 'hsl(28,28%,10%)',
+    }));
+    g.appendChild(tg);
+    const t = svgEl('text', {
+      x: String(6 + tri + 4),
+      y: '12.6',
+      fill: 'hsl(38,100%,82%)',
+      'font-size': '10',
+      'font-weight': '700',
+      'font-family': 'Inter,system-ui,sans-serif',
+      'pointer-events': 'none',
+    });
+    t.textContent = label;
+    g.appendChild(t);
+    parent.appendChild(g);
+    return w;
+  }
+
+  function formatOverlapPeer(o) {
+    const parts = [o.peer_commessa, o.peer_item, o.peer_activity || o.peer_label]
+      .filter(v => v != null && String(v).trim() !== '');
+    if (parts.length) return parts.join(' - ');
+    return o.peer_activity_id || '';
+  }
+
+  function overlapBadgeTexts(row) {
+    return (row.resource_overlaps || []).map(o => {
+      const ref = formatOverlapPeer(o);
+      return ref ? ('Sovrapposizione risorse ' + ref) : 'Sovrapposizione risorse';
     });
   }
 
@@ -342,8 +383,13 @@
 
     if (!left) left = today;
 
-    // Small left pad so the first bar is not flush against the edge.
-    const minD = addDays(left, -5);
+    // Align to the leftmost bar start; the ~1 cm visual pad is applied in render().
+    (tasks || []).forEach(t => {
+      if (!taskIsWip(t) && !taskIsIncomplete(t)) return;
+      const planned = parseDate(t.start);
+      if (!isNaN(planned) && planned < left) left = new Date(planned);
+    });
+    const minD = new Date(left);
     const maxD = addMonths(minD, 6);
     const windowDays = Math.max(1, (maxD - minD) / 86400000);
 
@@ -420,8 +466,6 @@
       // Keys = commessa (or job_id). Empty = all collapsed when collapsibleGroups.
       this._expandedGroups = new Set();
       if (this.view === 'horizon') this.fitToData = true;
-      _activeCharts.add(this);
-      bindThemeWatcher();
     }
 
     _groupKey(gOrTask) {
@@ -577,6 +621,18 @@
       if (resList.length) {
         rows += row('Risorse', resList.join(';'), '');
       }
+      const overlaps = t.resource_overlaps || [];
+      if (overlaps.length) {
+        rows += '<div class="tip-divider"></div>';
+        rows += '<div class="tip-overlap-title">Sovrapposizione risorse</div>';
+        overlaps.forEach(o => {
+          const res = (o.resources || []).map(r => r.label || r.uid).join(', ');
+          const verb = o.role === 'late' ? 'Blocca' : 'Bloccata da';
+          rows += row(verb, formatOverlapPeer(o) || o.peer_activity_id || '—', 'tip-overlap-peer');
+          if (res) rows += row('Risorse contese', res, 'tip-overlap-res');
+          rows += row('Periodo', fmtDate(o.overlap_start) + ' → ' + fmtDate(o.overlap_end), 'tip-overlap-window');
+        });
+      }
       return (
         '<div class="gantt-tip-header">' +
           '<div class="gantt-tip-header-text">' +
@@ -661,6 +717,15 @@
     setData(tasks, deadlines) {
       this.tasks = tasks || [];
       this.deadlines = deadlines || {};
+      if (this.collapsibleGroups) {
+        (this.tasks || []).forEach(t => {
+          if (t && (t.resource_overlaps || []).length) {
+            const key = this._groupKey(t);
+            if (key) this._expandedGroups.add(key);
+          }
+        });
+        this._syncExpandToggleBtn();
+      }
       if (!this._fitLocked) {
         if (this.view === 'horizon') this.applyHorizonToData(this.tasks);
         else if (this.fitToData) this.applyFitToData(this.tasks);
@@ -790,7 +855,7 @@
         taskData, variant, barY, boxX1, boxW, colour, changed, theme,
       } = opts;
       const barH = opts.barH || BAR_H;
-      const th = theme || chartTheme(false);
+      const th = theme || chartTheme();
       if (boxW <= 0) return null;
       const isCurrent = variant === 'current';
       const rect = document.createElementNS(NS, 'rect');
@@ -833,7 +898,7 @@
       this._rendering = true;
       try {
 
-      const theme = chartTheme(document.body.classList.contains('light'));
+      const theme = chartTheme();
       const gridLineColor = theme.gridLine;
       const compareTasksById = this.compareMode ? this._compareTasksById() : {};
 
@@ -876,6 +941,12 @@
 
       this.updateNavState();
       const totalW = this._chartWidth(barsEl);
+      // ≈ 1 cm breathing room before the first bar (96 dpi).
+      if (this.fitToData && totalW > 0 && maxD > minD) {
+        const edgePadPx = 38;
+        const padMs = (edgePadPx / totalW) * (maxD.getTime() - minD.getTime());
+        minD = new Date(minD.getTime() - padMs);
+      }
       const adaptive = buildAdaptiveTicks(minD, maxD, totalW);
       const ticks = adaptive.ticks;
       const tickView = adaptive.labelMode;
@@ -1075,8 +1146,6 @@
         axisSvg.appendChild(axisTodayLine);
       }
 
-      const defs = document.createElementNS(NS, 'defs');
-      barsSvg.appendChild(defs);
       const self = this;
       const taskPosMap = {};
 
@@ -1386,7 +1455,6 @@
           if (!self.simplified) {
             const BADGE_H = 16, BADGE_RX = 5, BADGE_PAD = 10, GAP = 6, BADGE_FONT = 9;
             const SLATE = 'hsl(220,14%,38%)';
-            const AMBER = 'hsl(38,90%,48%)';
             const charW = BADGE_FONT * 0.60;
             const badges = [];
             if (isCompleted) badges.push({ text: '✓ COMPLETATA', color: 'hsl(142,55%,40%)' });
@@ -1395,47 +1463,38 @@
               if (isStarted) badges.push({ text: 'IN LAVORAZIONE', color: SLATE });
               else badges.push({ text: isOverdue ? 'DA INIZIARE' : 'PIANIFICATA', color: SLATE });
             }
+            overlapBadgeTexts(row).forEach(text => {
+              badges.push({ text, plain: true, keep: true });
+            });
             let bx = Math.max(badgeAnchorX, 0) + BADGE_PAD;
-            badges.forEach(({ text, color }) => {
-              const bw = Math.ceil(text.length * charW) + 14;
-              if (bx + bw > totalW + 100) return;
+            badges.forEach(({ text, color, plain, keep }) => {
+              const bw = Math.ceil(text.length * charW) + (plain ? 0 : 14);
+              if (!keep && bx + bw > totalW + 100) return;
               const by = midY - BADGE_H / 2;
-              const bg = document.createElementNS(NS, 'rect');
-              bg.setAttribute('x', bx); bg.setAttribute('y', by);
-              bg.setAttribute('width', bw); bg.setAttribute('height', BADGE_H);
-              bg.setAttribute('rx', BADGE_RX); bg.setAttribute('fill', color);
-              bg.setAttribute('opacity', '0.92'); bg.setAttribute('pointer-events', 'none');
-              barsSvg.appendChild(bg);
+              if (!plain) {
+                const bg = document.createElementNS(NS, 'rect');
+                bg.setAttribute('x', bx); bg.setAttribute('y', by);
+                bg.setAttribute('width', bw); bg.setAttribute('height', BADGE_H);
+                bg.setAttribute('rx', BADGE_RX); bg.setAttribute('fill', color);
+                bg.setAttribute('opacity', '0.92'); bg.setAttribute('pointer-events', 'none');
+                barsSvg.appendChild(bg);
+              }
               const bt = document.createElementNS(NS, 'text');
-              bt.setAttribute('x', bx + bw / 2); bt.setAttribute('y', by + BADGE_H / 2 + 3.5);
-              bt.setAttribute('fill', 'white'); bt.setAttribute('font-size', BADGE_FONT);
-              bt.setAttribute('font-weight', '700');
-              bt.setAttribute('text-anchor', 'middle');
+              bt.setAttribute('x', plain ? bx : bx + bw / 2);
+              bt.setAttribute('y', by + BADGE_H / 2 + 3.5);
+              bt.setAttribute('fill', plain ? 'hsl(220,10%,62%)' : 'white');
+              bt.setAttribute('font-size', BADGE_FONT);
+              bt.setAttribute('font-weight', plain ? '500' : '700');
+              bt.setAttribute('text-anchor', plain ? 'start' : 'middle');
               bt.setAttribute('pointer-events', 'none');
               bt.textContent = text;
               barsSvg.appendChild(bt);
               bx += bw + GAP;
             });
             if (self.enableWarningNav && !isCompleted && row.warning_count > 0) {
-              const warnText = '⚠ ' + row.warning_count;
-              const bw = Math.ceil(warnText.length * charW) + 14;
-              if (bx + bw <= totalW + 100) {
-                const by = midY - BADGE_H / 2;
-                const bg = document.createElementNS(NS, 'rect');
-                bg.setAttribute('x', bx); bg.setAttribute('y', by);
-                bg.setAttribute('width', bw); bg.setAttribute('height', BADGE_H);
-                bg.setAttribute('rx', BADGE_RX); bg.setAttribute('fill', AMBER);
-                bg.setAttribute('data-warn-ormid', row.orm_id);
-                bg.style.cursor = 'pointer';
-                barsSvg.appendChild(bg);
-                const bt = document.createElementNS(NS, 'text');
-                bt.setAttribute('x', bx + bw / 2); bt.setAttribute('y', by + BADGE_H / 2 + 3.5);
-                bt.setAttribute('fill', 'white'); bt.setAttribute('font-size', BADGE_FONT);
-                bt.setAttribute('font-weight', '700');
-                bt.setAttribute('text-anchor', 'middle');
-                bt.setAttribute('pointer-events', 'none');
-                bt.textContent = warnText;
-                barsSvg.appendChild(bt);
+              if (bx + 36 <= totalW + 100) {
+                const by = midY - 9;
+                bx += appendProblemsBadge(barsSvg, bx, by, row.warning_count, row.orm_id) + GAP;
               }
             }
           }
@@ -1681,6 +1740,5 @@
   GanttChart.computeFitViewport = computeFitViewport;
   GanttChart.computeHorizonViewport = computeHorizonViewport;
   GanttChart.summarizeCommessaTasks = summarizeCommessaTasks;
-  GanttChart.LIGHT_PALETTE = PALETTE_LIGHT;
   global.GanttChart = GanttChart;
 })(typeof window !== 'undefined' ? window : this);

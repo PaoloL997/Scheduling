@@ -812,7 +812,7 @@
       html = '<div style="color:var(--color-success,#16a34a);font-size:0.85rem;padding:0.5rem 0;">' + esc(res.msg) + '</div>';
       if (res.errors && res.errors.length) {
         html += '<details style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-subtle);">' +
-                '<summary style="cursor:pointer;">Avvisi (' + res.errors.length + ')</summary><ul style="margin:.5rem 0 0 1rem;">' +
+                '<summary style="cursor:pointer;">Errori (' + res.errors.length + ')</summary><ul style="margin:.5rem 0 0 1rem;">' +
                 res.errors.map(function(e) { return '<li>' + esc(e) + '</li>'; }).join('') +
                 '</ul></details>';
       }

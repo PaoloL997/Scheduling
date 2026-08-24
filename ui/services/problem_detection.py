@@ -10,11 +10,15 @@ Problems are detected at activity-creation time and stored as
 resolve them through the UI.  :class:`~ui.models.RisoluzioneProblema` provides
 a persistent mirror of resolved notes that survives the dataset reset+reimport
 cycle so that resolution history is never lost.
+
+Resource overlaps caused by a late start are computed on read
+(:func:`find_resource_overlaps`) and are not stored as notes.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import date
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,11 @@ _CAT_TO_TIPO: dict[str, str] = {
     "maschere": "maschera",
     "generatori": "generatore",
 }
+
+_TIPO_TO_CAT: dict[str, str] = {tipo: cat for cat, tipo in _CAT_TO_TIPO.items()}
+
+_SPOSTAMENTO_RESOLVED_NOTE = "Risorsa spostata allo stabilimento di lavorazione."
+_STALE_CONDITION_NOTE = "Condizione non piu verificata dopo aggiornamento attivita."
 
 
 def _shortfall_description(
@@ -124,8 +133,8 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
     description when needed, and missing ones are created.  Creation is
     idempotent against **open** signatures only, so a condition that returns
     after an auto-resolve can raise a new open note.  Auto-resolves are not
-    mirrored to :class:`~ui.models.RisoluzioneProblema` (unlike manual
-    resolutions) so a re-import can surface the issue again if it returns.
+    mirrored to :class:`~ui.models.RisoluzioneProblema`, so a re-import can
+    surface the issue again if it returns.
 
     Args:
         attivita: The :class:`~ui.models.Attivita` instance.
@@ -200,9 +209,6 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
         ProblemaAttivita.TIPO_ACQUISTO,
         ProblemaAttivita.TIPO_SPOSTAMENTO,
     )
-    stale_note = (
-        "Condizione non piu verificata dopo aggiornamento attivita."
-    )
     for problema in ProblemaAttivita.objects.filter(
         attivita=attivita,
         tipo__in=open_types,
@@ -210,8 +216,16 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
     ):
         sig = (problema.tipo, problema.risorsa_tipo, problema.risorsa_uid)
         if sig not in current_sigs:
+            still_assigned = False
+            if problema.tipo == ProblemaAttivita.TIPO_SPOSTAMENTO:
+                cat = _TIPO_TO_CAT.get(problema.risorsa_tipo)
+                still_assigned = bool(
+                    cat and problema.risorsa_uid in (risorse_dict.get(cat) or [])
+                )
             problema.risolto = True
-            problema.note_risoluzione = stale_note
+            problema.note_risoluzione = (
+                _SPOSTAMENTO_RESOLVED_NOTE if still_assigned else _STALE_CONDITION_NOTE
+            )
             problema.data_risoluzione = timezone.now()
             problema.save(
                 update_fields=["risolto", "note_risoluzione", "data_risoluzione"]
@@ -240,9 +254,7 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
         ).values_list("tipo", "risorsa_tipo", "risorsa_uid")
     )
     new_problems = [
-        p
-        for p in problems
-        if (p.tipo, p.risorsa_tipo, p.risorsa_uid) not in open_sigs
+        p for p in problems if (p.tipo, p.risorsa_tipo, p.risorsa_uid) not in open_sigs
     ]
 
     if new_problems:
@@ -251,330 +263,160 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
     return len(new_problems)
 
 
-def _format_date_it(value) -> str:
-    """Format a date as ``dd/mm/YYYY`` for Italian-language messages."""
-    return value.strftime("%d/%m/%Y") if value else "?"
+def _risorse_dict_for_attivita(attivita) -> dict[str, list[str]]:
+    """Build the wizard-style risorse mapping from assigned inventory rows."""
+    risorse_dict: dict[str, list[str]] = {}
+    for r in attivita.risorse.all():
+        cat = _TIPO_TO_CAT.get(r.tipo)
+        if cat:
+            risorse_dict.setdefault(cat, []).append(r.risorsa_id)
+    return risorse_dict
 
 
-def effective_finish(attivita):
-    """Return the effective finish date of an activity, or ``None``.
+def refresh_problems_for_attivita(attivita) -> int:
+    """Re-run problem detection from the activity's current assignments."""
+    return detect_and_save_problems(attivita, _risorse_dict_for_attivita(attivita))
 
-    The effective finish is the actual start date shifted by the planned
-    calendar-day span (``data_fine - data_inizio``), i.e. the estimated
-    duration applied from the moment the activity actually started.
+
+def refresh_problems_for_resource(tipo: str, *uids: str) -> int:
+    """Re-run problem detection for activities assigned any of the given UIDs.
 
     Args:
-        attivita: The :class:`~ui.models.Attivita` instance.
+        tipo: Resource category (``testa``, ``mandrino``, …).
+        uids: Inventory UIDs that changed (plant and/or identity).
 
     Returns:
-        datetime.date | None: The effective finish date, or ``None`` when
-            ``actual_start``, ``data_inizio`` or ``data_fine`` is missing.
+        int: Number of new problem rows created across matching activities.
+    """
+    from ui.models import RisorsaAttivita
+
+    ids = [uid for uid in uids if uid]
+    if not tipo or not ids:
+        return 0
+
+    rows = (
+        RisorsaAttivita.objects.filter(tipo=tipo, risorsa_id__in=ids)
+        .select_related("attivita")
+        .prefetch_related("attivita__risorse")
+    )
+    seen: set[int] = set()
+    total = 0
+    for row in rows:
+        if row.attivita_id in seen:
+            continue
+        seen.add(row.attivita_id)
+        total += refresh_problems_for_attivita(row.attivita)
+    return total
+
+
+def effective_finish(attivita) -> date | None:
+    """Return the expected finish if the activity started late (or at all).
+
+    Uses planned duration ``data_fine - data_inizio`` applied to
+    ``actual_start``.  Missing dates yield ``None``.
     """
     if not (attivita.actual_start and attivita.data_inizio and attivita.data_fine):
         return None
-    span = attivita.data_fine - attivita.data_inizio
-    return attivita.actual_start + span
+    return attivita.actual_start + (attivita.data_fine - attivita.data_inizio)
 
 
-def _encode_blocked_resources(blocked: list[tuple[str, str]]) -> str:
-    """Serialize blocked resource pairs for storage in ``risorsa_uid``."""
-    return "|".join(f"{tipo}:{uid}" for tipo, uid in blocked)
+def _resource_pairs(attivita) -> set[tuple[str, str]]:
+    """Return the assigned ``(tipo, uid)`` pairs for an activity."""
+    return {(r.tipo, r.risorsa_id) for r in attivita.risorse.all()}
 
 
-def parse_blocked_resources(
-    risorsa_uid: str, risorsa_tipo: str = ""
-) -> list[tuple[str, str]]:
-    """Parse blocked ``(tipo, uid)`` pairs from a problem record.
-
-    Supports the consolidated pipe-separated encoding (``testa:T1|mandrino:M1``)
-    and the legacy single-resource format.
-    """
-    if risorsa_uid and ("|" in risorsa_uid or ":" in risorsa_uid):
-        pairs: list[tuple[str, str]] = []
-        for part in risorsa_uid.split("|"):
-            if ":" not in part:
-                continue
-            tipo, uid = part.split(":", 1)
-            if tipo and uid:
-                pairs.append((tipo, uid))
-        return pairs
-    if risorsa_tipo and risorsa_uid:
-        return [(risorsa_tipo, risorsa_uid)]
-    return []
+def _serialize_overlap_resource(tipo: str, uid: str) -> dict:
+    """Return a display dict for one shared resource."""
+    label = _TIPO_LABELS.get(tipo, tipo.capitalize())
+    return {"tipo": tipo, "uid": uid, "label": f"{label} {uid}"}
 
 
-def _overlap_description(
-    blocked: list[tuple[str, str]], fine_effettiva, attivita_x
-) -> str:
-    """Build an Italian description listing all blocked resources."""
-    labels = [
-        f"{_TIPO_LABELS.get(tipo, tipo.capitalize())} {uid}" for tipo, uid in blocked
-    ]
-    if len(labels) == 1:
-        resources_text = labels[0]
-    elif len(labels) == 2:
-        resources_text = f"{labels[0]} e {labels[1]}"
-    else:
-        resources_text = ", ".join(labels[:-1]) + f" e {labels[-1]}"
-    return (
-        f"Le risorse {resources_text} richieste per questa attivita saranno "
-        f"bloccate fino al {_format_date_it(fine_effettiva)} "
-        f"dall'attivita {attivita_x}."
-    )
+def _peer_identity(attivita) -> dict:
+    """Return identity fields for the other activity in an overlap."""
+    return {
+        "peer_orm_id": attivita.pk,
+        "peer_activity_id": attivita.activity_id,
+        "peer_label": attivita.activity or str(attivita),
+        "peer_commessa": attivita.commessa,
+        "peer_item": attivita.item,
+        "peer_activity": attivita.activity or "",
+    }
 
 
-def detect_overlap_problems(attivita_x) -> list[dict]:
-    """Detect resource overlaps caused by an activity's actual start date.
+def find_resource_overlaps(activities: list | None = None) -> dict[int, list[dict]]:
+    """Compute delay-caused resource overlaps without persisting notes.
 
-    When activity *X* actually starts, its effective finish
-    (``actual_start + planned span``) may extend past the planned start of a
-    following activity *Y* that shares one or more resources.  A single
-    ``sovrapposizione`` :class:`~ui.models.ProblemaAttivita` is created on *Y*
-    listing every blocked resource.
+    Activity **X** (has ``actual_start``) occupies its resources until
+    ``effective_finish(X)``.  Activity **Y** conflicts when it is distinct,
+    starts on or after ``X.data_inizio``, starts before that effective
+    finish, and shares at least one assigned resource.
 
-    Unresolved overlap notes previously generated by *X* are cleared first so
-    that re-planning *X* (a new ``actual_start``) refreshes them; resolved
-    notes are kept as history and never duplicated.
+    The visual window is
+    ``[Y.data_inizio, min(Y.data_fine, effective_finish(X))]``.
+    The same payload is attached to both activities (``role`` is ``late``
+    on X and ``blocked`` on Y).
 
     Args:
-        attivita_x: The :class:`~ui.models.Attivita` whose ``actual_start``
-            was just set.  Must have ``actual_start``, ``data_inizio`` and
-            ``data_fine`` populated.
+        activities: Optional prefetched :class:`~ui.models.Attivita` list.
+            When omitted, all activities are loaded.
 
     Returns:
-        list[dict]: One descriptor per created overlap note with keys
-            ``attivita_id``, ``activity_label``, ``problema_id``,
-            ``risorse_bloccate``, ``bloccata_fino``.
+        dict[int, list[dict]]: Mapping of activity primary key to overlap
+        descriptors.  Activities without overlaps are omitted.
     """
-    from collections import defaultdict
+    from ui.models import Attivita
 
-    from django.db.models import Q
-    from ui.models import ProblemaAttivita, RisorsaAttivita
+    if activities is None:
+        activities = list(Attivita.objects.prefetch_related("risorse"))
 
-    fine_effettiva = effective_finish(attivita_x)
-    if fine_effettiva is None:
-        return []
+    pairs = {a.pk: _resource_pairs(a) for a in activities}
+    result: dict[int, list[dict]] = {}
+    seen_pairs: set[tuple[int, int]] = set()
 
-    pairs = list(
-        RisorsaAttivita.objects.filter(attivita_id=attivita_x.pk).values_list(
-            "tipo", "risorsa_id"
-        )
-    )
-    riferimento = attivita_x.activity_id or str(attivita_x)
-
-    # Refresh: drop stale (unresolved) overlap notes previously raised by X.
-    ProblemaAttivita.objects.filter(
-        tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
-        riferimento_attivita=riferimento,
-        risolto=False,
-    ).delete()
-
-    if not pairs:
-        return []
-
-    pair_q = Q()
-    for tipo, risorsa_id in pairs:
-        pair_q |= Q(tipo=tipo, risorsa_id=risorsa_id)
-
-    conflicts = (
-        RisorsaAttivita.objects.select_related("attivita")
-        .filter(pair_q)
-        .filter(
-            attivita__data_inizio__gte=attivita_x.data_inizio,
-            attivita__data_inizio__lt=fine_effettiva,
-        )
-        .exclude(attivita_id=attivita_x.pk)
-    )
-
-    by_successor: dict[int, list] = defaultdict(list)
-    for row in conflicts:
-        by_successor[row.attivita_id].append(row)
-
-    # Skip only unresolved notes — resolved history must not block re-detection
-    # after a re-import that reverts resource assignments.
-    existing_sigs: set[tuple] = set(
-        ProblemaAttivita.objects.filter(
-            tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
-            riferimento_attivita=riferimento,
-            risolto=False,
-        ).values_list("attivita_id", "risorsa_tipo", "risorsa_uid")
-    )
-
-    created: list[dict] = []
-    for attivita_y_id, rows in by_successor.items():
-        blocked = list(dict.fromkeys((r.tipo, r.risorsa_id) for r in rows))
-        encoded = _encode_blocked_resources(blocked)
-        sig = (attivita_y_id, "", encoded)
-        if sig in existing_sigs:
+    for late in activities:
+        fine = effective_finish(late)
+        if fine is None or not late.data_inizio:
             continue
-
-        attivita_y = rows[0].attivita
-        descrizione = _overlap_description(blocked, fine_effettiva, attivita_x)
-        problema = ProblemaAttivita.objects.create(
-            attivita=attivita_y,
-            tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
-            risorsa_tipo="",
-            risorsa_uid=encoded,
-            bloccata_fino=fine_effettiva,
-            riferimento_attivita=riferimento,
-            descrizione=descrizione,
-        )
-        created.append(
-            {
-                "attivita_id": attivita_y_id,
-                "activity_label": str(attivita_y),
-                "problema_id": problema.pk,
-                "risorse_bloccate": [
-                    {"tipo": tipo, "uid": uid} for tipo, uid in blocked
-                ],
-                "bloccata_fino": fine_effettiva.isoformat(),
+        late_pairs = pairs[late.pk]
+        if not late_pairs:
+            continue
+        for blocked in activities:
+            if blocked.pk == late.pk or not blocked.data_inizio:
+                continue
+            if blocked.data_inizio < late.data_inizio or blocked.data_inizio >= fine:
+                continue
+            # Same planned start and both started: emit the pair once.
+            if (
+                blocked.actual_start
+                and blocked.data_inizio == late.data_inizio
+                and blocked.pk < late.pk
+            ):
+                continue
+            pair_key = (min(late.pk, blocked.pk), max(late.pk, blocked.pk))
+            if pair_key in seen_pairs:
+                continue
+            shared = late_pairs & pairs[blocked.pk]
+            if not shared:
+                continue
+            seen_pairs.add(pair_key)
+            overlap_end = fine
+            if blocked.data_fine:
+                overlap_end = min(blocked.data_fine, fine)
+            resources = [
+                _serialize_overlap_resource(tipo, uid) for tipo, uid in sorted(shared)
+            ]
+            base = {
+                "resources": resources,
+                "overlap_start": blocked.data_inizio.isoformat(),
+                "overlap_end": overlap_end.isoformat(),
             }
-        )
-
-    return created
-
-
-def resolve_stale_overlaps(attivita) -> int:
-    """Auto-resolve overlap notes whose conflicting resource was reassigned.
-
-    Called after an activity's resource assignments change.  Any open
-    ``sovrapposizione`` note on this activity whose ``(risorsa_tipo,
-    risorsa_uid)`` is no longer assigned is marked resolved and mirrored to
-    :class:`~ui.models.RisoluzioneProblema` so it survives re-imports.
-
-    Args:
-        attivita: The :class:`~ui.models.Attivita` whose resources changed.
-
-    Returns:
-        int: Number of overlap notes resolved.
-    """
-    from django.utils import timezone
-    from ui.models import ProblemaAttivita, RisoluzioneProblema, RisorsaAttivita
-
-    current = set(
-        RisorsaAttivita.objects.filter(attivita_id=attivita.pk).values_list(
-            "tipo", "risorsa_id"
-        )
-    )
-
-    resolved = 0
-    note = (
-        "Risorsa riassegnata: la risorsa in conflitto non e piu assegnata "
-        "a questa attivita."
-    )
-    for problema in ProblemaAttivita.objects.filter(
-        attivita_id=attivita.pk,
-        tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
-        risolto=False,
-    ):
-        blocked = parse_blocked_resources(problema.risorsa_uid, problema.risorsa_tipo)
-        if blocked:
-            if any(pair in current for pair in blocked):
-                continue
-        elif (problema.risorsa_tipo, problema.risorsa_uid) in current:
-            continue
-        problema.risolto = True
-        problema.note_risoluzione = note
-        problema.data_risoluzione = timezone.now()
-        problema.save(update_fields=["risolto", "note_risoluzione", "data_risoluzione"])
-        RisoluzioneProblema.objects.update_or_create(
-            commessa=attivita.commessa,
-            item=attivita.item,
-            activity=attivita.activity,
-            tipo=problema.tipo,
-            risorsa_tipo=problema.risorsa_tipo,
-            risorsa_uid=problema.risorsa_uid,
-            defaults={
-                "note_risoluzione": note,
-                "data_risoluzione": problema.data_risoluzione,
-            },
-        )
-        resolved += 1
-
-    return resolved
-
-
-def _find_attivita_by_riferimento(riferimento: str):
-    """Resolve the source activity referenced by an overlap note."""
-    from ui.models import Attivita
-
-    if not riferimento:
-        return None
-    return Attivita.objects.filter(activity_id=riferimento).first()
-
-
-def reopen_stale_overlap_resolutions() -> int:
-    """Re-open overlap notes that were auto-resolved while the conflict persists.
-
-    This covers page reloads without a full re-import: a previous reassignment
-    may have marked the note resolved even though the blocked resources are
-    still assigned and the source activity still overlaps the successor.
-    """
-    from ui.models import ProblemaAttivita, RisoluzioneProblema, RisorsaAttivita
-
-    reopened = 0
-    for problema in ProblemaAttivita.objects.filter(
-        tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
-        risolto=True,
-    ).select_related("attivita"):
-        note = (problema.note_risoluzione or "").lower()
-        if "lasciato invariato" in note or "accettata" in note:
-            continue
-
-        blocked = parse_blocked_resources(problema.risorsa_uid, problema.risorsa_tipo)
-        if not blocked:
-            continue
-
-        attivita_y = problema.attivita
-        current = set(
-            RisorsaAttivita.objects.filter(attivita_id=attivita_y.pk).values_list(
-                "tipo", "risorsa_id"
+            result.setdefault(late.pk, []).append(
+                {**base, **_peer_identity(blocked), "role": "late"}
             )
-        )
-        if not any(pair in current for pair in blocked):
-            continue
-
-        attivita_x = _find_attivita_by_riferimento(problema.riferimento_attivita)
-        if attivita_x is None or not attivita_y.data_inizio:
-            continue
-
-        fine_effettiva = effective_finish(attivita_x)
-        if fine_effettiva is None or fine_effettiva <= attivita_y.data_inizio:
-            continue
-
-        problema.risolto = False
-        problema.note_risoluzione = ""
-        problema.data_risoluzione = None
-        problema.save(update_fields=["risolto", "note_risoluzione", "data_risoluzione"])
-
-        RisoluzioneProblema.objects.filter(
-            commessa=attivita_y.commessa,
-            item=attivita_y.item,
-            activity=attivita_y.activity,
-            tipo=problema.tipo,
-            risorsa_tipo=problema.risorsa_tipo,
-            risorsa_uid=problema.risorsa_uid,
-        ).delete()
-        reopened += 1
-
-    return reopened
-
-
-def refresh_overlap_warnings() -> int:
-    """Ensure overlap warnings reflect the current schedule and assignments.
-
-    Re-opens wrongly resolved overlap notes, then re-runs overlap detection for
-    every activity that has an actual start date.
-
-    Returns:
-        int: Number of notes reopened plus newly created overlap notes.
-    """
-    from ui.models import Attivita
-
-    total = reopen_stale_overlap_resolutions()
-    for attivita in Attivita.objects.filter(actual_start__isnull=False):
-        total += len(detect_overlap_problems(attivita))
-    return total
+            result.setdefault(blocked.pk, []).append(
+                {**base, **_peer_identity(late), "role": "blocked"}
+            )
+    return result
 
 
 def detect_for_all_activities() -> int:
@@ -583,72 +425,32 @@ def detect_for_all_activities() -> int:
     Called after a dataset re-import and on Pianificazione page load so that
     open ``acquisto`` / ``spostamento`` notes stay aligned with current
     assignments.  Stale open notes are auto-resolved; new conditions create
-    fresh rows.  Overlap warnings are refreshed at the end.
+    fresh rows.  Existing overlap warnings are removed.
 
     Returns:
         int: Total number of new :class:`~ui.models.ProblemaAttivita` rows
-            created across all activities (plus overlap refresh counts).
+            created across all activities.
     """
-    from ui.models import Attivita
+    from ui.models import Attivita, ProblemaAttivita
 
-    tipo_to_plural: dict[str, str] = {
-        "testa": "teste",
-        "mandrino": "mandrini",
-        "tastatore": "tastatori",
-        "maschera": "maschere",
-        "generatore": "generatori",
-    }
+    ProblemaAttivita.objects.filter(tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE).delete()
 
     total = 0
     activitas = Attivita.objects.prefetch_related("risorse").all()
     for a in activitas:
-        risorse_dict: dict[str, list[str]] = {}
-        for r in a.risorse.all():
-            plural = tipo_to_plural.get(r.tipo)
-            if plural:
-                risorse_dict.setdefault(plural, []).append(r.risorsa_id)
-        total += detect_and_save_problems(a, risorse_dict)
-
-    total += refresh_overlap_warnings()
+        total += refresh_problems_for_attivita(a)
 
     logger.info("detect_for_all_activities: %d nuovi problemi rilevati.", total)
     return total
-
-
-def _should_restore_overlap_resolution(attivita, risoluzione) -> bool:
-    """Return whether a saved overlap resolution should be re-applied.
-
-    User-accepted overlaps (``lascia invariato``) are always restored.
-    Auto-resolutions after resource reassignment are restored only when the
-    blocked resources are no longer assigned — if they are still present the
-    overlap is active again and the warning must remain visible.
-    """
-    from ui.models import RisorsaAttivita
-
-    note = (risoluzione.note_risoluzione or "").lower()
-    if "lasciato invariato" in note or "accettata" in note:
-        return True
-
-    blocked = parse_blocked_resources(risoluzione.risorsa_uid, risoluzione.risorsa_tipo)
-    if not blocked:
-        return True
-
-    current = set(
-        RisorsaAttivita.objects.filter(attivita_id=attivita.pk).values_list(
-            "tipo", "risorsa_id"
-        )
-    )
-    return not any(pair in current for pair in blocked)
 
 
 def restore_resolved_notes() -> int:
     """Re-apply persistent resolution notes to freshly imported problems.
 
     After a dataset reset+reimport, :class:`~ui.models.ProblemaAttivita` rows
-    are re-created by :func:`detect_for_all_activities`.  This function looks
-    up matching :class:`~ui.models.RisoluzioneProblema` records (by activity
-    identity + problem signature) and marks the corresponding problems as
-    resolved, restoring the planner's notes.
+    are re-created by :func:`detect_for_all_activities`.  Manual resolutions
+    of ``acquisto`` / ``spostamento`` are no longer restored: those notes
+    close only when the underlying condition is gone.
 
     Returns:
         int: Number of problems restored as resolved.
@@ -661,7 +463,14 @@ def restore_resolved_notes() -> int:
         return 0
 
     restored = 0
+    skipped_types = {
+        ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+        ProblemaAttivita.TIPO_SPOSTAMENTO,
+        ProblemaAttivita.TIPO_ACQUISTO,
+    }
     for r in resoluzioni:
+        if r.tipo in skipped_types:
+            continue
         try:
             attivita = Attivita.objects.get(
                 commessa=r.commessa,
@@ -680,10 +489,6 @@ def restore_resolved_notes() -> int:
 
         if problema is None or problema.risolto:
             continue
-
-        if r.tipo == ProblemaAttivita.TIPO_SOVRAPPOSIZIONE:
-            if not _should_restore_overlap_resolution(attivita, r):
-                continue
 
         problema.risolto = True
         problema.note_risoluzione = r.note_risoluzione

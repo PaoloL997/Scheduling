@@ -49,11 +49,6 @@
     box-shadow: 0 0 0 1px hsl(211, 70%, 48% / 0.35), var(--shadow);
     background: var(--surface-2);
   }
-  body.light .stat-card:hover { border-color: hsl(220, 13%, 75%); }
-  body.light .stat-card.is-active {
-    border-color: hsl(211, 80%, 46%);
-    box-shadow: 0 0 0 1px hsl(211, 80%, 46% / 0.28), var(--shadow);
-  }
   .stat-icon {
     width: 28px; height: 28px;
     border-radius: 8px;
@@ -124,8 +119,6 @@
   /* "Oggi" è depotenziato quando siamo già sulla finestra corrente */
   #nav-today.at-today { color: hsl(220, 10%, 30%); cursor: default; }
   #nav-today.at-today:hover { background: transparent; color: hsl(220, 10%, 30%); }
-  body.light #nav-today.at-today { color: hsl(220, 13%, 70%); }
-  body.light #nav-today.at-today:hover { background: transparent; }
 
   /* ── Gantt card ── */
   #card {
@@ -312,7 +305,6 @@
     margin-bottom: 10px;
     color-scheme: dark;
   }
-  body.light #dl-input { color-scheme: light; }
   #dl-actions { display: flex; gap: 8px; }
   #dl-save-btn {
     flex: 1;
@@ -361,24 +353,6 @@
     letter-spacing: 0.02em;
     font-weight: 500;
   }
-  body.light .gl-txt { color: hsl(220,15%,45%); }
-  body.light #gantt-legend .gl-bar-sample {
-    fill: hsl(211,84%,40%);
-    stroke: hsl(211,84%,40%);
-  }
-  body.light #gantt-legend .gl-bar-sample--planned {
-    fill-opacity: 0.44;
-    stroke-opacity: 1;
-  }
-  body.light #gantt-legend .gl-bar-sample--actual {
-    opacity: 0.95;
-  }
-  body.light #gantt-legend .gl-today-sample {
-    fill: hsl(0,82%,48%);
-    stroke: hsl(0,88%,42%);
-  }
-  body.light #gantt-legend .gl-today-sample--fill { opacity: 0.22; }
-  body.light #gantt-legend .gl-today-sample--line { opacity: 0.85; stroke-width: 2; }
 </style>
 {% endblock %}
 

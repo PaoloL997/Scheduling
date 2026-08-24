@@ -195,11 +195,6 @@ urlpatterns = [
         name="api_bridge_problemi",
     ),
     path(
-        "api/bridge/problemi/<int:pk>/risolvi/",
-        views_bridge.api_bridge_problema_risolvi,
-        name="api_bridge_problema_risolvi",
-    ),
-    path(
         "api/bridge/app-settings/",
         views_bridge.api_bridge_app_settings,
         name="api_bridge_app_settings",
@@ -249,9 +244,9 @@ urlpatterns = [
         name="api_attivita_problemi",
     ),
     path(
-        "api/attivita/problemi/<int:pk>/risolvi/",
-        views.api_problema_risolvi,
-        name="api_problema_risolvi",
+        "api/attivita/<int:pk>/overlap-reassign/",
+        views.api_overlap_reassign,
+        name="api_overlap_reassign",
     ),
     path("api/tasks/update/", views.api_tasks_update, name="api_tasks_update"),
     path("api/jobs/create/", views.api_jobs_create, name="api_jobs_create"),

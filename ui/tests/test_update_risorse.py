@@ -8,7 +8,17 @@ from datetime import date
 from django.contrib.auth.models import User
 from django.test import RequestFactory, TestCase
 
-from ui.models import Attivita, MandrinoItem, MppSyncQueue, RisorsaAttivita, TestaItem
+from ui.models import (
+    Attivita,
+    ConfigurazioneTesta,
+    GeneratoreItem,
+    MandrinoItem,
+    MascheraItem,
+    MppSyncQueue,
+    RisorsaAttivita,
+    TastatoreItem,
+    TestaItem,
+)
 from ui.services.activity_inventory import get_available_resources
 from ui.services.bridge_write import BridgeWriteError, update_attivita
 from ui.views import api_tasks_update
@@ -348,3 +358,191 @@ class ApiTasksUpdateRisorseTest(TestCase):
         data = json.loads(resp.content)
         self.assertTrue(data["ok"])
         self.assertEqual(data["resources_by_tipo"]["testa"], ["T010"])
+
+
+class PreselectDiversificationTest(TestCase):
+    """Idle-first pre-selection among resources free in the candidate window."""
+
+    def setUp(self) -> None:
+        TestaItem.objects.create(uid="T001", model="HT200", plant="Valbrembo")
+        TestaItem.objects.create(uid="T002", model="HT200", plant="Valbrembo")
+        MandrinoItem.objects.create(uid="M_BUSY", diameter="25", plant="Valbrembo")
+        MandrinoItem.objects.create(uid="M_IDLE_NEAR", diameter="26", plant="Valbrembo")
+        MandrinoItem.objects.create(uid="M_IDLE_FAR", diameter="40", plant="Valbrembo")
+
+    def _planned(self, commessa: str, start: date, finish: date, **kwargs) -> Attivita:
+        return Attivita.objects.create(
+            commessa=commessa,
+            item=1,
+            activity="A1",
+            data_inizio=start,
+            data_fine=finish,
+            stabilimento="Valbrembo",
+            **kwargs,
+        )
+
+    def test_prefers_idle_testa_over_one_assigned_elsewhere(self) -> None:
+        other = self._planned("C200", date(2026, 3, 1), date(2026, 3, 10))
+        RisorsaAttivita.objects.create(attivita=other, tipo="testa", risorsa_id="T001")
+
+        result = get_available_resources(
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            modello_testa="HT200",
+        )
+        self.assertEqual(result["pre_testa"], {"T002"})
+
+    def test_completed_assignment_does_not_penalize(self) -> None:
+        done = self._planned(
+            "C200",
+            date(2026, 3, 1),
+            date(2026, 3, 10),
+            actual_start=date(2026, 3, 1),
+            actual_finish=date(2026, 3, 8),
+        )
+        open_att = self._planned("C300", date(2026, 4, 1), date(2026, 4, 10))
+        RisorsaAttivita.objects.create(attivita=done, tipo="testa", risorsa_id="T002")
+        RisorsaAttivita.objects.create(
+            attivita=open_att, tipo="testa", risorsa_id="T001"
+        )
+
+        result = get_available_resources(
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            modello_testa="HT200",
+        )
+        self.assertEqual(result["pre_testa"], {"T002"})
+
+    def test_falls_back_to_assigned_when_all_busy(self) -> None:
+        a = self._planned("C200", date(2026, 3, 1), date(2026, 3, 10))
+        b = self._planned("C300", date(2026, 4, 1), date(2026, 4, 10))
+        RisorsaAttivita.objects.create(attivita=a, tipo="testa", risorsa_id="T001")
+        RisorsaAttivita.objects.create(attivita=b, tipo="testa", risorsa_id="T002")
+
+        result = get_available_resources(
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            modello_testa="HT200",
+        )
+        self.assertEqual(len(result["pre_testa"]), 1)
+        self.assertTrue(result["pre_testa"].issubset({"T001", "T002"}))
+
+    def test_idle_mandrino_closest_to_bore_mid(self) -> None:
+        other = self._planned("C200", date(2026, 3, 1), date(2026, 3, 10))
+        RisorsaAttivita.objects.create(
+            attivita=other, tipo="mandrino", risorsa_id="M_BUSY"
+        )
+
+        result = get_available_resources(
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            bore_min=20.0,
+            bore_max=50.0,
+            bore_mid=25.0,
+        )
+        self.assertEqual(result["pre_mandrini"], {"M_IDLE_NEAR"})
+        self.assertNotIn("M_BUSY", result["pre_mandrini"])
+
+    def test_fills_minimum_with_idle_then_busy(self) -> None:
+        ConfigurazioneTesta.objects.create(modello_testa="HT200", min_mandrini=2)
+        other = self._planned("C200", date(2026, 3, 1), date(2026, 3, 10))
+        RisorsaAttivita.objects.create(
+            attivita=other, tipo="mandrino", risorsa_id="M_BUSY"
+        )
+
+        result = get_available_resources(
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            modello_testa="HT200",
+            bore_min=20.0,
+            bore_max=50.0,
+            bore_mid=25.0,
+        )
+        self.assertEqual(result["pre_mandrini"], {"M_IDLE_NEAR", "M_IDLE_FAR"})
+
+        ConfigurazioneTesta.objects.filter(modello_testa="HT200").update(min_mandrini=3)
+        result = get_available_resources(
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            modello_testa="HT200",
+            bore_min=20.0,
+            bore_max=50.0,
+            bore_mid=25.0,
+        )
+        self.assertEqual(
+            result["pre_mandrini"], {"M_IDLE_NEAR", "M_IDLE_FAR", "M_BUSY"}
+        )
+
+    def test_in_progress_assignment_counts_as_busy(self) -> None:
+        working = self._planned(
+            "C200",
+            date(2026, 3, 1),
+            date(2026, 3, 10),
+            actual_start=date(2026, 3, 1),
+        )
+        RisorsaAttivita.objects.create(
+            attivita=working, tipo="testa", risorsa_id="T001"
+        )
+
+        result = get_available_resources(
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            modello_testa="HT200",
+        )
+        self.assertEqual(result["pre_testa"], {"T002"})
+
+    def test_exclude_activity_id_treats_own_assignment_as_idle(self) -> None:
+        current = self._planned("C100", date(2026, 6, 1), date(2026, 6, 5))
+        other = self._planned("C200", date(2026, 3, 1), date(2026, 3, 10))
+        RisorsaAttivita.objects.create(
+            attivita=current, tipo="testa", risorsa_id="T001"
+        )
+        RisorsaAttivita.objects.create(attivita=other, tipo="testa", risorsa_id="T002")
+
+        result = get_available_resources(
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            modello_testa="HT200",
+            exclude_activity_id=current.pk,
+        )
+        self.assertEqual(result["pre_testa"], {"T001"})
+
+    def test_idle_first_on_tastatori_maschere_generatori(self) -> None:
+        TastatoreItem.objects.create(uid="TA_BUSY", diameter="25", plant="Valbrembo")
+        TastatoreItem.objects.create(uid="TA_IDLE", diameter="40", plant="Valbrembo")
+        MascheraItem.objects.create(uid="MA001", pitch="50", plant="Valbrembo")
+        MascheraItem.objects.create(uid="MA002", pitch="50", plant="Valbrembo")
+        GeneratoreItem.objects.create(uid="G001", model="GEN-A", plant="Valbrembo")
+        GeneratoreItem.objects.create(uid="G002", model="GEN-A", plant="Valbrembo")
+
+        other = self._planned("C200", date(2026, 3, 1), date(2026, 3, 10))
+        RisorsaAttivita.objects.create(
+            attivita=other, tipo="tastatore", risorsa_id="TA_BUSY"
+        )
+        RisorsaAttivita.objects.create(
+            attivita=other, tipo="maschera", risorsa_id="MA001"
+        )
+        RisorsaAttivita.objects.create(
+            attivita=other, tipo="generatore", risorsa_id="G001"
+        )
+
+        result = get_available_resources(
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            bore_min=20.0,
+            bore_max=50.0,
+            bore_mid=25.0,
+            tube_pitch=50.0,
+        )
+        self.assertEqual(result["pre_tastatori"], {"TA_IDLE"})
+        self.assertEqual(result["pre_maschere"], {"MA002"})
+        self.assertEqual(result["pre_generatori"], {"G002"})

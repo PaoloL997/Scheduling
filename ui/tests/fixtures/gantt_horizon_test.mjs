@@ -91,10 +91,10 @@ assert(fit.view === 'horizon', `view=${fit.view}`);
 const days = (fit.maxD - fit.minD) / 86400000;
 assert(days >= 160 && days <= 200, `expected ~6 months (~180d), got ${days}`);
 
-// Left should be near first WIP actual_start (2026-03-05), with small pad.
-const wipStart = new Date('2026-03-05T00:00:00').getTime();
-const driftLeft = (wipStart - fit.minD.getTime()) / 86400000;
-assert(driftLeft >= 0 && driftLeft <= 10, `left not anchored near WIP start, drift=${driftLeft}`);
+// Left aligns to the earliest WIP planned start; the ~1 cm pad is applied at render time.
+const earliest = new Date('2026-03-01T00:00:00').getTime();
+const driftLeft = (earliest - fit.minD.getTime()) / 86400000;
+assert(Math.abs(driftLeft) < 1.5, `left not anchored at earliest bar, drift=${driftLeft}`);
 
 const chart = new GanttChart({ prefix: '', initialView: 'horizon', enableStats: false });
 chart.setData(tasks, {});

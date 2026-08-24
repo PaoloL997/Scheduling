@@ -120,6 +120,73 @@ def _occupied_ids(
     return occupied_resource_ids(tipo, data_inizio, data_fine, exclude_activity_id)
 
 
+def _open_assignment_ids(
+    tipo: str,
+    exclude_activity_id: int | None = None,
+) -> set[str]:
+    """Return resource IDs assigned to incomplete (open) activities.
+
+    Completed activities (both ``actual_start`` and ``actual_finish`` set)
+    do not count: those resources are treated as idle for diversification.
+
+    Args:
+        tipo: Resource category (testa, mandrino, tastatore, maschera,
+            generatore).
+        exclude_activity_id: Activity PK to ignore (edit flows).
+
+    Returns:
+        set[str]: Resource IDs currently assigned to open activities.
+    """
+    from ui.models import RisorsaAttivita
+
+    qs = RisorsaAttivita.objects.filter(tipo=tipo).exclude(
+        attivita__actual_start__isnull=False,
+        attivita__actual_finish__isnull=False,
+    )
+    if exclude_activity_id is not None:
+        qs = qs.exclude(attivita_id=exclude_activity_id)
+    return set(qs.values_list("risorsa_id", flat=True))
+
+
+def _select_n(
+    items: list[dict],
+    n: int,
+    busy: set[str],
+    mid: float | None = None,
+) -> set[str]:
+    """Select N resource UIDs preferring idle items, then quality.
+
+    Ranking:
+
+    1. Idle (UID not in *busy*) before already-assigned.
+    2. Diameter closest to *mid* when *mid* is set; otherwise original order.
+    3. UID as tiebreaker.
+
+    Args:
+        items: Resource dicts with ``uid`` and optionally ``diameter``.
+        n: Number of items to select.
+        busy: UIDs assigned to open activities.
+        mid: Optional target diameter for closest-match ranking.
+
+    Returns:
+        set[str]: Selected UIDs (fewer than *n* if the list is shorter).
+    """
+    if not items or n <= 0:
+        return set()
+
+    ranked = sorted(
+        enumerate(items),
+        key=lambda pair: (
+            pair[1]["uid"] in busy,
+            abs(float(pair[1].get("diameter") or 0) - mid)
+            if mid is not None
+            else pair[0],
+            pair[1]["uid"],
+        ),
+    )
+    return {item["uid"] for _, item in ranked[:n]}
+
+
 def find_modello_testa_in_db(modello_testa: str) -> str | None:
     """Return the canonical DB value for a testa model name.
 
@@ -243,19 +310,24 @@ def get_available_resources(
     from other plants, annotated with ``stab_esterno``.
 
     Pre-selection is driven by the :class:`~ui.models.ConfigurazioneTesta`
-    configuration for ``modello_testa`` (if one exists):
+    configuration for ``modello_testa`` (if one exists), then diversified
+    so that resources not assigned to any open activity (in progress or
+    planned) are preferred over ones already booked on other dates:
 
-    * ``pre_mandrini`` — the ``min_mandrini`` items with diameter closest to
-      ``bore_mid``.
-    * ``pre_tastatori`` — the ``min_tastatori`` items with diameter closest to
-      ``bore_mid``.
-    * ``pre_maschere`` — the first ``min_maschere`` items in the list.
+    * ``pre_mandrini`` — ``min_mandrini`` idle items with diameter closest
+      to ``bore_mid`` (falls back to already-assigned if idle ones are
+      insufficient).
+    * ``pre_tastatori`` — same ranking as mandrini for ``min_tastatori``.
+    * ``pre_maschere`` — ``min_maschere`` idle items first, then list order.
     * ``pre_generatori`` — items whose ``model`` is in the compatible-generator
       set; the generator list itself is also filtered to those models.
-    * ``pre_testa`` — the first available testa (unchanged).
+      Idle items are preferred within that set.
+    * ``pre_testa`` — the first idle available testa (falls back to an
+      already-assigned one if none are idle).
 
-    When no configuration is found, all minimums default to 1 and generator
-    filtering is not applied.
+    Completed activities (both actual dates set) do not mark a resource as
+    busy.  When no configuration is found, all minimums default to 1 and
+    generator filtering is not applied.
 
     Args:
         stabilimento: Plant name for the activity being created.
@@ -456,54 +528,22 @@ def get_available_resources(
     maschere = _maschere_available()
     generatori = _generatori_available()
 
-    pre_testa: set = {teste[0]["uid"]} if teste else set()
+    busy_testa = _open_assignment_ids("testa", exclude_activity_id)
+    busy_m = _open_assignment_ids("mandrino", exclude_activity_id)
+    busy_t = _open_assignment_ids("tastatore", exclude_activity_id)
+    busy_ma = _open_assignment_ids("maschera", exclude_activity_id)
+    busy_g = _open_assignment_ids("generatore", exclude_activity_id)
 
-    def _closest_n(items: list[dict], n: int, mid: float | None) -> set[str]:
-        """Select UIDs of the N items with diameter closest to a target value.
-
-        When ``mid`` is ``None``, returns the UIDs of the first ``n`` items.
-
-        Args:
-            items: Resource dicts, each expected to have ``uid`` and
-                ``diameter`` keys.
-            n: Number of items to select.
-            mid: Target diameter for closest-match ranking.
-
-        Returns:
-            set[str]: The selected UIDs (fewer than ``n`` if list is shorter).
-        """
-        if not items:
-            return set()
-        if mid is not None:
-            ranked = sorted(
-                items,
-                key=lambda x: abs(float(x.get("diameter") or 0) - mid),
-            )
-        else:
-            ranked = items
-        return {r["uid"] for r in ranked[:n]}
-
-    def _first_n(items: list[dict], n: int) -> set[str]:
-        """Return the UIDs of the first ``n`` items in a list.
-
-        Args:
-            items: Resource dicts, each expected to have a ``uid`` key.
-            n: Number of items to select.
-
-        Returns:
-            set[str]: The selected UIDs (fewer than ``n`` if list is shorter).
-        """
-        return {r["uid"] for r in items[:n]}
-
-    pre_mandrini = _closest_n(mandrini, min_mandrini, bore_mid)
-    pre_tastatori = _closest_n(tastatori, min_tastatori, bore_mid)
-    pre_maschere = _first_n(maschere, min_maschere)
+    pre_testa = _select_n(teste, 1, busy_testa)
+    pre_mandrini = _select_n(mandrini, min_mandrini, busy_m, bore_mid)
+    pre_tastatori = _select_n(tastatori, min_tastatori, busy_t, bore_mid)
+    pre_maschere = _select_n(maschere, min_maschere, busy_ma)
 
     if gen_models:
         compatible = [r for r in generatori if r.get("model") in gen_models]
-        pre_generatori: set = _first_n(compatible, min_generatori)
+        pre_generatori = _select_n(compatible, min_generatori, busy_g)
     else:
-        pre_generatori = {generatori[0]["uid"]} if generatori else set()
+        pre_generatori = _select_n(generatori, min_generatori, busy_g)
 
     def _pre_first(lst: list, pre: set) -> list:
         """Place pre-selected items at the front of a list.

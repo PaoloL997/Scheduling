@@ -9,22 +9,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="{% static 'ui/style.css' %}">
     {% block extra_head %}{% endblock %}
-    <script>
-        (function () {
-            if (localStorage.getItem('theme') === 'light') {
-                document.documentElement.classList.add('light-pending');
-            }
-        })();
-    </script>
 </head>
 <body>
-
-<script>
-    if (document.documentElement.classList.contains('light-pending')) {
-        document.body.classList.add('light');
-        document.documentElement.classList.remove('light-pending');
-    }
-</script>
 
 <nav id="navbar">
     <div id="navbar-brand">
@@ -35,7 +21,7 @@
 
     <ul>
         <li><a href="{% url 'index' %}" class="{% if request.resolver_match.url_name == 'index' %}active{% endif %}">Home</a></li>
-        <li><a href="{% url 'pianificazione' %}" class="{% if request.resolver_match.url_name == 'pianificazione' %}active{% endif %}">Pianificazione{% if global_open_problems > 0 %}<span class="nav-warn-badge" id="nav-warn-badge" title="{{ global_open_problems }} problema/i aperto/i">⚠ {{ global_open_problems }}</span>{% endif %}</a></li>
+        <li><a href="{% url 'pianificazione' %}" class="{% if request.resolver_match.url_name == 'pianificazione' %}active{% endif %}">Pianificazione{% if global_open_problems > 0 %}<span class="btn-problemi nav-warn-badge" id="nav-warn-badge" title="{{ global_open_problems }} problema/i aperto/i"><svg class="problems-badge__tri" viewBox="0 0 20 20" aria-hidden="true"><path class="problems-badge__tri-fill" d="M10 2.15c.47 0 .9.25 1.14.66l7.2 12.85A1.32 1.32 0 0 1 17.2 17.8H2.8a1.32 1.32 0 0 1-1.14-1.98L8.86 2.81c.24-.41.67-.66 1.14-.66z"/><path class="problems-badge__tri-mark" d="M10 7.05c.36 0 .65.28.65.64v3.55c0 .36-.29.64-.65.64s-.65-.28-.65-.64V7.69c0-.36.29-.64.65-.64zm0 6.2a.82.82 0 1 1 0 1.64.82.82 0 0 1 0-1.64z"/></svg><span class="problems-badge__n">{{ global_open_problems }}</span></span>{% endif %}</a></li>
         <li><a href="{% url 'inventario' %}" class="{% if request.resolver_match.url_name == 'inventario' %}active{% endif %}">Inventario</a></li>
         <li><a href="{% url 'ottimizzazione' %}" class="{% if request.resolver_match.url_name == 'ottimizzazione' or request.resolver_match.url_name == 'ottimizzazione_risultati' %}active{% endif %}">Ottimizzazione</a></li>
         <li><a href="{% url 'impostazioni' %}" class="{% if request.resolver_match.url_name == 'impostazioni' %}active{% endif %}">Impostazioni</a></li>
@@ -76,19 +62,6 @@
     <span class="status-dot status-dot--loading" id="status-dot"></span>
     <span id="status-label">Caricamento…</span>
 </div>
-
-<!-- Theme toggle (bottom-right fixed) -->
-<button id="theme-toggle" onclick="toggleTheme()" title="Cambia tema" aria-label="Cambia tema">
-    <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
-        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-        <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
-        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-    </svg>
-    <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-    </svg>
-</button>
 
 <!-- Writing blocking overlay -->
 <div id="writing-overlay" aria-hidden="true">
@@ -212,12 +185,6 @@
 
         poll();
     })();
-
-    function toggleTheme() {
-        document.body.classList.toggle('light');
-        const isLight = document.body.classList.contains('light');
-        localStorage.setItem('theme', isLight ? 'light' : 'dark');
-    }
 
     (function () {
         const overlay = document.getElementById("user-modal-overlay");

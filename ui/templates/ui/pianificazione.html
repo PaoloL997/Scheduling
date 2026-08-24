@@ -113,11 +113,12 @@
                 <span></span>
               </div>
               {% for task in group.activities %}
-              <div class="pian-activity-row"
+              <div class="pian-activity-row{% if task.resource_overlaps %} row--overlap{% endif %}"
                    data-source="{{ task.source }}"
                    data-orm-id="{{ task.orm_id|default:'' }}"
                    data-warning-count="{{ task.warning_count|default:0 }}"
                    data-note-count="{{ task.note_count|default:0 }}"
+                   data-overlaps="{{ task.resource_overlaps_json }}"
                    data-activity-id="{{ task.activity_id }}"
                    data-job-id="{{ task.job_id }}"
                    data-commessa="{{ task.commessa }}"
@@ -162,11 +163,13 @@
                 <span class="pian-col-pred">{{ task.predecessors|default:"Nessuna" }}</span>
                 <span class="pian-col-action">
                   {% if task.orm_id %}
-                    {% if task.warning_count and task.warning_count > 0 %}
-                      <button class="btn-risolvi" onclick="event.stopPropagation();openNotesModal('{{ task.orm_id }}')">&#9888; Risolvi ({{ task.warning_count }})</button>
+                    {% with wc=task.warning_count|default:0 oc=task.resource_overlaps|length %}
+                    {% if wc or oc %}
+                      <button type="button" class="btn-problemi" onclick="event.stopPropagation();openNotesModal('{{ task.orm_id }}')"><svg class="problems-badge__tri" viewBox="0 0 20 20" aria-hidden="true"><path class="problems-badge__tri-fill" d="M10 2.15c.47 0 .9.25 1.14.66l7.2 12.85A1.32 1.32 0 0 1 17.2 17.8H2.8a1.32 1.32 0 0 1-1.14-1.98L8.86 2.81c.24-.41.67-.66 1.14-.66z"/><path class="problems-badge__tri-mark" d="M10 7.05c.36 0 .65.28.65.64v3.55c0 .36-.29.64-.65.64s-.65-.28-.65-.64V7.69c0-.36.29-.64.65-.64zm0 6.2a.82.82 0 1 1 0 1.64.82.82 0 0 1 0-1.64z"/></svg><span>Problemi</span><span class="problems-badge__n">{{ wc|add:oc }}</span></button>
                     {% elif task.note_count and task.note_count > 0 %}
                       <button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('{{ task.orm_id }}')">Note</button>
                     {% endif %}
+                    {% endwith %}
                   {% endif %}
                 </span>
               </div>
@@ -616,44 +619,13 @@
   <div class="notes-modal-inner" role="dialog" aria-labelledby="notes-modal-title" aria-modal="true">
     <header class="notes-modal-header">
       <div class="notes-modal-heading">
-        <p class="notes-modal-eyebrow">Note</p>
+        <p class="notes-modal-eyebrow">Problemi</p>
         <h3 class="notes-modal-title" id="notes-modal-title">Attività</h3>
         <p class="notes-modal-subtitle" id="notes-modal-subtitle"></p>
       </div>
       <button class="btn-icon notes-modal-close" onclick="closeNotesModal()" aria-label="Chiudi">&#x2715;</button>
     </header>
     <div class="notes-modal-body" id="notes-modal-body"></div>
-  </div>
-</div>
-
-<!-- Risolvi-problema mini-modal -->
-<div id="risolvi-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:3000; align-items:center; justify-content:center;">
-  <div id="risolvi-inner" style="background:var(--surface); border:1px solid var(--border); border-radius:.75rem; padding:1.5rem; width:min(460px,90vw); display:flex; flex-direction:column; gap:1rem;">
-    <h3 style="margin:0; font-size:1rem; font-weight:600;">Risolvi problema</h3>
-    <p id="risolvi-desc" style="margin:0; font-size:.85rem; color:var(--text-muted);"></p>
-    <div class="wiz-field">
-      <label>Note di risoluzione <span class="opt">(opz.)</span></label>
-      <textarea id="risolvi-notes" rows="3" style="width:100%; resize:vertical;" placeholder="Descrivi come hai risolto il problema…"></textarea>
-    </div>
-    <div style="display:flex; justify-content:flex-end; gap:.5rem;">
-      <button class="btn btn-ghost" onclick="closeRisolviModal()">Annulla</button>
-      <button id="risolvi-confirm-btn" class="btn btn-primary" onclick="confirmRisolvi()">Conferma</button>
-    </div>
-  </div>
-</div>
-
-<!-- Overlap reassignment proposal modal -->
-<div id="overlap-reassign-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:3100; align-items:center; justify-content:center;">
-  <div class="overlap-reassign-inner">
-    <h3 class="overlap-reassign-title">Riassegna risorse</h3>
-    <p id="overlap-reassign-desc" class="overlap-reassign-desc"></p>
-    <div id="overlap-reassign-proposal" class="overlap-reassign-proposal"></div>
-    <div id="overlap-reassign-warn" class="overlap-reassign-warn" style="display:none;"></div>
-    <div class="overlap-reassign-actions">
-      <button type="button" class="btn btn-ghost" onclick="closeOverlapReassignModal()">Annulla</button>
-      <button type="button" class="btn btn-secondary" id="overlap-reassign-edit-btn" onclick="modifyOverlapReassignManual()">Modifica manualmente</button>
-      <button type="button" class="btn btn-primary" id="overlap-reassign-confirm-btn" onclick="confirmOverlapReassign()">Conferma proposta</button>
-    </div>
   </div>
 </div>
 
@@ -822,6 +794,62 @@ const buildActivityId = (commessa, item, attivita) => `${_enc(commessa)}-${_enc(
 let _selectedPianCommessa = '';
 let _pianDetachedActivities = null;
 let _pianLockedJob = null;
+
+const _PROBLEMS_TRI_SVG =
+  '<svg class="problems-badge__tri" viewBox="0 0 20 20" aria-hidden="true">' +
+  '<path class="problems-badge__tri-fill" d="M10 2.15c.47 0 .9.25 1.14.66l7.2 12.85A1.32 1.32 0 0 1 17.2 17.8H2.8a1.32 1.32 0 0 1-1.14-1.98L8.86 2.81c.24-.41.67-.66 1.14-.66z"/>' +
+  '<path class="problems-badge__tri-mark" d="M10 7.05c.36 0 .65.28.65.64v3.55c0 .36-.29.64-.65.64s-.65-.28-.65-.64V7.69c0-.36.29-.64.65-.64zm0 6.2a.82.82 0 1 1 0 1.64.82.82 0 0 1 0-1.64z"/>' +
+  '</svg>';
+
+function problemsBadgeInner(count) {
+  return _PROBLEMS_TRI_SVG + '<span class="problems-badge__n">' + count + '</span>';
+}
+
+function problemiButtonHtml(ormId, count) {
+  return (
+    '<button type="button" class="btn-problemi" onclick="event.stopPropagation();openNotesModal(\'' + ormId + '\')">' +
+    _PROBLEMS_TRI_SVG +
+    '<span>Problemi</span>' +
+    '<span class="problems-badge__n">' + count + '</span>' +
+    '</button>'
+  );
+}
+
+function _parseOverlaps(ds) {
+  try {
+    const parsed = JSON.parse((ds && ds.overlaps) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function _pianActionButtonsHtml(ormId, wc, nc, overlapCount) {
+  if (!ormId) return '';
+  const openCount = (wc || 0) + (overlapCount || 0);
+  if (openCount > 0) return problemiButtonHtml(ormId, openCount);
+  if (nc > 0) {
+    return `<button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('${ormId}')">Note</button>`;
+  }
+  return '';
+}
+
+function _applyOverlapUpdates(currentRow, json) {
+  const prevPeers = _parseOverlaps(currentRow.dataset).map(o => String(o.peer_orm_id));
+  const updates = { ...(json.overlap_updates || {}) };
+  if (json.resource_overlaps) {
+    updates[String(currentRow.dataset.ormId)] = json.resource_overlaps;
+  }
+  prevPeers.forEach(id => {
+    if (!(id in updates)) updates[id] = [];
+  });
+  Object.keys(updates).forEach(id => {
+    const row = document.querySelector(`.pian-activity-row[data-orm-id="${id}"]`);
+    if (!row) return;
+    row.dataset.overlaps = JSON.stringify(updates[id] || []);
+    _refreshActivityRowCells(row);
+  });
+}
 
 function _resolveActivityName(activityId) {
   const row = document.querySelector(`.pian-activity-row[data-activity-id="${CSS.escape(activityId)}"]`);
@@ -994,11 +1022,18 @@ function _pianJobStats(commessa) {
     workTotal: 0,
     progressPct: 0,
   };
+  const overlapPairs = new Set();
   rows.forEach(row => {
     const wc = parseInt(row.dataset.warningCount || '0', 10) || 0;
     const state = _pianActivityState(row);
     if (state === 'completata') stats.completed += 1;
     stats.openProblems += wc;
+    const ormId = parseInt(row.dataset.ormId, 10);
+    _parseOverlaps(row.dataset).forEach(o => {
+      const peer = parseInt(o.peer_orm_id, 10);
+      if (!ormId || !peer) return;
+      overlapPairs.add(ormId < peer ? `${ormId}:${peer}` : `${peer}:${ormId}`);
+    });
     if (state === 'in_ritardo') stats.late += 1;
     if (state === 'in_lavorazione') stats.working += 1;
     if (state === 'pianificata') stats.planned += 1;
@@ -1021,6 +1056,7 @@ function _pianJobStats(commessa) {
       }
     }
   });
+  stats.openProblems += overlapPairs.size;
   stats.progressPct = stats.workTotal
     ? Math.round(stats.workDone / stats.workTotal * 100)
     : 0;
@@ -2817,18 +2853,16 @@ function _refreshActivityRowCells(div) {
     resCell.innerHTML = formatResourcesHtml(typed);
   }
 
+  const overlapCount = _parseOverlaps(ds).length;
+  div.classList.toggle('row--overlap', overlapCount > 0);
+
   const actionCol = div.querySelector('.pian-col-action');
   if (actionCol) {
-    if (ormIdVal && wc > 0) {
-      actionCol.innerHTML = `<button class="btn-risolvi" onclick="event.stopPropagation();openNotesModal('${ormIdVal}')">Risolvi (${wc})</button>`;
-    } else if (ormIdVal && nc > 0) {
-      actionCol.innerHTML = `<button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('${ormIdVal}')">Note</button>`;
-    } else {
-      actionCol.innerHTML = '';
-    }
+    actionCol.innerHTML = _pianActionButtonsHtml(ormIdVal, wc, nc, overlapCount);
   }
   const group = _pianGroupByCommessa(ds.commessa || _selectedPianCommessa);
   if (group) _refreshPianJobCard(group);
+  _syncNavWarnBadge();
 }
 
 function _wizAppendRow(ormId, warningCount, noteCount) {
@@ -2868,14 +2902,11 @@ function _wizAppendRow(ormId, warningCount, noteCount) {
   div.dataset.resources      = allRes;
   div.dataset.resourcesTyped = JSON.stringify(resByTipo);
   div.dataset.predecessors   = r.predecessors && r.predecessors.length ? r.predecessors.join(', ') : '';
+  div.dataset.overlaps       = '[]';
   div.setAttribute('onclick', 'openDetailModal(this, \'task\')');
 
   const pills = _computeActivityStatus(r.dataInizio, r.dataFine, null, null);
-  const noteBtn = ormId && wc > 0
-    ? `<button class="btn-risolvi" onclick="event.stopPropagation();openNotesModal('${ormId}')">Risolvi (${wc})</button>`
-    : ormId && nc > 0
-    ? `<button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('${ormId}')">Note</button>`
-    : '';
+  const noteBtn = _pianActionButtonsHtml(ormId, wc, nc, 0);
   div.innerHTML = `
     <span class="pian-col-id">${esc(activityId)}</span>
     <span class="pian-col-date pian-col-date--planned-start"><strong>${fmt(r.dataInizio)}</strong></span>
@@ -3607,13 +3638,13 @@ async function saveEdit() {
     if (entityType === 'task') {
       tr.dataset.jobId = newData.jobId || '';
       tr.dataset.activityId = newData.activityId || '';
-      _refreshActivityRowCells(tr);
+      _applyOverlapUpdates(tr, json);
+      if (!json.resource_overlaps && !json.overlap_updates) {
+        _refreshActivityRowCells(tr);
+      }
       refreshPianSummary();
       sortPianGroupList();
       filterPianGroups(document.getElementById('pian-search')?.value || '');
-      if (Array.isArray(json.overlaps) && json.overlaps.length) {
-        _applyOverlapNotes(json.overlaps);
-      }
     }
 
     // Visual refresh for job card meta after edit.
@@ -3749,25 +3780,15 @@ async function deleteEntity() {
 }
 
 // ── Problemi ──────────────────────────────────────────────────────────────────
-let _risolviState   = null;  // { problemaId, tr }
 let _notesModalOrmId = null;
 let _notesModalTr    = null;
 
 // ── Notes modal (read-only list of all problems/notes) ────────────────────
-const _PROB_LABEL = { testa:'Testa', mandrino:'Mandrino', tastatore:'Tastatore', maschera:'Maschera', generatore:'Generatore' };
 const _NOTE_TIPO_LABEL = {
-  sovrapposizione: 'Sovrapposizione risorse',
   acquisto: 'Risorsa da recuperare',
   spostamento: 'Spostamento richiesto',
+  sovrapposizione: 'Sovrapposizione risorse',
 };
-
-function _fmtNoteDate(iso) {
-  if (!iso) return '';
-  const raw = String(iso).slice(0, 10);
-  const d = new Date(raw + 'T12:00:00');
-  if (Number.isNaN(d.getTime())) return raw;
-  return d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' });
-}
 
 function _fmtNoteDateTime(iso) {
   if (!iso) return '';
@@ -3779,43 +3800,124 @@ function _fmtNoteDateTime(iso) {
   });
 }
 
+function _fmtOverlapFull(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso + 'T00:00:00');
+    if (Number.isNaN(d.getTime())) return iso;
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    return `${dd}/${mm}/${d.getFullYear()}`;
+  } catch {
+    return iso;
+  }
+}
+
+function _parenTraits(r) {
+  if (!r) return '';
+  const bits = [];
+  if (r.model) bits.push('modello ' + r.model);
+  else if (r.diameter) bits.push('Ø ' + r.diameter);
+  else if (r.pitch) bits.push('passo ' + r.pitch);
+  if (r.plant) bits.push('stabilimento ' + r.plant);
+  return bits.length ? ` (${bits.join(', ')})` : '';
+}
+
+function _resourceName(r) {
+  if (!r) return 'risorsa';
+  const tipo = r.tipo_label || 'Risorsa';
+  const uid = r.uid || '';
+  return uid ? `${tipo} ${uid}` : (r.label || 'risorsa');
+}
+
+function _overlapAsProblem(o, viewingOrmId) {
+  const isLate = o.role === 'late';
+  // Resource is held by the late activity until overlap_end.
+  const lateActivity = isLate
+    ? (_notesModalTr?.dataset?.activityId || 'questa attività')
+    : (o.peer_activity_id || o.peer_label || 'attività in ritardo');
+  const until = _fmtOverlapFull(o.overlap_end);
+  const res = (o.resources && o.resources[0]) || null;
+  const descr =
+    `La risorsa ${_resourceName(res)}${_parenTraits(res)} impiegata nell'attività ${lateActivity} ` +
+    `è bloccata fino al ${until}.`;
+  const suggestion = o.suggestion || null;
+  const blockedOrmId = suggestion && suggestion.blocked_orm_id
+    ? suggestion.blocked_orm_id
+    : (isLate ? o.peer_orm_id : viewingOrmId);
+  return {
+    tipo: 'sovrapposizione',
+    risolto: false,
+    descrizione: descr,
+    suggestion,
+    blocked_orm_id: blockedOrmId,
+  };
+}
+
+function _proposalLine(r) {
+  const toItem = r.to_item || {};
+  const name = _resourceName({
+    tipo_label: toItem.tipo_label || (r.from_item && r.from_item.tipo_label),
+    uid: r.to_uid || toItem.uid,
+    label: r.to_label,
+  });
+  return `Proposta sostituzione con risorsa ${name}${_parenTraits(toItem)}`;
+}
+
 function _renderNoteItem(p) {
-  const isOverlap = p.tipo === 'sovrapposizione';
   const typeLabel = _NOTE_TIPO_LABEL[p.tipo] || p.tipo;
-  const resourceLabel = isOverlap ? '' : (_PROB_LABEL[p.risorsa_tipo] || p.risorsa_tipo || '');
-  const resourceUid = isOverlap ? '' : (p.risorsa_uid || '');
   const from = p.stabilimento_origine || '?';
   const to = p.stabilimento_attivita || '?';
-  const description = p.tipo === 'acquisto'
-    ? (p.descrizione || 'Risorsa da acquistare o noleggiare.')
-    : isOverlap
-      ? (p.descrizione || 'Conflitto di risorse con un\'altra attività.')
-      : (p.descrizione || `Spostamento richiesto da ${from} a ${to}.`);
+  let description;
+  if (p.tipo === 'acquisto') {
+    description = p.descrizione || 'Risorsa da acquistare o noleggiare.';
+  } else if (p.tipo === 'sovrapposizione') {
+    description = p.descrizione || 'Sovrapposizione sulle risorse.';
+  } else {
+    description = p.descrizione || `Spostamento richiesto da ${from} a ${to}.`;
+  }
   const isOpen = !p.risolto;
 
   let footHtml = '';
   if (!isOpen && p.note_risoluzione) {
     const when = p.data_risoluzione ? ` · ${_fmtNoteDateTime(p.data_risoluzione)}` : '';
     footHtml = `<p class="note-item__resolved">${esc(p.note_risoluzione)}${esc(when)}</p>`;
-  } else if (isOpen && p.tipo === 'sovrapposizione') {
-    footHtml = `<div class="note-item__actions">
-      <button class="btn-risolvi" type="button" onclick="reassignFromOverlap('${_notesModalOrmId}')">Risolvi</button>
-      <button class="btn-risolvi btn-risolvi--ghost" type="button" onclick="leaveOverlapAsIs(${p.id})">Lascia invariato</button>
-    </div>`;
-  } else if (isOpen) {
-    const risolviDesc = (typeLabel + (resourceUid ? ' ' + resourceUid : '') + ' — ' + description).replace(/'/g, "\\'");
-    footHtml = `<div class="note-item__actions">
-      <button class="btn-risolvi" type="button" onclick="openRisolviModal(${p.id}, '${risolviDesc}')">Risolvi</button>
-    </div>`;
   }
 
-  return `<li class="note-item${isOpen ? ' note-item--open' : ''}">
+  let suggestHtml = '';
+  if (p.tipo === 'sovrapposizione' && isOpen) {
+    const sug = p.suggestion;
+    const reps = (sug && sug.replacements) || [];
+    const unresolved = (sug && sug.unresolved) || [];
+    if (reps.length) {
+      const lines = reps.map(r =>
+        `<p class="note-item__propose">${esc(_proposalLine(r))}</p>`
+      ).join('');
+      suggestHtml = `<div class="note-item__suggest">
+        ${lines}
+        <div class="note-item__actions">
+          <button type="button" class="btn btn-ghost" onclick="event.stopPropagation();dismissOverlapSuggestion(this)">Lascia così</button>
+          <button type="button" class="btn-risolvi" onclick="event.stopPropagation();acceptOverlapReassign(${Number(p.blocked_orm_id)})">Accetta</button>
+        </div>
+      </div>`;
+    } else {
+      const summary = (sug && sug.summary)
+        || ('Nessuna alternativa nel periodo'
+          + (unresolved.length
+            ? ' (' + unresolved.map(r => r.from_uid || r.from_label).join(', ') + ')'
+            : ''));
+      suggestHtml = `<p class="note-item__suggest-empty">${esc(summary)}</p>`;
+    }
+  }
+
+  return `<li class="note-item${isOpen ? ' note-item--open' : ''}${p.tipo === 'sovrapposizione' ? ' note-item--overlap' : ''}">
     <div class="note-item__row">
       <span class="note-item__type">${esc(typeLabel)}</span>
       <span class="note-item__state">${isOpen ? 'Aperta' : 'Risolta'}</span>
     </div>
     <p class="note-item__text">${esc(description)}</p>
     ${footHtml}
+    ${suggestHtml}
   </li>`;
 }
 
@@ -3838,7 +3940,8 @@ async function openNotesModal(ormId) {
       return;
     }
     const data = await resp.json();
-    const problemi = data.problemi || [];
+    const overlaps = _parseOverlaps(_notesModalTr?.dataset).map(o => _overlapAsProblem(o, ormId));
+    const problemi = overlaps.concat(data.problemi || []);
     if (!problemi.length) {
       body.innerHTML = '<p class="notes-modal-status">Nessuna nota per questa attività.</p>';
       return;
@@ -3862,391 +3965,51 @@ function closeNotesModal() {
   _notesModalTr = null;
 }
 
-// ── Overlap (sovrapposizione) note handling ───────────────────────────────
-let _overlapReassignState = null;
-
-function _taskDataFromTr(tr) {
-  const ds = tr.dataset;
-  return {
-    ormId: ds.ormId,
-    start: ds.start || '',
-    finish: ds.finish || '',
-    plant: ds.plant || '',
-    modelloTesta: ds.modelloTesta || '',
-    boreMin: ds.boreMin || '',
-    boreMax: ds.boreMax || '',
-    boreMid: ds.boreMid || '',
-    tubePitch: ds.tubePitch || '',
-    resourcesTyped: ds.resourcesTyped || '',
-  };
+function dismissOverlapSuggestion(btn) {
+  const box = btn.closest('.note-item__suggest');
+  if (!box) return;
+  const actions = box.querySelector('.note-item__actions');
+  if (actions) actions.remove();
+  const note = document.createElement('p');
+  note.className = 'note-item__suggest-dismissed';
+  note.textContent = 'Proposta ignorata. Il problema resta visibile.';
+  box.appendChild(note);
 }
 
-function _cloneRisorse(risorse) {
-  return {
-    teste: [...(risorse.teste || [])],
-    mandrini: [...(risorse.mandrini || [])],
-    tastatori: [...(risorse.tastatori || [])],
-    maschere: [...(risorse.maschere || [])],
-    generatori: [...(risorse.generatori || [])],
-  };
-}
-
-async function _fetchOpenOverlapProblemi(ormId) {
-  const resp = await fetch(`/api/attivita/${ormId}/problemi/`);
-  if (!resp.ok) return [];
-  const data = await resp.json();
-  return (data.problemi || []).filter(p => p.tipo === 'sovrapposizione' && !p.risolto);
-}
-
-async function _loadAvailableRisorseForTask(taskData, lookupPairs) {
-  const params = new URLSearchParams({
-    stabilimento: taskData.plant || '',
-    data_inizio: taskData.start || '',
-    data_fine: taskData.finish || '',
-    bore_min: taskData.boreMin || '',
-    bore_max: taskData.boreMax || '',
-    bore_mid: taskData.boreMid || '',
-    tube_pitch: taskData.tubePitch || '',
-    modello_testa: taskData.modelloTesta || '',
-    exclude_activity_id: String(taskData.ormId || ''),
-    strict_requirements: '1',
-  });
-  if (lookupPairs?.length) {
-    params.set('lookup', lookupPairs.map(([tipo, uid]) => `${tipo}:${uid}`).join(','));
-  }
-  const resp = await fetch(`/api/attivita/risorse/?${params}`);
-  const data = await resp.json();
-  if (!resp.ok || !data.ok) {
-    throw new Error(data.error || 'Impossibile caricare le risorse disponibili.');
-  }
-  return data;
-}
-
-function _resourceLookupFromAvail(avail) {
-  const map = {};
-  for (const cat of _RISORSE_CAT_KEYS) {
-    for (const r of (avail[cat] || [])) {
-      const uid = r.uid || r.id;
-      if (uid) map[uid] = { ...r, cat };
-    }
-  }
-  return map;
-}
-
-function _overlapResourceMeasure(cat, r) {
-  if (!r) return '';
-  if ((cat === 'teste' || cat === 'generatori') && r.model) return String(r.model);
-  if ((cat === 'mandrini' || cat === 'tastatori') && r.diameter) return `Ø ${r.diameter} mm`;
-  if (cat === 'maschere' && r.pitch) return `Passo ${r.pitch} mm`;
-  return '';
-}
-
-function _overlapResourceHtml(uid, cat, lookup) {
-  const r = lookup[uid] || {};
-  const measure = _overlapResourceMeasure(cat, r);
-  const plant = r.stab_esterno || r.plant || '';
-  const measureHtml = measure
-    ? `<span class="overlap-reassign-sep">·</span><span class="overlap-reassign-measure">${esc(measure)}</span>`
-    : '';
-  const plantHtml = plant
-    ? `<span class="overlap-reassign-sep">·</span>${stabBadge(plant, r.stab_esterno ? 'stab-badge--ext' : '')}`
-    : '';
-  return `<span class="overlap-reassign-res"><code>${esc(uid)}</code>${measureHtml}${plantHtml}</span>`;
-}
-
-function _pickReplacement(cat, blockedUid, availableRows, preselected) {
-  const candidates = [
-    ...(preselected || []),
-    ...(availableRows || []).map(r => r.uid || r.id || '').filter(Boolean),
-  ];
-  for (const uid of candidates) {
-    if (uid !== blockedUid) return uid;
-  }
-  return null;
-}
-
-function _parseOverlapBlockedResources(p) {
-  const uid = p.risorsa_uid || '';
-  if (uid.includes('|') || (uid.includes(':') && !p.risorsa_tipo)) {
-    return uid.split('|').map(part => {
-      const sep = part.indexOf(':');
-      if (sep < 0) return null;
-      const tipo = part.slice(0, sep);
-      const rid = part.slice(sep + 1);
-      if (!tipo || !rid) return null;
-      return {
-        tipo,
-        uid: rid,
-        label: _PROB_LABEL[tipo] || tipo,
-      };
-    }).filter(Boolean);
-  }
-  if (p.risorsa_tipo && uid) {
-    return [{
-      tipo: p.risorsa_tipo,
-      uid,
-      label: _PROB_LABEL[p.risorsa_tipo] || p.risorsa_tipo,
-    }];
-  }
-  return [];
-}
-
-async function _buildOverlapProposal(tr, overlapProblemi) {
-  const taskData = _taskDataFromTr(tr);
-  const current = _typedToRisorse(taskData.resourcesTyped);
-  const proposed = _cloneRisorse(current);
-  const changes = [];
-  const unresolved = [];
-
-  const seenBlocked = new Set();
-  const allBlocked = [];
-  for (const p of overlapProblemi) {
-    for (const b of _parseOverlapBlockedResources(p)) {
-      const key = `${b.tipo}:${b.uid}`;
-      if (seenBlocked.has(key)) continue;
-      seenBlocked.add(key);
-      allBlocked.push({ ...b });
-    }
-  }
-
-  const lookupPairs = allBlocked.map(b => [b.tipo, b.uid]);
-  const avail = await _loadAvailableRisorseForTask(taskData, lookupPairs);
-  const preMap = {
-    teste: avail.pre_testa || [],
-    mandrini: avail.pre_mandrini || [],
-    tastatori: avail.pre_tastatori || [],
-    maschere: avail.pre_maschere || [],
-    generatori: avail.pre_generatori || [],
-  };
-
-  for (const b of allBlocked) {
-    const cat = TIPO_TO_CAT[b.tipo];
-    if (!cat) continue;
-    const blocked = b.uid;
-    const replacement = _pickReplacement(cat, blocked, avail[cat], preMap[cat]);
-    if (!replacement) {
-      unresolved.push(b);
-      continue;
-    }
-    const arr = proposed[cat] || [];
-    if (arr.includes(blocked)) {
-      proposed[cat] = arr.map(uid => (uid === blocked ? replacement : uid));
-    } else {
-      proposed[cat] = [...arr, replacement];
-    }
-    changes.push({
-      label: b.label,
-      tipo: b.tipo,
-      cat,
-      from: blocked,
-      to: replacement,
-    });
-  }
-
-  const resourceLookup = {
-    ..._resourceLookupFromAvail(avail),
-    ...(avail.lookup || {}),
-  };
-
-  return { proposed, changes, unresolved, taskData, resourceLookup };
-}
-
-function _renderOverlapProposal(changes, unresolved, resourceLookup) {
-  const proposalEl = document.getElementById('overlap-reassign-proposal');
-  const warnEl = document.getElementById('overlap-reassign-warn');
-  const confirmBtn = document.getElementById('overlap-reassign-confirm-btn');
-  const lookup = resourceLookup || {};
-
-  if (changes.length) {
-    proposalEl.innerHTML = changes.map(c => {
-      return `<div class="overlap-reassign-row">
-        <span class="overlap-reassign-label">${esc(c.label)}</span>
-        <div class="overlap-reassign-swap">
-          ${_overlapResourceHtml(c.from, c.cat, lookup)}
-          <span class="overlap-reassign-arrow" aria-hidden="true">→</span>
-          ${_overlapResourceHtml(c.to, c.cat, lookup)}
-        </div>
-      </div>`;
-    }).join('');
-    proposalEl.style.display = '';
-  } else {
-    proposalEl.innerHTML = '<p class="overlap-reassign-empty">Nessuna sostituzione automatica disponibile.</p>';
-    proposalEl.style.display = '';
-  }
-
-  if (unresolved.length) {
-    warnEl.innerHTML = 'Attenzione: nessuna alternativa libera per '
-      + unresolved.map(u => `${esc(u.label)} ${esc(u.uid)}`).join(', ')
-      + '. Usa «Modifica manualmente» per scegliere altre risorse.';
-    warnEl.style.display = '';
-  } else {
-    warnEl.style.display = 'none';
-  }
-
-  confirmBtn.disabled = changes.length === 0;
-}
-
-async function _refreshActivityWarningCounts(tr) {
-  const ormId = tr?.dataset?.ormId;
-  if (!ormId) return;
+async function acceptOverlapReassign(blockedOrmId) {
+  const viewing = _notesModalOrmId;
+  const currentRow = _notesModalTr;
+  if (!viewing || !blockedOrmId) return;
+  const overlay = document.getElementById('notes-modal-overlay');
+  overlay.querySelectorAll('.note-item__actions button').forEach(b => { b.disabled = true; });
   try {
-    const resp = await fetch(`/api/attivita/${ormId}/problemi/`);
-    if (!resp.ok) return;
-    const data = await resp.json();
-    const problemi = data.problemi || [];
-    const wc = problemi.filter(p => !p.risolto).length;
-    const nc = problemi.filter(p => p.risolto).length;
-    tr.dataset.warningCount = wc;
-    tr.dataset.noteCount = nc;
-    _refreshActivityRowCells(tr);
-    refreshPianSummary();
-  } catch (_) { /* ignore */ }
-}
-
-async function reassignFromOverlap(ormId) {
-  const tr = document.querySelector(`[data-orm-id="${ormId}"]`);
-  if (!tr) return;
-
-  closeNotesModal();
-  const descEl = document.getElementById('overlap-reassign-desc');
-  const proposalEl = document.getElementById('overlap-reassign-proposal');
-  const warnEl = document.getElementById('overlap-reassign-warn');
-  const confirmBtn = document.getElementById('overlap-reassign-confirm-btn');
-  descEl.textContent = 'Calcolo proposta in corso…';
-  proposalEl.innerHTML = '';
-  warnEl.style.display = 'none';
-  confirmBtn.disabled = true;
-  document.getElementById('overlap-reassign-overlay').style.display = 'flex';
-
-  try {
-    const overlapProblemi = await _fetchOpenOverlapProblemi(ormId);
-    if (!overlapProblemi.length) {
-      descEl.textContent = 'Nessuna sovrapposizione aperta da risolvere.';
-      return;
-    }
-
-    const { proposed, changes, unresolved, taskData, resourceLookup } = await _buildOverlapProposal(tr, overlapProblemi);
-    _overlapReassignState = {
-      ormId,
-      tr,
-      proposed,
-      overlapCount: overlapProblemi.length,
-      taskData,
-      resourceLookup,
-    };
-
-    descEl.textContent = changes.length
-      ? 'Proposta di riassegnazione basata sulle risorse libere nel periodo dell\'attività:'
-      : 'Non è stato possibile proporre sostituzioni automatiche.';
-    _renderOverlapProposal(changes, unresolved, resourceLookup);
-  } catch (e) {
-    console.error('reassignFromOverlap error:', e);
-    descEl.textContent = e.message || 'Errore durante il calcolo della proposta.';
-    proposalEl.innerHTML = '';
-    confirmBtn.disabled = true;
-  }
-}
-
-function closeOverlapReassignModal() {
-  document.getElementById('overlap-reassign-overlay').style.display = 'none';
-  _overlapReassignState = null;
-}
-
-async function confirmOverlapReassign() {
-  if (!_overlapReassignState?.proposed) return;
-  const { ormId, tr, proposed } = _overlapReassignState;
-  const btn = document.getElementById('overlap-reassign-confirm-btn');
-  btn.disabled = true;
-  btn.textContent = 'Salvataggio…';
-
-  try {
-    const resp = await fetch('/api/tasks/update/', {
-      method: 'PUT',
+    const resp = await fetch(`/api/attivita/${viewing}/overlap-reassign/`, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCsrfToken() },
-      body: JSON.stringify({ orm_id: ormId, risorse: proposed }),
+      body: JSON.stringify({ blocked_orm_id: blockedOrmId }),
     });
     const json = await resp.json();
-    if (!resp.ok) {
-      alert(json.error || `Errore ${resp.status}`);
-      btn.disabled = false;
-      btn.textContent = 'Conferma proposta';
+    if (!resp.ok || json.ok === false) {
+      const body = document.getElementById('notes-modal-body');
+      const err = document.createElement('p');
+      err.className = 'notes-modal-status notes-modal-status--error';
+      err.textContent = json.error || `Errore ${resp.status}`;
+      body.prepend(err);
+      overlay.querySelectorAll('.note-item__actions button').forEach(b => { b.disabled = false; });
       return;
     }
-
-    if (json.resources_by_tipo) {
-      tr.dataset.resources = json.resources || '';
-      tr.dataset.resourcesTyped = JSON.stringify(json.resources_by_tipo);
-    } else {
-      tr.dataset.resources = _risorseToFlat(proposed);
-      tr.dataset.resourcesTyped = JSON.stringify(_risorseToByTipo(proposed));
+    const blockedId = json.blocked_orm_id || blockedOrmId;
+    const blockedRow = document.querySelector(`.pian-activity-row[data-orm-id="${blockedId}"]`);
+    if (blockedRow && json.resources_by_tipo) {
+      blockedRow.dataset.resources = json.resources || '';
+      blockedRow.dataset.resourcesTyped = JSON.stringify(json.resources_by_tipo);
     }
-
-    closeOverlapReassignModal();
-    await _refreshActivityWarningCounts(tr);
-    _syncNavWarnBadge();
-    _wizToast('Risorse riassegnate con successo.');
+    const rowForUpdate = currentRow || blockedRow;
+    if (rowForUpdate) _applyOverlapUpdates(rowForUpdate, json);
+    closeNotesModal();
   } catch (e) {
-    console.error('confirmOverlapReassign error:', e);
-    alert('Errore di rete durante il salvataggio.');
-    btn.disabled = false;
-    btn.textContent = 'Conferma proposta';
-  }
-}
-
-async function modifyOverlapReassignManual() {
-  if (!_overlapReassignState) return;
-  const { ormId, tr, proposed } = _overlapReassignState;
-  closeOverlapReassignModal();
-  openDetailModal(tr, 'task');
-  await enterEditMode();
-  _detState.editRisorse = _cloneRisorse(proposed);
-  _detState.risorseDirty = true;
-  _updateDetResourcesSummary();
-  await openRisorsePickerForEdit();
-}
-
-async function leaveOverlapAsIs(problemaId) {
-  const ormId = _notesModalOrmId;
-  const tr = _notesModalTr || (ormId ? document.querySelector(`[data-orm-id="${ormId}"]`) : null);
-  try {
-    const resp = await fetch(`/api/attivita/problemi/${problemaId}/risolvi/`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCsrfToken() },
-      body: JSON.stringify({ note: 'Sovrapposizione accettata (lasciato invariato).' }),
-    });
-    const data = await resp.json();
-    if (data.ok) {
-      if (tr) {
-        tr.dataset.warningCount = data.warning_count ?? 0;
-        tr.dataset.noteCount = data.note_count ?? 0;
-        _refreshActivityRowCells(tr);
-      }
-      refreshPianSummary();
-      _updateNavBadge(-1);
-      if (ormId) openNotesModal(ormId);
-    }
-  } catch (e) { console.error('leaveOverlapAsIs error:', e); }
-}
-
-// Apply overlap notes returned when an actual start date is saved: bump the
-// affected successor rows' warning counts and notify the planner.
-function _applyOverlapNotes(overlaps) {
-  const counts = {};
-  overlaps.forEach(o => { counts[o.attivita_id] = (counts[o.attivita_id] || 0) + 1; });
-  let total = 0;
-  Object.entries(counts).forEach(([id, n]) => {
-    const tr2 = document.querySelector(`[data-orm-id="${id}"]`);
-    if (tr2) {
-      tr2.dataset.warningCount = (parseInt(tr2.dataset.warningCount, 10) || 0) + n;
-      _refreshActivityRowCells(tr2);
-    }
-    total += n;
-  });
-  if (total > 0) {
-    _updateNavBadge(total);
-    refreshPianSummary();
-    const labels = [...new Set(overlaps.map(o => o.activity_label))].join(', ');
-    _wizToast(`Sovrapposizione risorse: ${total} nota/e aggiunta/e su ${labels}.`);
+    console.error('acceptOverlapReassign', e);
+    overlay.querySelectorAll('.note-item__actions button').forEach(b => { b.disabled = false; });
   }
 }
 
@@ -4349,80 +4112,45 @@ function _appendNewJobGroup(job) {
 }
 
 
-function _updateNavBadge(delta) {
-  const badge = document.getElementById('nav-warn-badge');
-  if (!badge) return;
-  const current = parseInt(badge.textContent.replace(/\D/g, ''), 10) || 0;
-  const next = current + delta;
-  if (next <= 0) {
-    badge.remove();
-  } else {
-    badge.textContent = `⚠ ${next}`;
-  }
-}
-
 function _syncNavWarnBadge() {
-  const total = Array.from(document.querySelectorAll('.pian-activity-row'))
-    .reduce((sum, tr) => sum + (parseInt(tr.dataset.warningCount, 10) || 0), 0);
-  const badge = document.getElementById('nav-warn-badge');
+  let problems = 0;
+  const seenPairs = new Set();
+  document.querySelectorAll('.pian-activity-row').forEach(tr => {
+    problems += parseInt(tr.dataset.warningCount, 10) || 0;
+    const ormId = parseInt(tr.dataset.ormId, 10);
+    _parseOverlaps(tr.dataset).forEach(o => {
+      if (o.role !== 'late') return;
+      const peer = parseInt(o.peer_orm_id, 10);
+      if (!ormId || !peer) return;
+      const key = ormId < peer ? `${ormId}:${peer}` : `${peer}:${ormId}`;
+      seenPairs.add(key);
+    });
+  });
+  const total = problems + seenPairs.size;
+  let badge = document.getElementById('nav-warn-badge');
   if (total <= 0) {
     badge?.remove();
     return;
   }
-  if (badge) {
-    badge.textContent = `⚠ ${total}`;
+  const title = total + (total === 1 ? ' problema aperto' : ' problemi aperti');
+  if (!badge) {
+    const link = document.querySelector('#navbar a[href*="pianificazione"]');
+    if (!link) return;
+    badge = document.createElement('span');
+    badge.id = 'nav-warn-badge';
+    badge.className = 'btn-problemi nav-warn-badge';
+    link.appendChild(badge);
+  } else {
+    badge.className = 'btn-problemi nav-warn-badge';
   }
+  badge.title = title;
+  badge.innerHTML =
+    _PROBLEMS_TRI_SVG + '<span class="problems-badge__n">' + total + '</span>';
 }
 
-function openRisolviModal(problemaId, desc) {
-  const activeTr = (_detState ? _detState.tr : null) || _notesModalTr;
-  if (!activeTr) return;
-  _risolviState = { problemaId, tr: activeTr };
-  document.getElementById('risolvi-desc').textContent = desc;
-  document.getElementById('risolvi-notes').value = '';
-  const ov = document.getElementById('risolvi-overlay');
-  ov.style.display = 'flex';
-}
-
-function closeRisolviModal() {
-  document.getElementById('risolvi-overlay').style.display = 'none';
-  _risolviState = null;
-}
-
-async function confirmRisolvi() {
-  if (!_risolviState) return;
-  const { problemaId, tr } = _risolviState;
-  const notes = document.getElementById('risolvi-notes').value.trim();
-  const btn = document.getElementById('risolvi-confirm-btn');
-  btn.disabled = true;
-  try {
-    const resp = await fetch(`/api/attivita/problemi/${problemaId}/risolvi/`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCsrfToken() },
-      body: JSON.stringify({ note: notes }),
-    });
-    const data = await resp.json();
-    if (data.ok) {
-      closeRisolviModal();
-      // Update row warning/note counts
-      const wc = data.warning_count ?? 0;
-      const nc = data.note_count ?? 0;
-      tr.dataset.warningCount = wc;
-      tr.dataset.noteCount = nc;
-      // Refresh status pill + action button via shared helper
-      _refreshActivityRowCells(tr);
-      refreshPianSummary();
-      // Update navbar badge (decrement by 1)
-      _updateNavBadge(-1);
-      // Reload notes modal if still open
-      const notesOv = document.getElementById('notes-modal-overlay');
-      if (notesOv.style.display === 'flex' && _notesModalOrmId) {
-        openNotesModal(_notesModalOrmId);
-      }
-    }
-  } catch (e) { console.error('confirmRisolvi error:', e); }
-  btn.disabled = false;
-}
+document.addEventListener('DOMContentLoaded', () => {
+  _syncNavWarnBadge();
+});
 
 </script>
 {% endblock %}

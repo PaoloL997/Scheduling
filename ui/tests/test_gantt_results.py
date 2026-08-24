@@ -149,9 +149,7 @@ class GanttResultsPageTest(TestCase):
     def test_gantt_horizon_anchors_to_first_wip(self) -> None:
         if not shutil.which("node"):
             self.skipTest("Node.js not available")
-        script = (
-            Path(__file__).resolve().parent / "fixtures" / "gantt_horizon_test.mjs"
-        )
+        script = Path(__file__).resolve().parent / "fixtures" / "gantt_horizon_test.mjs"
         if not script.is_file():
             self.fail(f"Missing gantt test script: {script}")
         root = Path(__file__).resolve().parents[2]
@@ -350,6 +348,33 @@ class GanttResultsPageTest(TestCase):
         if proc.returncode != 0:
             self.fail(
                 "gantt_stable_width_test.mjs failed:\n"
+                + (proc.stderr or proc.stdout or "unknown error")
+            )
+        self.assertIn("ok", proc.stdout)
+
+    def test_gantt_overlap_badge_has_peer_identity(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("Node.js not available")
+        script = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "gantt_overlap_badge_test.mjs"
+        )
+        if not script.is_file():
+            self.fail(f"Missing gantt test script: {script}")
+        root = Path(__file__).resolve().parents[2]
+        if not (root / "node_modules" / "jsdom").is_dir():
+            self.skipTest("Run `npm install --no-save jsdom` to enable Gantt JS tests")
+        proc = subprocess.run(
+            ["node", str(script)],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            check=False,
+        )
+        if proc.returncode != 0:
+            self.fail(
+                "gantt_overlap_badge_test.mjs failed:\n"
                 + (proc.stderr or proc.stdout or "unknown error")
             )
         self.assertIn("ok", proc.stdout)

@@ -1,11 +1,12 @@
-"""CP-SAT scheduling model: build, solve (three-phase lexicographic), extract.
+"""CP-SAT scheduling model: build, solve (four-phase lexicographic), extract.
 
 Time is modelled in working-day indices. Each activity is a fixed-size interval;
 each (activity, compatible resource) pair is an optional interval whose presence
 literal selects that physical resource. Unit capacity is enforced with
 ``NoOverlap`` per resource. The objective is solved lexicographically: first the
 total tardiness penalty, then a bore-mid tie-breaker, then resource continuity
-along precedence edges — later phases never worsen earlier objectives.
+along precedence edges, and finally workload levelling (minimum peak of
+concurrent activities) — later phases never worsen earlier objectives.
 """
 
 from __future__ import annotations
@@ -56,6 +57,10 @@ class _SchedulingModel:
         self._tie_break_literals: list[cp_model.IntVar] = []
         self._continuity_literals: list[cp_model.IntVar] = []
         self._penalty_components: list[tuple[int, cp_model.IntVar]] = []
+        # One non-optional interval per activity plus the fixed reservation
+        # intervals: together they describe the global workload over time.
+        self._load_intervals: list[cp_model.IntervalVar] = []
+        self._load_peak: cp_model.IntVar | None = None
 
         self._build()
 
@@ -67,6 +72,7 @@ class _SchedulingModel:
         self._add_assignments_and_capacity()
         self._add_continuity_literals()
         self._add_penalties()
+        self._add_load_peak()
 
     def _create_activity_intervals(self) -> None:
         for job in self.problem.jobs:
@@ -80,6 +86,16 @@ class _SchedulingModel:
                     lower = self.calendar.date_to_working_index(activity.earliest_start)
                     self.model.Add(start >= lower)
                 self.start[activity.activity_id] = start
+                # The per-resource intervals in _add_activity_assignments are
+                # optional (one per candidate resource): the global workload
+                # needs exactly one always-present interval per activity.
+                self._load_intervals.append(
+                    self.model.NewFixedSizeIntervalVar(
+                        start,
+                        activity.duration_days,
+                        f"load_{activity.activity_id}",
+                    )
+                )
 
     def _add_precedences(self) -> None:
         for job in self.problem.jobs:
@@ -103,6 +119,9 @@ class _SchedulingModel:
                 f"res_{reservation.activity_id}_{reservation.resource_id}",
             )
             resource_intervals[reservation.resource_id].append(interval)
+            # Reservations are work already in progress: the load peak must
+            # reflect them even though they are not re-schedulable.
+            self._load_intervals.append(interval)
 
         for resource_id, intervals in resource_intervals.items():
             if len(intervals) > 1:
@@ -151,14 +170,10 @@ class _SchedulingModel:
         for job in self.problem.jobs:
             for prev, curr in precedence_pairs(job):
                 prev_ids = {
-                    rid
-                    for (aid, rid) in self.assign
-                    if aid == prev.activity_id
+                    rid for (aid, rid) in self.assign if aid == prev.activity_id
                 }
                 curr_ids = {
-                    rid
-                    for (aid, rid) in self.assign
-                    if aid == curr.activity_id
+                    rid for (aid, rid) in self.assign if aid == curr.activity_id
                 }
                 for resource_id in prev_ids & curr_ids:
                     lit_prev = self.assign[(prev.activity_id, resource_id)]
@@ -194,6 +209,24 @@ class _SchedulingModel:
                 (scale_penalty(job.penalty_per_week), weeks)
             )
 
+    def _add_load_peak(self) -> None:
+        """Bind ``_load_peak`` to the maximum number of concurrent intervals.
+
+        ``AddCumulative`` with unit demands and a variable capacity makes the
+        capacity an upper bound on concurrency; minimizing it (phase D) turns
+        the bound into the actual peak.
+        """
+        if not self._load_intervals:
+            return
+        self._load_peak = self.model.NewIntVar(
+            0, len(self._load_intervals), "load_peak"
+        )
+        self.model.AddCumulative(
+            self._load_intervals,
+            [1] * len(self._load_intervals),
+            self._load_peak,
+        )
+
     # -- objective expressions --------------------------------------------
 
     def _total_penalty_expr(self):
@@ -206,6 +239,9 @@ class _SchedulingModel:
 
     def _tie_break_value(self, solver: cp_model.CpSolver) -> int:
         return sum(solver.Value(lit) for lit in self._tie_break_literals)
+
+    def _continuity_value(self, solver: cp_model.CpSolver) -> int:
+        return sum(solver.Value(lit) for lit in self._continuity_literals)
 
     # -- solving -----------------------------------------------------------
 
@@ -220,8 +256,12 @@ class _SchedulingModel:
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return SolveOutcome(status=solver.StatusName(status), feasible=False)
 
+        # Snapshot after every successful phase: if a later phase times out
+        # without a solution, the last good solution is still returned.
+        best = self._extract(solver, status)
         current_penalty = self._penalty_value(solver)
         bore_bound: int | None = None
+        continuity_bound: int | None = None
 
         # Phase B: only when phase A is provably optimal, minimize the
         # tie-breaker subject to keeping the optimal penalty.
@@ -231,6 +271,7 @@ class _SchedulingModel:
             phase_b_status = solver.Solve(self.model)
             if phase_b_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 status = phase_b_status
+                best = self._extract(solver, status)
                 current_penalty = self._penalty_value(solver)
                 if phase_b_status == cp_model.OPTIMAL:
                     bore_bound = self._tie_break_value(solver)
@@ -248,8 +289,30 @@ class _SchedulingModel:
             phase_c_status = solver.Solve(self.model)
             if phase_c_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 status = phase_c_status
+                best = self._extract(solver, status)
+                current_penalty = self._penalty_value(solver)
+                # The achieved value is a valid lower bound even when phase C
+                # is only feasible: the current solution already reaches it.
+                continuity_bound = self._continuity_value(solver)
 
-        return self._extract(solver, status)
+        # Phase D: level the workload by minimizing the peak number of
+        # concurrent activities, without worsening any earlier objective.
+        if self._load_peak is not None and status in (
+            cp_model.OPTIMAL,
+            cp_model.FEASIBLE,
+        ):
+            self.model.Add(self._total_penalty_expr() <= current_penalty)
+            if bore_bound is not None:
+                self.model.Add(sum(self._tie_break_literals) <= bore_bound)
+            if continuity_bound is not None:
+                self.model.Add(sum(self._continuity_literals) >= continuity_bound)
+            self.model.Minimize(self._load_peak)
+            phase_d_status = solver.Solve(self.model)
+            if phase_d_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+                status = phase_d_status
+                best = self._extract(solver, status)
+
+        return best
 
     def _extract(self, solver: cp_model.CpSolver, status: int) -> SolveOutcome:
         activity_starts = {

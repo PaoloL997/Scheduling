@@ -39,6 +39,14 @@ _TABLE_NOTES_COL: dict[str, str] = {
     "Maschera": "center_distance",
 }
 
+_TABLE_TO_TIPO: dict[str, str] = {
+    "Testa": "testa",
+    "Mandrino": "mandrino",
+    "Tastatore": "tastatore",
+    "Maschera": "maschera",
+    "Generatore": "generatore",
+}
+
 
 def _get_model(table: str):
     """Return the ORM model class for the given inventory table name.
@@ -81,6 +89,16 @@ def _validated_table(table: str) -> str:
     if table not in _ALLOWED_TABLES:
         raise ValueError(f"Tabella non valida: {table!r}")
     return table
+
+
+def _refresh_problems_after_resource_change(table: str, *uids: str) -> None:
+    """Re-detect operational problems for activities using the changed resource."""
+    tipo = _TABLE_TO_TIPO.get(table)
+    if not tipo:
+        return
+    from ui.services.problem_detection import refresh_problems_for_resource
+
+    refresh_problems_for_resource(tipo, *uids)
 
 
 def insert_resource(table: str, data: dict) -> None:
@@ -159,7 +177,10 @@ def patch_resource(table: str, original_uid: str, data: dict) -> str:
         raise ValueError(f"uid '{new_uid}' già presente in {table}.") from exc
 
     _enqueue_patch_resource(table, original_uid, updates)
-    return updates.get("uid", original_uid)
+    new_uid = updates.get("uid", original_uid)
+    if "plant" in updates or "uid" in updates:
+        _refresh_problems_after_resource_change(table, original_uid, new_uid)
+    return new_uid
 
 
 def update_resource(table: str, original_uid: str, data: dict) -> None:
@@ -186,6 +207,8 @@ def update_resource(table: str, original_uid: str, data: dict) -> None:
     except model_class.DoesNotExist:
         raise ValueError(f"uid '{original_uid}' non trovato in {table}.")
 
+    old_plant = obj.plant
+    old_uid = obj.uid
     for col, val in row.items():
         setattr(obj, col, val)
     try:
@@ -194,6 +217,10 @@ def update_resource(table: str, original_uid: str, data: dict) -> None:
         raise ValueError(f"uid '{data.get('uid')}' già presente in {table}.") from exc
 
     _enqueue_update_resource(table, original_uid, data)
+    new_uid = data.get("uid") or original_uid
+    new_plant = data.get("plant")
+    if new_uid != old_uid or (new_plant or "") != (old_plant or ""):
+        _refresh_problems_after_resource_change(table, old_uid, new_uid)
 
 
 def delete_resource(table: str, uid: str) -> None:
