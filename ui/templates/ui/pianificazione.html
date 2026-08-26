@@ -1,4 +1,5 @@
 {% extends "ui/base.html" %}
+{% load static %}
 
 {% block title %}Pianificazione{% endblock %}
 
@@ -113,12 +114,11 @@
                 <span></span>
               </div>
               {% for task in group.activities %}
-              <div class="pian-activity-row{% if task.resource_overlaps %} row--overlap{% endif %}"
+              <div class="pian-activity-row"
                    data-source="{{ task.source }}"
                    data-orm-id="{{ task.orm_id|default:'' }}"
                    data-warning-count="{{ task.warning_count|default:0 }}"
                    data-note-count="{{ task.note_count|default:0 }}"
-                   data-overlaps="{{ task.resource_overlaps_json }}"
                    data-activity-id="{{ task.activity_id }}"
                    data-job-id="{{ task.job_id }}"
                    data-commessa="{{ task.commessa }}"
@@ -163,13 +163,11 @@
                 <span class="pian-col-pred">{{ task.predecessors|default:"Nessuna" }}</span>
                 <span class="pian-col-action">
                   {% if task.orm_id %}
-                    {% with wc=task.warning_count|default:0 oc=task.resource_overlaps|length %}
-                    {% if wc or oc %}
-                      <button type="button" class="btn-problemi" onclick="event.stopPropagation();openNotesModal('{{ task.orm_id }}')"><svg class="problems-badge__tri" viewBox="0 0 20 20" aria-hidden="true"><path class="problems-badge__tri-fill" d="M10 2.15c.47 0 .9.25 1.14.66l7.2 12.85A1.32 1.32 0 0 1 17.2 17.8H2.8a1.32 1.32 0 0 1-1.14-1.98L8.86 2.81c.24-.41.67-.66 1.14-.66z"/><path class="problems-badge__tri-mark" d="M10 7.05c.36 0 .65.28.65.64v3.55c0 .36-.29.64-.65.64s-.65-.28-.65-.64V7.69c0-.36.29-.64.65-.64zm0 6.2a.82.82 0 1 1 0 1.64.82.82 0 0 1 0-1.64z"/></svg><span>Problemi</span><span class="problems-badge__n">{{ wc|add:oc }}</span></button>
+                    {% if task.warning_count %}
+                      <button type="button" class="btn-problemi" onclick="event.stopPropagation();openNotesModal('{{ task.orm_id }}')"><svg class="problems-badge__tri" viewBox="0 0 20 20" aria-hidden="true"><path class="problems-badge__tri-fill" d="M10 2.15c.47 0 .9.25 1.14.66l7.2 12.85A1.32 1.32 0 0 1 17.2 17.8H2.8a1.32 1.32 0 0 1-1.14-1.98L8.86 2.81c.24-.41.67-.66 1.14-.66z"/><path class="problems-badge__tri-mark" d="M10 7.05c.36 0 .65.28.65.64v3.55c0 .36-.29.64-.65.64s-.65-.28-.65-.64V7.69c0-.36.29-.64.65-.64zm0 6.2a.82.82 0 1 1 0 1.64.82.82 0 0 1 0-1.64z"/></svg><span>Problemi</span><span class="problems-badge__n">{{ task.warning_count }}</span></button>
                     {% elif task.note_count and task.note_count > 0 %}
                       <button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('{{ task.orm_id }}')">Note</button>
                     {% endif %}
-                    {% endwith %}
                   {% endif %}
                 </span>
               </div>
@@ -628,6 +626,7 @@
     <div class="notes-modal-body" id="notes-modal-body"></div>
   </div>
 </div>
+<div id="gantt-proposal-tip"></div>
 
 <!-- Risorse picker modal (edit attività) -->
 <div id="risorse-picker-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:2500; align-items:center; justify-content:center;">
@@ -763,6 +762,7 @@
   </div>
 </div>
 
+<script src="{% static 'ui/gantt.js' %}"></script>
 <script>
 // ── App-wide settings ─────────────────────────────────────────────────────────
 const PENALE_MAX = {{ penale_max_json|safe }};
@@ -815,38 +815,27 @@ function problemiButtonHtml(ormId, count) {
   );
 }
 
-function _parseOverlaps(ds) {
-  try {
-    const parsed = JSON.parse((ds && ds.overlaps) || '[]');
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function _pianActionButtonsHtml(ormId, wc, nc, overlapCount) {
+function _pianActionButtonsHtml(ormId, wc, nc) {
   if (!ormId) return '';
-  const openCount = (wc || 0) + (overlapCount || 0);
-  if (openCount > 0) return problemiButtonHtml(ormId, openCount);
+  if ((wc || 0) > 0) return problemiButtonHtml(ormId, wc);
   if (nc > 0) {
     return `<button class="btn-note-icon" onclick="event.stopPropagation();openNotesModal('${ormId}')">Note</button>`;
   }
   return '';
 }
 
-function _applyOverlapUpdates(currentRow, json) {
-  const prevPeers = _parseOverlaps(currentRow.dataset).map(o => String(o.peer_orm_id));
-  const updates = { ...(json.overlap_updates || {}) };
-  if (json.resource_overlaps) {
-    updates[String(currentRow.dataset.ormId)] = json.resource_overlaps;
-  }
-  prevPeers.forEach(id => {
-    if (!(id in updates)) updates[id] = [];
-  });
+function _applyActivityUpdates(json) {
+  const updates = json.activity_updates || {};
   Object.keys(updates).forEach(id => {
     const row = document.querySelector(`.pian-activity-row[data-orm-id="${id}"]`);
     if (!row) return;
-    row.dataset.overlaps = JSON.stringify(updates[id] || []);
+    const u = updates[id] || {};
+    if (u.warning_count != null) row.dataset.warningCount = String(u.warning_count);
+    if (u.note_count != null) row.dataset.noteCount = String(u.note_count);
+    if (u.resources_by_tipo) {
+      row.dataset.resources = u.resources || '';
+      row.dataset.resourcesTyped = JSON.stringify(u.resources_by_tipo);
+    }
     _refreshActivityRowCells(row);
   });
 }
@@ -1022,18 +1011,11 @@ function _pianJobStats(commessa) {
     workTotal: 0,
     progressPct: 0,
   };
-  const overlapPairs = new Set();
   rows.forEach(row => {
     const wc = parseInt(row.dataset.warningCount || '0', 10) || 0;
     const state = _pianActivityState(row);
     if (state === 'completata') stats.completed += 1;
     stats.openProblems += wc;
-    const ormId = parseInt(row.dataset.ormId, 10);
-    _parseOverlaps(row.dataset).forEach(o => {
-      const peer = parseInt(o.peer_orm_id, 10);
-      if (!ormId || !peer) return;
-      overlapPairs.add(ormId < peer ? `${ormId}:${peer}` : `${peer}:${ormId}`);
-    });
     if (state === 'in_ritardo') stats.late += 1;
     if (state === 'in_lavorazione') stats.working += 1;
     if (state === 'pianificata') stats.planned += 1;
@@ -1056,7 +1038,6 @@ function _pianJobStats(commessa) {
       }
     }
   });
-  stats.openProblems += overlapPairs.size;
   stats.progressPct = stats.workTotal
     ? Math.round(stats.workDone / stats.workTotal * 100)
     : 0;
@@ -2853,12 +2834,9 @@ function _refreshActivityRowCells(div) {
     resCell.innerHTML = formatResourcesHtml(typed);
   }
 
-  const overlapCount = _parseOverlaps(ds).length;
-  div.classList.toggle('row--overlap', overlapCount > 0);
-
   const actionCol = div.querySelector('.pian-col-action');
   if (actionCol) {
-    actionCol.innerHTML = _pianActionButtonsHtml(ormIdVal, wc, nc, overlapCount);
+    actionCol.innerHTML = _pianActionButtonsHtml(ormIdVal, wc, nc);
   }
   const group = _pianGroupByCommessa(ds.commessa || _selectedPianCommessa);
   if (group) _refreshPianJobCard(group);
@@ -2902,11 +2880,10 @@ function _wizAppendRow(ormId, warningCount, noteCount) {
   div.dataset.resources      = allRes;
   div.dataset.resourcesTyped = JSON.stringify(resByTipo);
   div.dataset.predecessors   = r.predecessors && r.predecessors.length ? r.predecessors.join(', ') : '';
-  div.dataset.overlaps       = '[]';
   div.setAttribute('onclick', 'openDetailModal(this, \'task\')');
 
   const pills = _computeActivityStatus(r.dataInizio, r.dataFine, null, null);
-  const noteBtn = _pianActionButtonsHtml(ormId, wc, nc, 0);
+  const noteBtn = _pianActionButtonsHtml(ormId, wc, nc);
   div.innerHTML = `
     <span class="pian-col-id">${esc(activityId)}</span>
     <span class="pian-col-date pian-col-date--planned-start"><strong>${fmt(r.dataInizio)}</strong></span>
@@ -3638,10 +3615,10 @@ async function saveEdit() {
     if (entityType === 'task') {
       tr.dataset.jobId = newData.jobId || '';
       tr.dataset.activityId = newData.activityId || '';
-      _applyOverlapUpdates(tr, json);
-      if (!json.resource_overlaps && !json.overlap_updates) {
-        _refreshActivityRowCells(tr);
-      }
+      if (json.warning_count != null) tr.dataset.warningCount = String(json.warning_count);
+      if (json.note_count != null) tr.dataset.noteCount = String(json.note_count);
+      _applyActivityUpdates(json);
+      _refreshActivityRowCells(tr);
       refreshPianSummary();
       sortPianGroupList();
       filterPianGroups(document.getElementById('pian-search')?.value || '');
@@ -3800,68 +3777,215 @@ function _fmtNoteDateTime(iso) {
   });
 }
 
-function _fmtOverlapFull(iso) {
+function _fmtIsoDay(iso) {
   if (!iso) return '—';
-  try {
-    const d = new Date(iso + 'T00:00:00');
-    if (Number.isNaN(d.getTime())) return iso;
-    const dd = String(d.getDate()).padStart(2, '0');
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    return `${dd}/${mm}/${d.getFullYear()}`;
-  } catch {
-    return iso;
+  const s = String(iso);
+  if (s.length >= 10 && s[4] === '-' && s[7] === '-') {
+    return `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}`;
   }
+  return s;
 }
 
-function _parenTraits(r) {
-  if (!r) return '';
-  const bits = [];
-  if (r.model) bits.push('modello ' + r.model);
-  else if (r.diameter) bits.push('Ø ' + r.diameter);
-  else if (r.pitch) bits.push('passo ' + r.pitch);
-  if (r.plant) bits.push('stabilimento ' + r.plant);
-  return bits.length ? ` (${bits.join(', ')})` : '';
+let _proposalGantt = null;
+
+function _teardownProposalGantt() {
+  const tip = document.getElementById('gantt-proposal-tip');
+  if (tip) tip.style.display = 'none';
+  if (_proposalGantt && _proposalGantt._layoutObs) {
+    try { _proposalGantt._layoutObs.disconnect(); } catch (e) {}
+    _proposalGantt._layoutObs = null;
+  }
+  _proposalGantt = null;
 }
 
-function _resourceName(r) {
-  if (!r) return 'risorsa';
-  const tipo = r.tipo_label || 'Risorsa';
-  const uid = r.uid || '';
-  return uid ? `${tipo} ${uid}` : (r.label || 'risorsa');
-}
-
-function _overlapAsProblem(o, viewingOrmId) {
-  const isLate = o.role === 'late';
-  // Resource is held by the late activity until overlap_end.
-  const lateActivity = isLate
-    ? (_notesModalTr?.dataset?.activityId || 'questa attività')
-    : (o.peer_activity_id || o.peer_label || 'attività in ritardo');
-  const until = _fmtOverlapFull(o.overlap_end);
-  const res = (o.resources && o.resources[0]) || null;
-  const descr =
-    `La risorsa ${_resourceName(res)}${_parenTraits(res)} impiegata nell'attività ${lateActivity} ` +
-    `è bloccata fino al ${until}.`;
-  const suggestion = o.suggestion || null;
-  const blockedOrmId = suggestion && suggestion.blocked_orm_id
-    ? suggestion.blocked_orm_id
-    : (isLate ? o.peer_orm_id : viewingOrmId);
+function _activityToGanttTask(a, prop) {
+  const commessa = a.commessa || prop.commessa || '';
+  const jobId = a.job_id || prop.job_id || (prop.gantt && prop.gantt.job_id) || commessa;
+  let item = a.item;
+  let activity = a.activity;
+  if (item == null && activity == null) {
+    const parts = String(a.label || a.activity_id || '').split(' · ');
+    item = parts[0] || '';
+    activity = parts.slice(1).join(' · ') || '';
+  }
   return {
-    tipo: 'sovrapposizione',
-    risolto: false,
-    descrizione: descr,
-    suggestion,
-    blocked_orm_id: blockedOrmId,
+    activity_id: a.activity_id,
+    commessa,
+    job_id: jobId,
+    item: item || '',
+    activity: activity || '',
+    start: a.start,
+    finish: a.finish,
+    assigned_resources: a.assigned_resources || [],
   };
 }
 
-function _proposalLine(r) {
-  const toItem = r.to_item || {};
-  const name = _resourceName({
-    tipo_label: toItem.tipo_label || (r.from_item && r.from_item.tipo_label),
-    uid: r.to_uid || toItem.uid,
-    label: r.to_label,
+function _proposalTasksFromProp(prop) {
+  const g = prop.gantt || {};
+  const acts = g.activities || [];
+  const afterById = {};
+  (prop.tasks_after || []).forEach(t => {
+    if (t && t.activity_id) afterById[t.activity_id] = t;
   });
-  return `Proposta sostituzione con risorsa ${name}${_parenTraits(toItem)}`;
+  const before = acts.map(a => _activityToGanttTask(a, prop));
+  const after = acts.map(a => {
+    const moved = afterById[a.activity_id];
+    if (moved) return { ...moved };
+    const base = _activityToGanttTask(a, prop);
+    return {
+      ...base,
+      start: a.proposed_start || base.start,
+      finish: a.proposed_finish || base.finish,
+      assigned_resources: a.proposed_resources || base.assigned_resources,
+    };
+  });
+  const jobId = (before[0] && before[0].job_id) || prop.job_id || g.job_id || prop.commessa || '';
+  const due = g.due_date || prop.due_date;
+  const deadlines = {};
+  if (jobId && due) deadlines[jobId] = due;
+  const changes = {};
+  before.forEach(t => {
+    const nxt = after.find(x => x.activity_id === t.activity_id);
+    if (nxt && t.start && nxt.start && t.start !== nxt.start) changes[t.activity_id] = true;
+  });
+  return { before, after, deadlines, changes };
+}
+
+function _renderProposalGantt(prop) {
+  const g = prop.gantt;
+  if (!g || !Array.isArray(g.activities) || !g.activities.length) return '';
+  return `<div class="ott-res-compare pg-compare">
+    <section class="ott-res-panel" id="gantt-proposal-panel" aria-label="Confronto pianificazione">
+      <div class="ott-res-panel-head">
+        <div class="ott-res-panel-title">
+          <span class="ott-res-panel-name">Confronto pianificazione</span>
+        </div>
+        <div class="ott-res-panel-nav">
+          <button type="button" class="ott-res-nav-btn" id="gantt-proposal-nav-prev" aria-label="Indietro">&#8249;</button>
+          <button type="button" class="ott-res-nav-btn ott-res-nav-btn--text" id="gantt-proposal-nav-today">Oggi</button>
+          <button type="button" class="ott-res-nav-btn" id="gantt-proposal-nav-next" aria-label="Avanti">&#8250;</button>
+          <div class="ott-res-view-toggle">
+            <button type="button" class="ott-res-view-btn tbtn" data-view="week">Settimana</button>
+            <button type="button" class="ott-res-view-btn tbtn" data-view="month">Mese</button>
+            <button type="button" class="ott-res-view-btn tbtn" data-view="year">Anno</button>
+          </div>
+        </div>
+      </div>
+      <div class="ott-res-gantt" id="gantt-proposal-card">
+        <div class="gantt-axis-row">
+          <div class="gantt-axis-scroll" id="gantt-proposal-axis-scroll">
+            <svg id="gantt-proposal-axis-svg"></svg>
+          </div>
+        </div>
+        <div class="gantt-bars-scroll ott-res-bars" id="gantt-proposal-bars-scroll">
+          <svg id="gantt-proposal-bars-svg"></svg>
+        </div>
+      </div>
+      <div class="pg-compare-legend">
+        <span class="gl-item">
+          <svg width="38" height="14" viewBox="0 0 38 14" fill="none" aria-hidden="true">
+            <rect x="1" y="3" width="36" height="8" rx="3"
+                  fill="hsl(211,84%,40%)" fill-opacity="0.72"
+                  stroke="hsl(211,84%,40%)" stroke-opacity="1" stroke-width="1"/>
+          </svg>
+          <span class="gl-txt">Attuale</span>
+        </span>
+        <span class="gl-item">
+          <svg width="38" height="14" viewBox="0 0 38 14" fill="none" aria-hidden="true">
+            <rect x="1" y="3" width="36" height="8" rx="3"
+                  fill="hsl(211,84%,40%)" fill-opacity="0.42"
+                  stroke="hsl(211,84%,40%)" stroke-opacity="1" stroke-width="1.5"
+                  stroke-dasharray="4,3"/>
+          </svg>
+          <span class="gl-txt">Proposta</span>
+        </span>
+        <span class="gl-item">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <line x1="7" y1="0" x2="7" y2="9"
+                  stroke="hsl(0,55%,44%)" stroke-width="1.5"
+                  stroke-dasharray="3,2" opacity="0.85"/>
+            <polygon points="7,9 10,12 7,14 4,12"
+                     fill="hsl(0,55%,44%)" opacity="0.90"/>
+          </svg>
+          <span class="gl-txt">Deadline di consegna della commessa</span>
+        </span>
+        <span class="gl-item">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <rect x="4" y="0" width="6" height="14" rx="1.5"
+                  fill="hsl(0,82%,48%)" opacity="0.22"/>
+            <line x1="7" y1="0" x2="7" y2="14"
+                  stroke="hsl(0,88%,42%)" stroke-width="2" opacity="0.85"/>
+          </svg>
+          <span class="gl-txt">Oggi</span>
+        </span>
+      </div>
+    </section>
+  </div>`;
+}
+
+function _mountProposalGantt(prop) {
+  if (typeof GanttChart === 'undefined') return;
+  const barsEl = document.getElementById('gantt-proposal-bars-scroll');
+  if (!barsEl || !prop) return;
+  const mapped = _proposalTasksFromProp(prop);
+  if (!mapped.before.length) return;
+
+  _teardownProposalGantt();
+
+  const n = mapped.before.length;
+  barsEl.style.height = Math.min(360, Math.max(140, 36 + n * 38 + 28)) + 'px';
+
+  const gantt = new GanttChart({
+    prefix: 'gantt-proposal',
+    tooltipId: 'gantt-proposal-tip',
+    simplified: true,
+    fitToData: true,
+    compareMode: true,
+  });
+  gantt.bindControls();
+  gantt.tasks = mapped.before;
+  gantt.compareTasks = mapped.after;
+  gantt.deadlines = mapped.deadlines;
+  gantt.highlightChanges = mapped.changes;
+  const fit = GanttChart.computeFitViewport(mapped.before, mapped.after);
+  if (fit) {
+    gantt._fitRestore = fit;
+    gantt.applyFitViewport(fit);
+  } else {
+    gantt.view = 'month';
+  }
+  _proposalGantt = gantt;
+  gantt.renderWhenReady();
+}
+
+function _renderProposalBlock(p) {
+  const prop = p.proposta_json;
+  if (!prop || prop.status !== 'proposed') return '';
+  const b = prop.blocked || {};
+  const start = _fmtIsoDay(b.start);
+  const finish = _fmtIsoDay(b.finish);
+  const res = (b.resource_labels || []).map(esc).join(', ') || '—';
+  let badge = '';
+  if (prop.meets_deadline === true) {
+    badge = '<span class="reschedule-badge reschedule-badge--ok">entro scadenza</span>';
+  } else if (prop.meets_deadline === false) {
+    badge = '<span class="reschedule-badge reschedule-badge--late">oltre scadenza</span>';
+  }
+  const moved = (prop.moved_count > 1)
+    ? `<p class="reschedule-moved">Sposta anche ${prop.moved_count - 1} attività collegate.</p>`
+    : '';
+  const pk = prop.blocked_pk;
+  return `<div class="reschedule-proposal">
+    <p class="reschedule-title">Proposta di ripianificazione ${badge}</p>
+    <p class="reschedule-dates">Nuove date: <strong>${esc(start)} → ${esc(finish)}</strong></p>
+    <p class="reschedule-res">Risorse: ${res}</p>
+    ${moved}
+    ${_renderProposalGantt(prop)}
+    <div class="reschedule-actions">
+      <button type="button" class="reschedule-btn reschedule-btn--reject" onclick="rejectReschedule(${pk})">Rifiuta</button>
+      <button type="button" class="reschedule-btn reschedule-btn--accept" onclick="acceptReschedule(${pk})">Accetta</button>
+    </div>
+  </div>`;
 }
 
 function _renderNoteItem(p) {
@@ -3884,31 +4008,7 @@ function _renderNoteItem(p) {
     footHtml = `<p class="note-item__resolved">${esc(p.note_risoluzione)}${esc(when)}</p>`;
   }
 
-  let suggestHtml = '';
-  if (p.tipo === 'sovrapposizione' && isOpen) {
-    const sug = p.suggestion;
-    const reps = (sug && sug.replacements) || [];
-    const unresolved = (sug && sug.unresolved) || [];
-    if (reps.length) {
-      const lines = reps.map(r =>
-        `<p class="note-item__propose">${esc(_proposalLine(r))}</p>`
-      ).join('');
-      suggestHtml = `<div class="note-item__suggest">
-        ${lines}
-        <div class="note-item__actions">
-          <button type="button" class="btn btn-ghost" onclick="event.stopPropagation();dismissOverlapSuggestion(this)">Lascia così</button>
-          <button type="button" class="btn-risolvi" onclick="event.stopPropagation();acceptOverlapReassign(${Number(p.blocked_orm_id)})">Accetta</button>
-        </div>
-      </div>`;
-    } else {
-      const summary = (sug && sug.summary)
-        || ('Nessuna alternativa nel periodo'
-          + (unresolved.length
-            ? ' (' + unresolved.map(r => r.from_uid || r.from_label).join(', ') + ')'
-            : ''));
-      suggestHtml = `<p class="note-item__suggest-empty">${esc(summary)}</p>`;
-    }
-  }
+  const proposalHtml = (p.tipo === 'sovrapposizione' && isOpen) ? _renderProposalBlock(p) : '';
 
   return `<li class="note-item${isOpen ? ' note-item--open' : ''}${p.tipo === 'sovrapposizione' ? ' note-item--overlap' : ''}">
     <div class="note-item__row">
@@ -3916,9 +4016,44 @@ function _renderNoteItem(p) {
       <span class="note-item__state">${isOpen ? 'Aperta' : 'Risolta'}</span>
     </div>
     <p class="note-item__text">${esc(description)}</p>
+    ${proposalHtml}
     ${footHtml}
-    ${suggestHtml}
   </li>`;
+}
+
+async function acceptReschedule(pk) {
+  const btns = document.querySelectorAll('.reschedule-btn');
+  btns.forEach(b => { b.disabled = true; });
+  try {
+    const resp = await fetch(`/api/attivita/${pk}/riprogramma/accetta/`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': _getCsrfToken() },
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      alert(data.error || 'Impossibile applicare la proposta.');
+      btns.forEach(b => { b.disabled = false; });
+      return;
+    }
+    closeNotesModal();
+    location.reload();
+  } catch (e) {
+    alert('Errore di rete.');
+    btns.forEach(b => { b.disabled = false; });
+  }
+}
+
+async function rejectReschedule(pk) {
+  try {
+    const resp = await fetch(`/api/attivita/${pk}/riprogramma/rifiuta/`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': _getCsrfToken() },
+    });
+    await resp.json();
+    if (_notesModalOrmId) openNotesModal(_notesModalOrmId);
+  } catch (e) {
+    alert('Errore di rete.');
+  }
 }
 
 async function openNotesModal(ormId) {
@@ -3940,8 +4075,7 @@ async function openNotesModal(ormId) {
       return;
     }
     const data = await resp.json();
-    const overlaps = _parseOverlaps(_notesModalTr?.dataset).map(o => _overlapAsProblem(o, ormId));
-    const problemi = overlaps.concat(data.problemi || []);
+    const problemi = data.problemi || [];
     if (!problemi.length) {
       body.innerHTML = '<p class="notes-modal-status">Nessuna nota per questa attività.</p>';
       return;
@@ -3952,7 +4086,13 @@ async function openNotesModal(ormId) {
     if (openCount) parts.push(`${openCount} apert${openCount === 1 ? 'a' : 'e'}`);
     if (resolvedCount) parts.push(`${resolvedCount} risolt${resolvedCount === 1 ? 'a' : 'e'}`);
     subtitleEl.textContent = parts.join(', ');
+    _teardownProposalGantt();
     body.innerHTML = `<ul class="note-list">${problemi.map(_renderNoteItem).join('')}</ul>`;
+    const proposed = problemi.find(p =>
+      p.tipo === 'sovrapposizione' && !p.risolto
+      && p.proposta_json && p.proposta_json.status === 'proposed'
+    );
+    if (proposed) _mountProposalGantt(proposed.proposta_json);
   } catch (e) {
     console.error('openNotesModal error:', e);
     body.innerHTML = '<p class="notes-modal-status notes-modal-status--error">Errore di rete.</p>';
@@ -3960,57 +4100,10 @@ async function openNotesModal(ormId) {
 }
 
 function closeNotesModal() {
+  _teardownProposalGantt();
   document.getElementById('notes-modal-overlay').style.display = 'none';
   _notesModalOrmId = null;
   _notesModalTr = null;
-}
-
-function dismissOverlapSuggestion(btn) {
-  const box = btn.closest('.note-item__suggest');
-  if (!box) return;
-  const actions = box.querySelector('.note-item__actions');
-  if (actions) actions.remove();
-  const note = document.createElement('p');
-  note.className = 'note-item__suggest-dismissed';
-  note.textContent = 'Proposta ignorata. Il problema resta visibile.';
-  box.appendChild(note);
-}
-
-async function acceptOverlapReassign(blockedOrmId) {
-  const viewing = _notesModalOrmId;
-  const currentRow = _notesModalTr;
-  if (!viewing || !blockedOrmId) return;
-  const overlay = document.getElementById('notes-modal-overlay');
-  overlay.querySelectorAll('.note-item__actions button').forEach(b => { b.disabled = true; });
-  try {
-    const resp = await fetch(`/api/attivita/${viewing}/overlap-reassign/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCsrfToken() },
-      body: JSON.stringify({ blocked_orm_id: blockedOrmId }),
-    });
-    const json = await resp.json();
-    if (!resp.ok || json.ok === false) {
-      const body = document.getElementById('notes-modal-body');
-      const err = document.createElement('p');
-      err.className = 'notes-modal-status notes-modal-status--error';
-      err.textContent = json.error || `Errore ${resp.status}`;
-      body.prepend(err);
-      overlay.querySelectorAll('.note-item__actions button').forEach(b => { b.disabled = false; });
-      return;
-    }
-    const blockedId = json.blocked_orm_id || blockedOrmId;
-    const blockedRow = document.querySelector(`.pian-activity-row[data-orm-id="${blockedId}"]`);
-    if (blockedRow && json.resources_by_tipo) {
-      blockedRow.dataset.resources = json.resources || '';
-      blockedRow.dataset.resourcesTyped = JSON.stringify(json.resources_by_tipo);
-    }
-    const rowForUpdate = currentRow || blockedRow;
-    if (rowForUpdate) _applyOverlapUpdates(rowForUpdate, json);
-    closeNotesModal();
-  } catch (e) {
-    console.error('acceptOverlapReassign', e);
-    overlay.querySelectorAll('.note-item__actions button').forEach(b => { b.disabled = false; });
-  }
 }
 
 function _notesOverlayClick(e) {
@@ -4114,19 +4207,10 @@ function _appendNewJobGroup(job) {
 
 function _syncNavWarnBadge() {
   let problems = 0;
-  const seenPairs = new Set();
   document.querySelectorAll('.pian-activity-row').forEach(tr => {
     problems += parseInt(tr.dataset.warningCount, 10) || 0;
-    const ormId = parseInt(tr.dataset.ormId, 10);
-    _parseOverlaps(tr.dataset).forEach(o => {
-      if (o.role !== 'late') return;
-      const peer = parseInt(o.peer_orm_id, 10);
-      if (!ormId || !peer) return;
-      const key = ormId < peer ? `${ormId}:${peer}` : `${peer}:${ormId}`;
-      seenPairs.add(key);
-    });
   });
-  const total = problems + seenPairs.size;
+  const total = problems;
   let badge = document.getElementById('nav-warn-badge');
   if (total <= 0) {
     badge?.remove();

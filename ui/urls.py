@@ -244,9 +244,14 @@ urlpatterns = [
         name="api_attivita_problemi",
     ),
     path(
-        "api/attivita/<int:pk>/overlap-reassign/",
-        views.api_overlap_reassign,
-        name="api_overlap_reassign",
+        "api/attivita/<int:pk>/riprogramma/accetta/",
+        views.api_overlap_reschedule_accept,
+        name="api_overlap_reschedule_accept",
+    ),
+    path(
+        "api/attivita/<int:pk>/riprogramma/rifiuta/",
+        views.api_overlap_reschedule_reject,
+        name="api_overlap_reschedule_reject",
     ),
     path("api/tasks/update/", views.api_tasks_update, name="api_tasks_update"),
     path("api/jobs/create/", views.api_jobs_create, name="api_jobs_create"),

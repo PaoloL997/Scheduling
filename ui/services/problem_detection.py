@@ -11,8 +11,9 @@ resolve them through the UI.  :class:`~ui.models.RisoluzioneProblema` provides
 a persistent mirror of resolved notes that survives the dataset reset+reimport
 cycle so that resolution history is never lost.
 
-Resource overlaps caused by a late start are computed on read
-(:func:`find_resource_overlaps`) and are not stored as notes.
+Resource overlaps caused by a late start are detected by
+:func:`find_resource_overlaps` and auto-resolved when a compatible
+substitute exists; otherwise they are stored as open problems.
 """
 
 from __future__ import annotations
@@ -425,15 +426,18 @@ def detect_for_all_activities() -> int:
     Called after a dataset re-import and on Pianificazione page load so that
     open ``acquisto`` / ``spostamento`` notes stay aligned with current
     assignments.  Stale open notes are auto-resolved; new conditions create
-    fresh rows.  Existing overlap warnings are removed.
+    fresh rows.  Delay overlaps are auto-swapped when possible; remaining
+    ones become open ``sovrapposizione`` problems.  Resolved swap notes
+    are kept.
 
     Returns:
         int: Total number of new :class:`~ui.models.ProblemaAttivita` rows
             created across all activities.
     """
-    from ui.models import Attivita, ProblemaAttivita
+    from ui.models import Attivita
+    from ui.services.overlap_reassign import auto_resolve_resource_overlaps
 
-    ProblemaAttivita.objects.filter(tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE).delete()
+    auto_resolve_resource_overlaps()
 
     total = 0
     activitas = Attivita.objects.prefetch_related("risorse").all()

@@ -486,6 +486,7 @@ class ProblemaAttivita(models.Model):
     bloccata_fino = models.DateField(null=True, blank=True)
     riferimento_attivita = models.CharField(max_length=500, blank=True, default="")
     descrizione = models.TextField()
+    proposta_json = models.JSONField(null=True, blank=True, default=None)
     risolto = models.BooleanField(default=False)
     note_risoluzione = models.TextField(blank=True, default="")
     data_risoluzione = models.DateTimeField(null=True, blank=True)

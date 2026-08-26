@@ -78,14 +78,15 @@ class PianificazioneProgressBarTests(TestCase):
         self.assertContains(resp, "pian-stat-item--alerts is-active")
         self.assertContains(resp, "<strong data-job-alerts>2</strong>")
 
-    def test_job_header_counts_resource_overlaps(self) -> None:
-        """Delay overlaps increment Problemi on both involved commesse."""
+    def test_job_header_counts_unresolved_overlap_as_problem(self) -> None:
+        """Overlap flags only the not-started activity via warning_count."""
         late = Attivita.objects.create(
             commessa="C101",
             job_id="C101",
             item=1,
             activity_id="C101-1-Saldatura",
             activity="Saldatura",
+            modello_testa="TP60",
             data_inizio=date(2026, 8, 10),
             data_fine=date(2026, 8, 19),
             actual_start=date(2026, 8, 17),
@@ -96,6 +97,7 @@ class PianificazioneProgressBarTests(TestCase):
             item=2,
             activity_id="C205-2-Montaggio",
             activity="Montaggio",
+            modello_testa="TP60",
             data_inizio=date(2026, 8, 20),
             data_fine=date(2026, 8, 29),
         )
@@ -108,30 +110,36 @@ class PianificazioneProgressBarTests(TestCase):
         Job.objects.create(commessa="C205", job_id="C205")
 
         grouped = {g["job"]["commessa"]: g for g in _fetch_grouped()}
+
+        # Job headers still sum every unresolved problem into warning_count.
         for commessa in ("C101", "C205"):
             acts = grouped[commessa]["activities"]
             warnings = sum(a.get("warning_count") or 0 for a in acts)
-            self.assertTrue(any(a.get("resource_overlaps") for a in acts))
-            self.assertEqual(
-                grouped[commessa]["job"]["n_open_problems"],
-                warnings + 1,
-            )
+            self.assertEqual(grouped[commessa]["job"]["n_open_problems"], warnings)
 
-    def test_count_job_open_problems_unique_overlap_pairs(self) -> None:
-        """One overlap pair counts once even if both activities are on the job."""
+        # The overlap (sovrapposizione) problem is attached to the not-started
+        # activity only; the started peer reserves the resource but is unflagged.
+        self.assertTrue(
+            ProblemaAttivita.objects.filter(
+                attivita=blocked,
+                tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+                risolto=False,
+            ).exists()
+        )
+        self.assertFalse(
+            ProblemaAttivita.objects.filter(
+                attivita=late,
+                tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+                risolto=False,
+            ).exists()
+        )
+
+    def test_count_job_open_problems_sums_warning_count(self) -> None:
         self.assertEqual(
             _count_job_open_problems(
                 [
-                    {
-                        "orm_id": 1,
-                        "warning_count": 2,
-                        "resource_overlaps": [{"peer_orm_id": 2}],
-                    },
-                    {
-                        "orm_id": 2,
-                        "warning_count": 0,
-                        "resource_overlaps": [{"peer_orm_id": 1}],
-                    },
+                    {"orm_id": 1, "warning_count": 2},
+                    {"orm_id": 2, "warning_count": 1},
                 ]
             ),
             3,

@@ -49,7 +49,7 @@
     if (_globalTipDismissBound) return;
     _globalTipDismissBound = true;
     document.addEventListener('click', e => {
-      document.querySelectorAll('#gantt-tip, #ott-gantt-tip, [id$="-gantt-tip"]').forEach(tip => {
+      document.querySelectorAll('#gantt-tip, #ott-gantt-tip, #gantt-proposal-tip, [id$="-gantt-tip"]').forEach(tip => {
         if (tip.style.display === 'none') return;
         if (!tip.contains(e.target) && !e.target.closest('[data-task]')) {
           tip.style.display = 'none';
@@ -58,7 +58,7 @@
     });
     document.addEventListener('keydown', e => {
       if (e.key !== 'Escape') return;
-      document.querySelectorAll('#gantt-tip, #ott-gantt-tip, [id$="-gantt-tip"]').forEach(tip => {
+      document.querySelectorAll('#gantt-tip, #ott-gantt-tip, #gantt-proposal-tip, [id$="-gantt-tip"]').forEach(tip => {
         tip.style.display = 'none';
       });
     });
@@ -116,20 +116,6 @@
     g.appendChild(t);
     parent.appendChild(g);
     return w;
-  }
-
-  function formatOverlapPeer(o) {
-    const parts = [o.peer_commessa, o.peer_item, o.peer_activity || o.peer_label]
-      .filter(v => v != null && String(v).trim() !== '');
-    if (parts.length) return parts.join(' - ');
-    return o.peer_activity_id || '';
-  }
-
-  function overlapBadgeTexts(row) {
-    return (row.resource_overlaps || []).map(o => {
-      const ref = formatOverlapPeer(o);
-      return ref ? ('Sovrapposizione risorse ' + ref) : 'Sovrapposizione risorse';
-    });
   }
 
   function parseDate(s) {
@@ -621,18 +607,6 @@
       if (resList.length) {
         rows += row('Risorse', resList.join(';'), '');
       }
-      const overlaps = t.resource_overlaps || [];
-      if (overlaps.length) {
-        rows += '<div class="tip-divider"></div>';
-        rows += '<div class="tip-overlap-title">Sovrapposizione risorse</div>';
-        overlaps.forEach(o => {
-          const res = (o.resources || []).map(r => r.label || r.uid).join(', ');
-          const verb = o.role === 'late' ? 'Blocca' : 'Bloccata da';
-          rows += row(verb, formatOverlapPeer(o) || o.peer_activity_id || '—', 'tip-overlap-peer');
-          if (res) rows += row('Risorse contese', res, 'tip-overlap-res');
-          rows += row('Periodo', fmtDate(o.overlap_start) + ' → ' + fmtDate(o.overlap_end), 'tip-overlap-window');
-        });
-      }
       return (
         '<div class="gantt-tip-header">' +
           '<div class="gantt-tip-header-text">' +
@@ -717,15 +691,6 @@
     setData(tasks, deadlines) {
       this.tasks = tasks || [];
       this.deadlines = deadlines || {};
-      if (this.collapsibleGroups) {
-        (this.tasks || []).forEach(t => {
-          if (t && (t.resource_overlaps || []).length) {
-            const key = this._groupKey(t);
-            if (key) this._expandedGroups.add(key);
-          }
-        });
-        this._syncExpandToggleBtn();
-      }
       if (!this._fitLocked) {
         if (this.view === 'horizon') this.applyHorizonToData(this.tasks);
         else if (this.fitToData) this.applyFitToData(this.tasks);
@@ -1463,9 +1428,6 @@
               if (isStarted) badges.push({ text: 'IN LAVORAZIONE', color: SLATE });
               else badges.push({ text: isOverdue ? 'DA INIZIARE' : 'PIANIFICATA', color: SLATE });
             }
-            overlapBadgeTexts(row).forEach(text => {
-              badges.push({ text, plain: true, keep: true });
-            });
             let bx = Math.max(badgeAnchorX, 0) + BADGE_PAD;
             badges.forEach(({ text, color, plain, keep }) => {
               const bw = Math.ceil(text.length * charW) + (plain ? 0 : 14);
@@ -1492,10 +1454,11 @@
               bx += bw + GAP;
             });
             if (self.enableWarningNav && !isCompleted && row.warning_count > 0) {
-              if (bx + 36 <= totalW + 100) {
-                const by = midY - 9;
-                bx += appendProblemsBadge(barsSvg, bx, by, row.warning_count, row.orm_id) + GAP;
-              }
+              // Always surface unresolved problems: the warning badge is drawn
+              // even when the bar sits near the right edge (it stays within the
+              // scrollable timeline). Clicking it opens the reference modal.
+              const by = midY - 9;
+              bx += appendProblemsBadge(barsSvg, bx, by, row.warning_count, row.orm_id) + GAP;
             }
           }
         });

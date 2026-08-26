@@ -1,14 +1,18 @@
-"""Suggest and apply resource reassignment for delay-caused overlaps.
+"""Auto-resolve delay-caused resource overlaps by swapping the blocked activity.
 
-Occupancy used for suggestions includes the delayed finish
+When a late start makes two activities share a resource, the blocked activity
+is reassigned to a compatible free item if one exists.  Successful swaps are
+recorded as resolved notes; remaining overlaps become open problems with no
+resolution action yet.
+
+Occupancy includes the delayed finish
 (:func:`~ui.services.problem_detection.effective_finish`), not only the
-planned ``data_inizio``/``data_fine`` window.  The write path still uses
-planned-date conflict checks; after a successful apply the pair no longer
-shares the resource, so the overlap disappears.
+planned ``data_inizio``/``data_fine`` window.
 """
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date
 
 from ui.services.problem_detection import (
@@ -144,6 +148,35 @@ def _merge_resource_snapshot(res: dict) -> dict:
     return {**res, **snap}
 
 
+def _float_or_none(val) -> float | None:
+    if val is None or val == "":
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt_iso_day(value) -> str:
+    """Format ``YYYY-MM-DD`` or a date as ``DD/MM/YYYY``."""
+    text = str(value or "").strip()
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return f"{text[8:10]}/{text[5:7]}/{text[0:4]}"
+    return text or "—"
+
+
+def _peer_label(overlap_item: dict) -> str:
+    parts = [
+        overlap_item.get("peer_commessa"),
+        overlap_item.get("peer_item"),
+        overlap_item.get("peer_activity") or overlap_item.get("peer_label"),
+    ]
+    joined = " - ".join(
+        str(p).strip() for p in parts if p is not None and str(p).strip()
+    )
+    return joined or overlap_item.get("peer_activity_id") or "un'altra attività"
+
+
 def _preferred_model(tipo: str, blocked, from_uid: str) -> str | None:
     model_cls = _inventory_model(tipo)
     item = model_cls.objects.filter(pk=from_uid).first()
@@ -153,6 +186,28 @@ def _preferred_model(tipo: str, blocked, from_uid: str) -> str | None:
     return (current_model or "").strip() or None
 
 
+def _blocked_availability(blocked) -> dict | None:
+    """Wizard-compatible inventory lists for the blocked activity window."""
+    from ui.services.activity_inventory import get_available_resources
+
+    start = blocked.data_inizio
+    end = blocked.data_fine
+    if not (start and end):
+        return None
+    return get_available_resources(
+        stabilimento=blocked.stabilimento or "",
+        data_inizio=start,
+        data_fine=end,
+        bore_min=_float_or_none(blocked.bore_min),
+        bore_max=_float_or_none(blocked.bore_max),
+        bore_mid=_float_or_none(blocked.bore_mid),
+        tube_pitch=_float_or_none(blocked.tube_pitch),
+        modello_testa=(blocked.modello_testa or "").strip() or None,
+        exclude_activity_id=blocked.pk,
+        strict_requirements=True,
+    )
+
+
 def _pick_alternative(
     *,
     tipo: str,
@@ -160,11 +215,15 @@ def _pick_alternative(
     blocked,
     occupied: set[str],
     busy: set[str],
+    candidates: list[dict] | None = None,
 ) -> dict | None:
-    """Return the best free inventory item of *tipo*, or ``None``."""
+    """Return the best compatible free inventory item of *tipo*, or ``None``."""
     model_cls = _inventory_model(tipo)
     skip = occupied | {from_uid}
-    rows = list(model_cls.objects.exclude(uid__in=skip).values())
+    if candidates is None:
+        rows = list(model_cls.objects.exclude(uid__in=skip).values())
+    else:
+        rows = [r for r in candidates if r.get("uid") not in skip]
     if not rows:
         return None
     plant = (blocked.stabilimento or "").strip()
@@ -299,6 +358,7 @@ def build_suggestion(
             "summary": _format_suggestion_summary(meta, [], unresolved),
         }
 
+    availability = _blocked_availability(blocked)
     for res in overlap_item.get("resources") or []:
         tipo = res.get("tipo")
         uid = res.get("uid")
@@ -308,12 +368,15 @@ def build_suggestion(
             tipo, start, end, blocked.pk, activities, pairs
         )
         busy = _open_assignment_ids(tipo, blocked.pk)
+        cat = _TIPO_TO_CAT.get(tipo)
+        candidates = (availability or {}).get(cat) if cat else None
         picked = _pick_alternative(
             tipo=tipo,
             from_uid=uid,
             blocked=blocked,
             occupied=occupied,
             busy=busy,
+            candidates=candidates,
         )
         if picked:
             replacements.append(picked)
@@ -448,10 +511,563 @@ def apply_overlap_reassignment(blocked_pk: int) -> dict:
         )
 
     try:
-        result = update_attivita(blocked_pk, {"risorse": _pairs_to_risorse(new_pairs)})
+        result = update_attivita(
+            blocked_pk,
+            {"risorse": _pairs_to_risorse(new_pairs)},
+            resolve_overlaps=False,
+        )
     except BridgeWriteError as exc:
         raise OverlapReassignError(str(exc), status_code=exc.status_code) from exc
 
     result["blocked_orm_id"] = blocked_pk
     result["replacements"] = replacements
     return result
+
+
+def _open_overlap_description(overlap_item: dict, res: dict, *, role: str) -> str:
+    """Italian description for an overlap that cannot be auto-swapped."""
+    snap = (
+        res
+        if res.get("tipo_label")
+        else _item_snapshot(res.get("tipo") or "", res.get("uid") or "")
+    )
+    name = _resource_name(snap, tipo=res.get("tipo") or "", uid=res.get("uid") or "")
+    traits = _paren_traits(snap)
+    peer = _peer_label(overlap_item)
+    until = _fmt_iso_day(overlap_item.get("overlap_end"))
+    if role == "blocked":
+        return (
+            f"La risorsa {name}{traits} è in uso su {peer} fino al {until}. "
+            "Nessuna alternativa disponibile nel periodo."
+        )
+    return (
+        f"La risorsa {name}{traits} è condivisa con {peer} fino al {until}. "
+        "Nessuna alternativa disponibile nel periodo."
+    )
+
+
+def _persist_swap_notes(blocked, replacements: list[dict], overlap_item: dict) -> None:
+    """Store a resolved note on the blocked activity for each successful swap."""
+    from django.utils import timezone
+    from ui.models import ProblemaAttivita
+
+    late_id = overlap_item.get("peer_activity_id") or ""
+    late_label = _peer_label(overlap_item)
+    until = _fmt_iso_day(overlap_item.get("overlap_end"))
+    now = timezone.now()
+    for row in replacements:
+        from_name = _resource_name(
+            row.get("from_item"),
+            tipo=row.get("tipo") or "",
+            uid=row.get("from_uid") or "",
+        )
+        to_name = _resource_name(
+            row.get("to_item"), tipo=row.get("tipo") or "", uid=row.get("to_uid") or ""
+        )
+        descr = (
+            f"{from_name} sostituita con {to_name}"
+            f"{_paren_traits(row.get('to_item'))} perché in uso su {late_label} "
+            f"fino al {until}."
+        )
+        already = ProblemaAttivita.objects.filter(
+            attivita=blocked,
+            tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+            risolto=True,
+            risorsa_tipo=row["tipo"],
+            risorsa_uid=row["to_uid"],
+            riferimento_attivita=late_id,
+            descrizione=descr,
+        ).exists()
+        if already:
+            continue
+        ProblemaAttivita.objects.create(
+            attivita=blocked,
+            tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+            risorsa_tipo=row["tipo"],
+            risorsa_uid=row["to_uid"],
+            riferimento_attivita=late_id,
+            descrizione=descr,
+            risolto=True,
+            note_risoluzione="Sostituzione automatica per sovrapposizione risorse.",
+            data_risoluzione=now,
+        )
+
+
+def _overlap_problem_sig(attivita_id: int, tipo: str, uid: str, peer_id: str) -> tuple:
+    return (attivita_id, tipo, uid, peer_id or "")
+
+
+def _sync_open_overlap_problems(
+    remaining: dict[int, list[dict]],
+    activities: list,
+) -> None:
+    """Create or close open overlap problems to match remaining conflicts."""
+    from django.utils import timezone
+    from ui.models import ProblemaAttivita
+
+    by_id = {a.pk: a for a in activities}
+    desired: dict[tuple, dict] = {}
+    for pk, items in remaining.items():
+        att = by_id.get(pk)
+        if att is None:
+            continue
+        # The overlap problem belongs to the activity still to start (the one
+        # that can be rescheduled): the already-started peer only reserves the
+        # resource, it is not itself flagged.
+        if att.actual_start is not None:
+            continue
+        for item in items:
+            peer_id = item.get("peer_activity_id") or ""
+            role = item.get("role") or "blocked"
+            for res in item.get("resources") or []:
+                tipo = res.get("tipo") or ""
+                uid = res.get("uid") or ""
+                if not tipo or not uid:
+                    continue
+                sig = _overlap_problem_sig(pk, tipo, uid, peer_id)
+                desired[sig] = {
+                    "attivita": att,
+                    "tipo": tipo,
+                    "uid": uid,
+                    "peer_id": peer_id,
+                    "descrizione": _open_overlap_description(item, res, role=role),
+                    "bloccata_fino": item.get("overlap_end"),
+                }
+
+    open_qs = ProblemaAttivita.objects.filter(
+        tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+        risolto=False,
+    )
+    now = timezone.now()
+    seen: set[tuple] = set()
+    for problema in open_qs:
+        sig = _overlap_problem_sig(
+            problema.attivita_id,
+            problema.risorsa_tipo,
+            problema.risorsa_uid,
+            problema.riferimento_attivita,
+        )
+        wanted = desired.get(sig)
+        if wanted is None:
+            problema.risolto = True
+            problema.note_risoluzione = (
+                "Condizione non piu verificata dopo aggiornamento attivita."
+            )
+            problema.data_risoluzione = now
+            problema.save(
+                update_fields=["risolto", "note_risoluzione", "data_risoluzione"]
+            )
+            continue
+        seen.add(sig)
+        updates: list[str] = []
+        if problema.descrizione != wanted["descrizione"]:
+            problema.descrizione = wanted["descrizione"]
+            updates.append("descrizione")
+        until = wanted["bloccata_fino"]
+        if until and str(problema.bloccata_fino or "") != str(until):
+            from datetime import date as date_cls
+
+            try:
+                problema.bloccata_fino = date_cls.fromisoformat(str(until)[:10])
+            except ValueError:
+                problema.bloccata_fino = None
+            updates.append("bloccata_fino")
+            # The overlap window moved: any stored proposal is stale, force a
+            # fresh one on the next reschedule-proposal sync.
+            if problema.proposta_json is not None:
+                problema.proposta_json = None
+                updates.append("proposta_json")
+        if updates:
+            problema.save(update_fields=updates)
+
+    to_create = []
+    for sig, wanted in desired.items():
+        if sig in seen:
+            continue
+        until = wanted["bloccata_fino"]
+        bloccata = None
+        if until:
+            from datetime import date as date_cls
+
+            try:
+                bloccata = date_cls.fromisoformat(str(until)[:10])
+            except ValueError:
+                bloccata = None
+        to_create.append(
+            ProblemaAttivita(
+                attivita=wanted["attivita"],
+                tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+                risorsa_tipo=wanted["tipo"],
+                risorsa_uid=wanted["uid"],
+                riferimento_attivita=wanted["peer_id"],
+                descrizione=wanted["descrizione"],
+                bloccata_fino=bloccata,
+                risolto=False,
+            )
+        )
+    if to_create:
+        ProblemaAttivita.objects.bulk_create(to_create)
+
+
+def _activity_update_payload(attivita) -> dict:
+    """Row fields the pianificazione UI needs after an auto-resolve."""
+    from ui.models import ProblemaAttivita, RisorsaAttivita
+    from ui.services.resource_display import (
+        format_activity_resources,
+        format_activity_resources_html,
+    )
+
+    risorse_all = list(RisorsaAttivita.objects.filter(attivita=attivita))
+    res_fmt = format_activity_resources(risorse_all)
+    problemi = list(ProblemaAttivita.objects.filter(attivita=attivita))
+    return {
+        "resources": ";".join(res_fmt["flat_ids"]) or None,
+        "resources_by_tipo": res_fmt["by_tipo"],
+        "resources_html": format_activity_resources_html(risorse_all),
+        "warning_count": sum(1 for p in problemi if not p.risolto),
+        "note_count": sum(1 for p in problemi if p.risolto),
+    }
+
+
+def auto_resolve_resource_overlaps() -> dict:
+    """Swap compatible resources on blocked activities; persist notes/problems.
+
+    Returns:
+        dict: ``swapped_blocked_ids`` and ``activity_updates`` keyed by pk.
+    """
+    from ui.models import Attivita
+
+    activities = list(Attivita.objects.prefetch_related("risorse"))
+    overlaps = find_resource_overlaps(activities)
+    if not overlaps:
+        _sync_open_overlap_problems({}, activities)
+        return {"swapped_blocked_ids": [], "activity_updates": {}}
+
+    enrich_overlaps_with_suggestions(overlaps, activities)
+    swapped_ids: list[int] = []
+    affected: set[int] = set()
+
+    for pk, items in list(overlaps.items()):
+        blocked_items = [i for i in items if i.get("role") == "blocked"]
+        if not blocked_items:
+            continue
+        replacements: list[dict] = []
+        seen: set[tuple[str, str]] = set()
+        for item in blocked_items:
+            for row in (item.get("suggestion") or {}).get("replacements") or []:
+                key = (row["tipo"], row["from_uid"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                replacements.append(row)
+        if not replacements:
+            continue
+        try:
+            result = apply_overlap_reassignment(pk)
+        except OverlapReassignError:
+            continue
+        swapped_ids.append(pk)
+        affected.add(pk)
+        for item in blocked_items:
+            peer = item.get("peer_orm_id")
+            if peer:
+                affected.add(int(peer))
+        _persist_swap_notes(
+            Attivita.objects.get(pk=pk),
+            result.get("replacements") or replacements,
+            blocked_items[0],
+        )
+
+    activities = list(Attivita.objects.prefetch_related("risorse"))
+    remaining = find_resource_overlaps(activities)
+    _sync_open_overlap_problems(remaining, activities)
+    _sync_reschedule_proposals(remaining)
+    for pk in remaining:
+        affected.add(pk)
+
+    updates = {}
+    if affected:
+        for att in Attivita.objects.filter(pk__in=affected):
+            updates[str(att.pk)] = _activity_update_payload(att)
+
+    return {"swapped_blocked_ids": swapped_ids, "activity_updates": updates}
+
+
+# -- targeted single-activity reschedule proposals ----------------------------
+
+
+def _merge_unmodeled_resources(att, task: dict) -> dict:
+    """Keep ORM resources the solver did not model on ``task``.
+
+    The CP model only assigns resource types implied by the activity
+    requirements. A reschedule proposal must not wipe mandrini/tastatori/…
+    that were already assigned but are outside that subset.
+    """
+    current = [(r.tipo, r.risorsa_id) for r in att.risorse.all()]
+    solver_ids = list(task.get("assigned_resource_ids") or [])
+    solver_uids = list(task.get("assigned_resources") or [])
+    if not solver_uids:
+        task["assigned_resource_ids"] = [f"{tipo}:{uid}" for tipo, uid in current]
+        task["assigned_resources"] = [uid for _, uid in current]
+        return task
+    solver_tipos: set[str] = set()
+    for rid in solver_ids:
+        if ":" in rid:
+            solver_tipos.add(rid.split(":", 1)[0])
+    kept = [(tipo, uid) for tipo, uid in current if tipo not in solver_tipos]
+    if kept:
+        task["assigned_resource_ids"] = solver_ids + [
+            f"{tipo}:{uid}" for tipo, uid in kept
+        ]
+        task["assigned_resources"] = solver_uids + [uid for _, uid in kept]
+    return task
+
+
+def _resource_labels(assigned_resource_ids: list[str]) -> list[str]:
+    """Turn solver ``tipo:uid`` ids into display labels like ``Mandrino M1``."""
+    labels: list[str] = []
+    for rid in assigned_resource_ids or []:
+        if ":" in rid:
+            tipo, uid = rid.split(":", 1)
+        else:
+            tipo, uid = "", rid
+        label = _TIPO_LABELS.get(tipo, tipo.capitalize() or "Risorsa")
+        labels.append(f"{label} {uid}".strip())
+    return labels
+
+
+def propose_reschedule(blocked_pk: int) -> dict | None:
+    """Run the optimizer on a single blocked activity and build a proposal.
+
+    The blocked activity plus its precedence-connected chain are the only
+    schedulable activities; everything else is reserved. Returns a proposal
+    dict (with a serialisable ``tasks_after`` payload for applying) or ``None``
+    when infeasible or when nothing would change.
+    """
+    from ui.models import Attivita, Job as JobModel
+    from ui.services.optimization_problem import (
+        OptimizationProblemError,
+        build_reschedule_problem,
+        schedule_result_to_gantt_tasks,
+    )
+    from ui.services.runtime_config import load_runtime_config
+
+    try:
+        blocked = Attivita.objects.get(pk=blocked_pk)
+    except Attivita.DoesNotExist:
+        return None
+
+    try:
+        problem = build_reschedule_problem(blocked_pk)
+    except OptimizationProblemError:
+        return None
+
+    from src.optimization.feasibility import check_feasibility
+    from src.optimization.solver import schedule
+
+    if not check_feasibility(problem).feasible:
+        return None
+    result, _diagnoses = schedule(
+        problem, time_limit=load_runtime_config().solver_time_limit
+    )
+    if result is None:
+        return None
+
+    activities = list(Attivita.objects.prefetch_related("risorse"))
+    by_id = {a.activity_id: a for a in activities}
+    tasks = schedule_result_to_gantt_tasks(result, by_id, {}, attivita=activities)
+
+    changed: list[dict] = []
+    blocked_task: dict | None = None
+    for task in tasks:
+        att = by_id.get(task.get("activity_id"))
+        if att is None:
+            continue
+        _merge_unmodeled_resources(att, task)
+        new_start = task.get("start")
+        new_finish = task.get("finish")
+        new_res = sorted(task.get("assigned_resources") or [])
+        cur_start = att.data_inizio.isoformat() if att.data_inizio else None
+        cur_finish = att.data_fine.isoformat() if att.data_fine else None
+        cur_res = sorted(r.risorsa_id for r in att.risorse.all())
+        if att.pk == blocked_pk:
+            blocked_task = task
+        if (new_start, new_finish, new_res) != (cur_start, cur_finish, cur_res):
+            changed.append(task)
+
+    if not changed or blocked_task is None:
+        return None
+    # The optimizer only assigns resources it models (from the activity's
+    # requirements). If it assigned none, the overlapping resource is not
+    # modelled here and moving the date would wrongly drop the assignment.
+    if not blocked_task.get("assigned_resources"):
+        return None
+
+    due_iso: str | None = None
+    meets_deadline: bool | None = None
+    job_row = JobModel.objects.filter(commessa=blocked.commessa).first()
+    if job_row is not None and job_row.delivery_date:
+        due_iso = (
+            job_row.delivery_date.isoformat()
+            if hasattr(job_row.delivery_date, "isoformat")
+            else str(job_row.delivery_date)[:10]
+        )
+        finish = blocked_task.get("finish")
+        if finish and due_iso:
+            meets_deadline = str(finish)[:10] <= due_iso
+
+    moved_by_id = {t.get("activity_id"): t for t in changed}
+    gantt_acts: list[dict] = []
+    for att in activities:
+        if att.commessa != blocked.commessa:
+            continue
+        moved = moved_by_id.get(att.activity_id)
+        label = f"{att.item} · {att.activity}".strip()
+        gantt_acts.append(
+            {
+                "activity_id": att.activity_id,
+                "label": label or att.activity_id,
+                "item": str(att.item) if att.item is not None else "",
+                "activity": att.activity or "",
+                "commessa": att.commessa,
+                "job_id": att.job_id,
+                "start": att.data_inizio.isoformat() if att.data_inizio else None,
+                "finish": att.data_fine.isoformat() if att.data_fine else None,
+                "proposed_start": moved.get("start") if moved else None,
+                "proposed_finish": moved.get("finish") if moved else None,
+                "assigned_resources": [r.risorsa_id for r in att.risorse.all()],
+                "proposed_resources": (
+                    list(moved.get("assigned_resources") or []) if moved else None
+                ),
+                "is_blocked": att.pk == blocked_pk,
+                "started": att.actual_start is not None,
+            }
+        )
+    gantt_acts.sort(key=lambda a: (a["start"] or "9999", a["label"]))
+
+    return {
+        "status": "proposed",
+        "blocked_pk": blocked_pk,
+        "tasks_after": changed,
+        "blocked": {
+            "orm_id": blocked_pk,
+            "activity_id": blocked_task.get("activity_id"),
+            "start": blocked_task.get("start"),
+            "finish": blocked_task.get("finish"),
+            "resources": sorted(blocked_task.get("assigned_resources") or []),
+            "resource_labels": _resource_labels(
+                blocked_task.get("assigned_resource_ids") or []
+            ),
+        },
+        "moved_count": len(changed),
+        "due_date": due_iso,
+        "meets_deadline": meets_deadline,
+        "commessa": blocked.commessa,
+        "job_id": blocked.job_id,
+        "gantt": {
+            "due_date": due_iso,
+            "job_id": blocked.job_id,
+            "activities": gantt_acts,
+        },
+    }
+
+
+def _sync_reschedule_proposals(remaining: dict[int, list[dict]]) -> None:
+    """Compute and persist reschedule proposals on open overlap problems.
+
+    Only activities in the ``blocked`` role are re-planned. The solver runs
+    only when at least one open ``sovrapposizione`` row for the activity has no
+    proposal yet (``proposta_json is None``): already-computed or user-rejected
+    proposals are left untouched, so a plain gantt reload never re-solves.
+    """
+    from ui.models import ProblemaAttivita
+
+    blocked_pks = {
+        pk
+        for pk, items in remaining.items()
+        if any(it.get("role") == "blocked" for it in items)
+    }
+    if not blocked_pks:
+        return
+
+    rows_by_pk: dict[int, list[ProblemaAttivita]] = defaultdict(list)
+    for row in ProblemaAttivita.objects.filter(
+        tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+        risolto=False,
+        attivita_id__in=blocked_pks,
+    ):
+        rows_by_pk[row.attivita_id].append(row)
+
+    for pk, prob_rows in rows_by_pk.items():
+        if not any(r.proposta_json is None for r in prob_rows):
+            continue
+        payload = propose_reschedule(pk) or {"status": "no_proposal"}
+        for row in prob_rows:
+            row.proposta_json = payload
+            row.save(update_fields=["proposta_json"])
+
+
+def _stored_proposal(blocked_pk: int) -> dict | None:
+    """Return the current 'proposed' payload for an activity, if any."""
+    from ui.models import ProblemaAttivita
+
+    for row in ProblemaAttivita.objects.filter(
+        attivita_id=blocked_pk,
+        tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+        risolto=False,
+    ):
+        payload = row.proposta_json
+        if isinstance(payload, dict) and payload.get("status") == "proposed":
+            return payload
+    return None
+
+
+def apply_reschedule(blocked_pk: int) -> dict:
+    """Apply the stored reschedule proposal for a blocked activity.
+
+    Raises:
+        OverlapReassignError: When there is no applicable proposal.
+        ResourceConflictError: When the applied schedule conflicts (rolled back).
+    """
+    from ui.services.optimization_apply import (
+        OptimizationApplyError,
+        apply_optimization_result,
+    )
+
+    proposal = _stored_proposal(blocked_pk)
+    if not proposal:
+        raise OverlapReassignError("Nessuna proposta di ripianificazione disponibile.")
+    tasks_after = proposal.get("tasks_after") or []
+    if not tasks_after:
+        raise OverlapReassignError("La proposta non contiene modifiche da applicare.")
+
+    try:
+        updated = apply_optimization_result({"tasks_after": tasks_after, "job_ids": []})
+    except OptimizationApplyError as exc:
+        raise OverlapReassignError(str(exc)) from exc
+
+    # Re-run the overlap resolution so problems/proposals are reconciled.
+    result = auto_resolve_resource_overlaps()
+    result["updated"] = updated
+    result["blocked_orm_id"] = blocked_pk
+    return result
+
+
+def reject_reschedule(blocked_pk: int) -> dict:
+    """Mark the stored proposal as rejected so it is not shown or recomputed."""
+    from ui.models import ProblemaAttivita
+
+    count = 0
+    for row in ProblemaAttivita.objects.filter(
+        attivita_id=blocked_pk,
+        tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+        risolto=False,
+    ):
+        if (
+            isinstance(row.proposta_json, dict)
+            and row.proposta_json.get("status") == "proposed"
+        ):
+            row.proposta_json = {"status": "rejected"}
+            row.save(update_fields=["proposta_json"])
+            count += 1
+    return {"blocked_orm_id": blocked_pk, "rejected": count}

@@ -81,7 +81,6 @@ def serialize_problemi() -> list[dict]:
     """Return all problems with activity reference fields."""
     rows = (
         ProblemaAttivita.objects.select_related("attivita")
-        .exclude(tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE)
         .order_by("created_at")
         .values(
             "id",

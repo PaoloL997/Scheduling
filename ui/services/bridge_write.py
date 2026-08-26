@@ -63,12 +63,13 @@ def _parse_date(val) -> datetime.date | None:
     return None
 
 
-def update_attivita(orm_id: int, data: dict) -> dict:
+def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -> dict:
     """Update a single :class:`~ui.models.Attivita` and enqueue write-back.
 
     Args:
         orm_id: Primary key of the activity.
         data: Field updates (same keys as ``api_tasks_update``).
+        resolve_overlaps: When True, auto-swap delay overlaps after the write.
 
     Returns:
         dict: Success payload with ``item``, ``job_id``, ``activity_id``.
@@ -269,6 +270,14 @@ def update_attivita(orm_id: int, data: dict) -> dict:
                 "resources_html": format_activity_resources_html(risorse_all),
             }
         )
+    if resolve_overlaps:
+        should_resolve = risorse_data is not None or any(
+            key in data for key in ("actual_start", "start", "finish")
+        )
+        if should_resolve:
+            from ui.services.overlap_reassign import auto_resolve_resource_overlaps
+
+            result.update(auto_resolve_resource_overlaps())
     return result
 
 

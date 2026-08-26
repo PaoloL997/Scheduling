@@ -1664,15 +1664,6 @@ a .nav-warn-badge {
 .btn-problemi .problems-badge__tri { width: 12px; height: 12px; }
 .prob-list-item-actions { display: inline-flex; gap: .375rem; flex-shrink: 0; }
 
-/* Row highlight when a resource overlap involves this activity */
-.pian-activity-row.row--overlap {
-  box-shadow: inset 3px 0 0 hsl(4 80% 55% / .85);
-  background: linear-gradient(90deg, hsl(4 75% 50% / .07), transparent 45%);
-}
-.pian-activity-row.row--overlap:hover {
-  background: linear-gradient(90deg, hsl(4 75% 50% / .11), hsl(4 75% 50% / .03) 55%);
-}
-
 /* Note column button */
 .btn-note-icon {
   font-size: .775rem; padding: .2rem .5rem;
@@ -1697,7 +1688,7 @@ a .nav-warn-badge {
   border: 1px solid var(--border);
   border-radius: .875rem;
   box-shadow: 0 24px 64px hsl(220 20% 4% / .35);
-  width: min(860px, 96vw);
+  width: min(980px, 96vw);
   max-height: min(84vh, 820px);
   display: flex; flex-direction: column;
   animation: det-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -1826,6 +1817,90 @@ a .nav-warn-badge {
 .notes-modal-inner .note-item__actions .btn-risolvi:hover {
   background: hsl(38 80% 50% / .22);
 }
+
+/* Single-activity reschedule proposal inside the notes modal */
+.reschedule-proposal {
+  margin-top: .6rem;
+  padding: .6rem .75rem;
+  border: 1px solid hsl(215 40% 40% / .35);
+  border-radius: .5rem;
+  background: hsl(215 60% 50% / .08);
+}
+.reschedule-title {
+  margin: 0 0 .35rem;
+  font-size: .8125rem; font-weight: 600;
+  color: var(--text);
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+}
+.reschedule-dates, .reschedule-res, .reschedule-moved {
+  margin: 0 0 .25rem;
+  font-size: .8125rem; line-height: 1.45;
+  color: var(--text-muted);
+}
+.reschedule-badge {
+  font-size: .6875rem; font-weight: 600;
+  padding: .1rem .45rem; border-radius: .75rem;
+  text-transform: uppercase; letter-spacing: .02em;
+}
+.reschedule-badge--ok { background: hsl(145 60% 40% / .18); color: hsl(145 55% 65%); }
+.reschedule-badge--late { background: hsl(0 70% 50% / .18); color: hsl(0 70% 70%); }
+.pg-compare {
+  margin: .7rem 0 .45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+.pg-compare .ott-res-panel,
+.pg-compare .ott-res-gantt {
+  flex: none;
+  min-height: auto;
+  width: 100%;
+}
+.pg-compare .ott-res-bars {
+  flex: none;
+  overflow: auto;
+}
+.pg-compare-legend {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.85rem 1.15rem;
+  width: 100%;
+  padding: 0.4rem 0.75rem 0.5rem;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 50%, var(--bg));
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.pg-compare-legend > .gl-item {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  flex: 0 0 auto;
+  width: max-content;
+}
+
+.reschedule-actions {
+  display: flex; justify-content: flex-end; gap: .5rem; margin-top: .55rem;
+}
+.reschedule-btn {
+  font-size: .8125rem; font-weight: 500;
+  padding: .4rem .9rem; border-radius: .375rem;
+  border: 1px solid transparent; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.reschedule-btn--accept {
+  background: hsl(145 60% 40% / .16); color: hsl(145 55% 70%);
+  border-color: hsl(145 60% 40% / .3);
+}
+.reschedule-btn--accept:hover { background: hsl(145 60% 40% / .28); }
+.reschedule-btn--reject {
+  background: transparent; color: var(--text-muted);
+  border-color: hsl(220 10% 30%);
+}
+.reschedule-btn--reject:hover { background: hsl(220 10% 20% / .5); }
 
 .wiz-field { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.875rem; }
 .wiz-field label { font-size: 0.8125rem; font-weight: 500; color: var(--text-muted); }
@@ -4608,7 +4683,8 @@ a .nav-warn-badge {
 .ott-res-bars::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
 #gantt-tip,
-#ott-gantt-tip {
+#ott-gantt-tip,
+#gantt-proposal-tip {
   position: fixed;
   z-index: 600;
   background: color-mix(in srgb, var(--bg) 88%, var(--surface));
@@ -4620,6 +4696,7 @@ a .nav-warn-badge {
   overflow: hidden;
   backdrop-filter: blur(8px);
 }
+#gantt-proposal-tip { z-index: 2600; }
 .gantt-tip-header,
 #gantt-tip-header {
   display: flex;

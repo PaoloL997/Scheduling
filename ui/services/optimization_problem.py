@@ -384,22 +384,50 @@ def solver_resource_ids(att: Attivita) -> list[str]:
     return ids
 
 
-def _fixed_resource_reservations(horizon_start: date) -> list[ResourceReservation]:
-    """Block resources held by every started/completed activity.
+def _reservation_window(att: Attivita) -> tuple[date, date] | None:
+    """Return the occupancy window used to reserve a non-schedulable activity.
 
-    Started and completed activities are excluded from the optimization model
-    entirely; this is the only trace they leave in the problem. The reserved
-    window is clamped to the planning horizon.
+    Started/completed activities use their locked calendar window; merely
+    planned activities use their planned ``[data_inizio, data_fine]`` window
+    (estimating the finish when ``data_fine`` is missing).
     """
-    from django.db.models import Q
+    if att.actual_start or att.actual_finish:
+        return fixed_calendar_window(att)
+    start = att.data_inizio
+    if start is None:
+        return None
+    end = att.data_fine or _planned_finish(att)
+    if end is None:
+        return None
+    if end < start:
+        end = start
+    return start, end
+
+
+def reservations_for_excluded(
+    horizon_start: date,
+    schedulable_ids: set[str],
+    activities: Iterable[Attivita] | None = None,
+) -> list[ResourceReservation]:
+    """Reserve resources of every activity outside the schedulable set.
+
+    Any activity holding resources whose ``activity_id`` is not in
+    ``schedulable_ids`` becomes an immovable :class:`ResourceReservation` over
+    its occupancy window, so the solver treats those resources as busy. This
+    generalises the old started/completed-only behaviour: it now also covers
+    merely *planned* activities of non-selected commesse, matching the model's
+    own definition of ``ResourceReservation`` ("a resource blocked by an
+    activity outside the solved job set"). Windows are clamped to the horizon.
+    """
+    if activities is None:
+        activities = Attivita.objects.prefetch_related("risorse")
 
     calendar = WorkingCalendar(horizon_start)
-    rows = Attivita.objects.filter(
-        Q(actual_start__isnull=False) | Q(actual_finish__isnull=False)
-    ).prefetch_related("risorse")
     reservations: list[ResourceReservation] = []
-    for att in rows:
-        window = fixed_calendar_window(att)
+    for att in activities:
+        if att.activity_id in schedulable_ids:
+            continue
+        window = _reservation_window(att)
         if window is None:
             continue
         start, end = window
@@ -578,6 +606,7 @@ def build_scheduling_problem(
     job_rows = {j.commessa: j for j in JobModel.objects.filter(commessa__in=commesse)}
 
     jobs: list[Job] = []
+    schedulable_ids: set[str] = set()
     for commessa in commesse:
         all_rows = sorted(grouped[commessa], key=lambda a: (a.item, a.activity_id))
         # Started/completed activities are NOT part of the model: they are
@@ -587,6 +616,7 @@ def build_scheduling_problem(
         rows = [att for att in all_rows if not is_attivita_fixed(att)]
         if not rows:
             continue
+        schedulable_ids.update(att.activity_id for att in rows)
         fixed_end_by_id: dict[str, date] = {}
         for att in fixed_rows:
             window = fixed_calendar_window(att)
@@ -650,10 +680,146 @@ def build_scheduling_problem(
             min(override_dates) if override_dates else date.today() + timedelta(days=1)
         )
 
-    reservations = _fixed_resource_reservations(horizon_start)
+    reservations = reservations_for_excluded(horizon_start, schedulable_ids)
 
     return SchedulingProblem(
         jobs=jobs,
+        resources=resources,
+        horizon_start=horizon_start,
+        horizon_days=None,
+        resource_reservations=reservations,
+    )
+
+
+def _precedence_component(
+    blocked: Attivita, commessa_atts: list[Attivita]
+) -> list[Attivita]:
+    """Return the not-started activities precedence-connected to ``blocked``.
+
+    Builds an undirected graph over the *not-started* activities of the same
+    commessa using the ``predecessors`` field, then returns the connected
+    component containing ``blocked`` (predecessors and successors, transitively).
+    Started/completed activities are not traversed: they are immovable and only
+    act as earliest-start bounds, so they do not link two not-started chains.
+    """
+    not_started = {
+        att.activity_id: att for att in commessa_atts if not is_attivita_fixed(att)
+    }
+    known = set(not_started)
+    adjacency: dict[str, set[str]] = defaultdict(set)
+    for att in not_started.values():
+        for pred_id in _parse_predecessor_ids(att, known):
+            adjacency[att.activity_id].add(pred_id)
+            adjacency[pred_id].add(att.activity_id)
+
+    start_id = blocked.activity_id
+    seen = {start_id}
+    stack = [start_id]
+    while stack:
+        current = stack.pop()
+        for neighbour in adjacency[current]:
+            if neighbour not in seen:
+                seen.add(neighbour)
+                stack.append(neighbour)
+    return [not_started[aid] for aid in seen if aid in not_started]
+
+
+def build_reschedule_problem(
+    blocked_pk: int,
+    *,
+    horizon_start: date | None = None,
+) -> SchedulingProblem:
+    """Build a SchedulingProblem to re-plan a single blocked activity.
+
+    Only the blocked activity plus its precedence-connected chain (still
+    to start) are schedulable; every other activity holding resources becomes
+    an immovable reservation, so the solver proposes a genuinely free slot.
+    The due date and lateness penalty are unchanged from the general model.
+
+    Raises:
+        OptimizationProblemError: When the activity cannot be re-planned or the
+            inventory is empty.
+    """
+    from ui.services.optimization_explanation import ensure_django
+
+    ensure_django()
+
+    try:
+        blocked = Attivita.objects.prefetch_related("risorse").get(pk=blocked_pk)
+    except Attivita.DoesNotExist as exc:
+        raise OptimizationProblemError("Attività non trovata.") from exc
+
+    if is_attivita_fixed(blocked):
+        raise OptimizationProblemError(
+            "L'attività è già iniziata o completata: non è ripianificabile."
+        )
+
+    commessa = blocked.commessa
+    commessa_atts = list(
+        Attivita.objects.filter(commessa=commessa).prefetch_related("risorse")
+    )
+
+    schedulable = _precedence_component(blocked, commessa_atts)
+    if not schedulable:
+        raise OptimizationProblemError("Nessuna attività ripianificabile.")
+    schedulable_ids = {att.activity_id for att in schedulable}
+
+    resources = _fetch_inventory()
+    if not resources:
+        raise OptimizationProblemError("Inventario risorse vuoto.")
+
+    compatibility = _fetch_generator_compatibility()
+    if compatibility:
+        configure_generator_compatibility(compatibility)
+    quantities_by_head = _fetch_required_quantities()
+
+    fixed_end_by_id: dict[str, date] = {}
+    for att in commessa_atts:
+        if not is_attivita_fixed(att):
+            continue
+        window = fixed_calendar_window(att)
+        if window is not None:
+            fixed_end_by_id[att.activity_id] = window[1]
+
+    job_row = JobModel.objects.filter(commessa=commessa).first()
+    job_id = schedulable[0].job_id or commessa
+    rows = sorted(schedulable, key=lambda a: (a.item, a.activity_id))
+
+    opt_activities: list[Activity] = []
+    for order, att in enumerate(rows, 1):
+        pred_bound: date | None = None
+        for raw_pred in (att.predecessors or "").split(","):
+            end = fixed_end_by_id.get(raw_pred.strip())
+            if end is not None:
+                candidate = end + timedelta(days=1)
+                if pred_bound is None or candidate > pred_bound:
+                    pred_bound = candidate
+        local_overrides = {att.activity_id: pred_bound} if pred_bound else {}
+        opt_activities.append(
+            _to_opt_activity(
+                att,
+                order,
+                job_id,
+                quantities_by_head,
+                local_overrides,
+                _parse_predecessor_ids(att, schedulable_ids),
+            )
+        )
+
+    job = Job(
+        job_id=job_id,
+        due_date=_due_date(job_row, commessa_atts),
+        penalty_per_week=_penalty_per_week(job_row),
+        activities=opt_activities,
+    )
+
+    if horizon_start is None:
+        horizon_start = date.today() + timedelta(days=1)
+
+    reservations = reservations_for_excluded(horizon_start, schedulable_ids)
+
+    return SchedulingProblem(
+        jobs=[job],
         resources=resources,
         horizon_start=horizon_start,
         horizon_days=None,

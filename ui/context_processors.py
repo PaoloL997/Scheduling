@@ -4,20 +4,10 @@ from django.http import HttpRequest
 
 
 def _count_open_problems() -> int:
-    """Return open problems plus unique delay-overlap pairs."""
+    """Return unresolved operational problems, including unresolvable overlaps."""
     from ui.models import ProblemaAttivita
-    from ui.services.problem_detection import find_resource_overlaps
 
-    problems = (
-        ProblemaAttivita.objects.filter(risolto=False)
-        .exclude(tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE)
-        .count()
-    )
-    overlaps = find_resource_overlaps()
-    pairs = sum(
-        1 for items in overlaps.values() for item in items if item.get("role") == "late"
-    )
-    return problems + pairs
+    return ProblemaAttivita.objects.filter(risolto=False).count()
 
 
 def open_problems(request: HttpRequest) -> dict:
@@ -28,7 +18,7 @@ def open_problems(request: HttpRequest) -> dict:
 
     Returns:
         dict: ``{"global_open_problems": int}`` — unresolved problems
-            (acquisto/spostamento) plus unique resource-overlap pairs.
+            (acquisto, spostamento, and overlap without a substitute).
     """
     from ui.services.runtime_config import load_runtime_config
 

@@ -63,11 +63,8 @@ if (document.querySelector('.gantt-overlap-hatch')) {
 
 const texts = [...document.querySelectorAll('#bars-svg text')].map((t) => t.textContent);
 const badge = texts.find((t) => t && t.includes('Sovrapposizione risorse'));
-if (!badge) {
-  throw new Error('missing overlap badge, texts=' + JSON.stringify(texts));
-}
-if (badge !== 'Sovrapposizione risorse C205 - 2 - Montaggio') {
-  throw new Error('unexpected overlap badge text: ' + badge);
+if (badge) {
+  throw new Error('overlap badge should not be drawn, texts=' + JSON.stringify(texts));
 }
 
-console.log('ok', badge);
+console.log('ok');
