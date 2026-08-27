@@ -3605,6 +3605,45 @@ a .nav-warn-badge {
   max-width: 100%;
 }
 .inv-add-wrap { position: relative; flex-shrink: 0; }
+.data-table tr.is-maintenance td { opacity: 0.78; }
+.inv-maint-cell { text-align: center; width: 4.5rem; }
+.inv-maint-switch {
+  --maint-pad: 2px;
+  --maint-knob: 12px;
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  display: inline-block;
+  width: 28px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 16px;
+  background: var(--surface-2, hsl(0,0%,18%));
+  cursor: pointer;
+  vertical-align: middle;
+  overflow: hidden;
+  line-height: 0;
+  flex-shrink: 0;
+}
+.inv-maint-switch.is-on {
+  background: hsl(32 80% 42%);
+}
+.inv-maint-knob {
+  position: absolute;
+  top: var(--maint-pad);
+  left: var(--maint-pad);
+  width: var(--maint-knob);
+  height: var(--maint-knob);
+  border-radius: 50%;
+  background: #fff;
+  pointer-events: none;
+  box-shadow: 0 1px 2px hsl(0 0% 0% / 0.25);
+  transition: transform 0.12s ease;
+}
+.inv-maint-switch.is-on .inv-maint-knob {
+  transform: translateX(12px);
+}
 @media (max-width: 720px) {
   .inv-head-row {
     gap: 0.625rem;

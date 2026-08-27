@@ -62,6 +62,9 @@ class Resource(BaseModel):
     plant: Optional[str] = Field(None, description="Text1 — plant name")
     notes: Optional[str] = Field(None, description="Resource notes")
     category: Optional[str] = Field(None, description="Text2 — category")
+    in_manutenzione: bool = Field(
+        False, description="Flag1 — resource is in maintenance"
+    )
 
     @field_validator("measure")
     @classmethod

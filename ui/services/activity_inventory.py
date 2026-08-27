@@ -483,11 +483,12 @@ def get_available_resources(
         return qs
 
     def _teste_available() -> list[dict]:
+        base = TestaItem.objects.filter(in_manutenzione=False)
         if relax_requirements:
-            return _query_all_free(TestaItem.objects.all(), occ_testa)
+            return _query_all_free(base, occ_testa)
         if strict_requirements and not modello_testa:
             return []
-        return _query_with_fallback(TestaItem.objects.all(), _model_filter, occ_testa)
+        return _query_with_fallback(base, _model_filter, occ_testa)
 
     def _mandrini_available() -> list[dict]:
         if relax_requirements:
@@ -511,16 +512,15 @@ def get_available_resources(
         return _query_with_fallback(MascheraItem.objects.all(), _pitch_filter, occ_ma)
 
     def _generatori_available() -> list[dict]:
+        base = GeneratoreItem.objects.filter(in_manutenzione=False)
         if relax_requirements:
-            return _query_all_free(GeneratoreItem.objects.all(), occ_g)
+            return _query_all_free(base, occ_g)
         if strict_requirements:
             if not modello_testa:
                 return []
             if not gen_models:
                 return []
-        return _query_with_fallback(
-            GeneratoreItem.objects.all(), _gen_model_filter, occ_g
-        )
+        return _query_with_fallback(base, _gen_model_filter, occ_g)
 
     teste = _teste_available()
     mandrini = _mandrini_available()

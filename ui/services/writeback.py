@@ -455,6 +455,7 @@ def _apply_add_resource(project_wrapper, payload: dict) -> None:
         measure=payload.get("measure") or "",
         plant=payload.get("plant") or None,
         notes=payload.get("notes") or None,
+        in_manutenzione=bool(payload.get("in_manutenzione")),
     )
     project_wrapper.add_resource(resource)
 
@@ -472,21 +473,24 @@ def _apply_update_resource(project_wrapper, payload: dict) -> None:
     Args:
         project_wrapper: Open Project COM wrapper.
         payload: Decoded JSON dict with keys ``original_uid``, ``uid``, ``table``,
-            ``measure``, ``plant``, ``notes``.
+            ``measure``, ``plant``, ``notes``, ``in_manutenzione``.
     """
     original_uid = payload["original_uid"]
     new_uid = payload.get("uid") or original_uid
     rename_to = new_uid if new_uid != original_uid else None
 
+    kwargs: dict = {
+        "new_name": rename_to,
+        "measure": payload.get("measure"),
+        "plant": payload.get("plant"),
+        "notes": payload.get("notes"),
+        "category": payload.get("table"),
+    }
+    if "in_manutenzione" in payload:
+        kwargs["in_manutenzione"] = bool(payload["in_manutenzione"])
+
     try:
-        project_wrapper.update_resource(
-            original_uid,
-            new_name=rename_to,
-            measure=payload.get("measure"),
-            plant=payload.get("plant"),
-            notes=payload.get("notes"),
-            category=payload.get("table"),
-        )
+        project_wrapper.update_resource(original_uid, **kwargs)
         logger.debug("Risorsa aggiornata nel .mpp: %s → %s", original_uid, new_uid)
     except ValueError:
         logger.warning(

@@ -260,6 +260,7 @@ class TestaItem(models.Model):
     model = models.CharField(max_length=200, null=True, blank=True)
     plant = models.CharField(max_length=200, null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
+    in_manutenzione = models.BooleanField(default=False)
 
     class Meta:
         db_table = "testa_item"
@@ -320,6 +321,7 @@ class GeneratoreItem(models.Model):
     model = models.CharField(max_length=200, null=True, blank=True)
     plant = models.CharField(max_length=200, null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
+    in_manutenzione = models.BooleanField(default=False)
 
     class Meta:
         db_table = "generatore_item"
@@ -467,11 +469,13 @@ class ProblemaAttivita(models.Model):
     TIPO_SPOSTAMENTO = "spostamento"
     TIPO_ACQUISTO = "acquisto"
     TIPO_SOVRAPPOSIZIONE = "sovrapposizione"
+    TIPO_MANUTENZIONE = "manutenzione"
 
     TIPO_CHOICES = [
         (TIPO_SPOSTAMENTO, "Spostamento richiesto"),
         (TIPO_ACQUISTO, "Risorsa da recuperare"),
         (TIPO_SOVRAPPOSIZIONE, "Sovrapposizione risorse"),
+        (TIPO_MANUTENZIONE, "Sostituzione per manutenzione"),
     ]
 
     attivita = models.ForeignKey(

@@ -229,6 +229,7 @@ class Project:
         r.Text1 = data.plant or ""
         r.Notes = data.notes or ""
         r.Text2 = data.category or ""
+        r.Flag1 = bool(data.in_manutenzione)
 
     def list_tasks(self) -> list[Task]:
         """Return all tasks currently present in the project.
@@ -353,6 +354,7 @@ class Project:
         plant: str | None = None,
         notes: str | None = None,
         category: str | None = None,
+        in_manutenzione=_UNSET,
     ) -> None:
         """Partially update an existing resource.
 
@@ -366,6 +368,7 @@ class Project:
             plant: New plant name (Text1).
             notes: New notes.
             category: New category (Text2).
+            in_manutenzione: New maintenance flag (Flag1). Omit to leave unchanged.
 
         Raises:
             ValueError: If no resource with *name* is found.
@@ -381,6 +384,8 @@ class Project:
             r.Notes = notes
         if category is not None:
             r.Text2 = category
+        if in_manutenzione is not _UNSET:
+            r.Flag1 = bool(in_manutenzione)
 
     def delete_task(self, name: str) -> None:
         """Delete a task from the project by name.
@@ -546,6 +551,7 @@ class Project:
             plant=r.Text1 or None,
             notes=r.Notes or None,
             category=r.Text2 or None,
+            in_manutenzione=bool(getattr(r, "Flag1", False)),
         )
 
 

@@ -47,7 +47,9 @@ def _inventory_rows(model, fields: list[str]) -> list[dict]:
 def serialize_inventario() -> dict[str, list[dict]]:
     """Return all five inventory tables in one payload."""
     return {
-        "Testa": _inventory_rows(TestaItem, ["uid", "model", "plant", "notes"]),
+        "Testa": _inventory_rows(
+            TestaItem, ["uid", "model", "plant", "notes", "in_manutenzione"]
+        ),
         "Mandrino": _inventory_rows(
             MandrinoItem, ["uid", "diameter", "plant", "notes"]
         ),
@@ -58,7 +60,7 @@ def serialize_inventario() -> dict[str, list[dict]]:
             MascheraItem, ["uid", "pitch", "plant", "center_distance"]
         ),
         "Generatore": _inventory_rows(
-            GeneratoreItem, ["uid", "model", "plant", "notes"]
+            GeneratoreItem, ["uid", "model", "plant", "notes", "in_manutenzione"]
         ),
     }
 

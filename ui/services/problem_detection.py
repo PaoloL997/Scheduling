@@ -471,6 +471,7 @@ def restore_resolved_notes() -> int:
         ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
         ProblemaAttivita.TIPO_SPOSTAMENTO,
         ProblemaAttivita.TIPO_ACQUISTO,
+        ProblemaAttivita.TIPO_MANUTENZIONE,
     }
     for r in resoluzioni:
         if r.tipo in skipped_types:

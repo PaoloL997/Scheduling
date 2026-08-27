@@ -47,6 +47,8 @@ _TABLE_TO_TIPO: dict[str, str] = {
     "Generatore": "generatore",
 }
 
+_MAINTENANCE_TABLES = {"Testa", "Generatore"}
+
 
 def _get_model(table: str):
     """Return the ORM model class for the given inventory table name.
@@ -117,6 +119,9 @@ def insert_resource(table: str, data: dict) -> None:
     model_class = _get_model(table)
     columns = _TABLE_COLUMNS[table]
     row = {col: data.get(col) or None for col in columns}
+    maintenance = _extract_maintenance(table, data)
+    if maintenance is not None:
+        row["in_manutenzione"] = maintenance
 
     try:
         model_class.objects.create(**row)
@@ -134,6 +139,39 @@ def _normalize_field_value(val) -> str | None:
     if isinstance(val, str):
         return val.strip() or None
     return str(val).strip() or None
+
+
+def _parse_bool(val) -> bool:
+    """Parse a JSON/API value into a boolean.
+
+    Raises:
+        ValueError: When *val* cannot be interpreted as a boolean.
+    """
+    if isinstance(val, bool):
+        return val
+    if val is None:
+        return False
+    if isinstance(val, (int, float)) and val in (0, 1):
+        return bool(val)
+    text = str(val).strip().lower()
+    if text in ("true", "1", "yes", "si", "sì"):
+        return True
+    if text in ("false", "0", "no", ""):
+        return False
+    raise ValueError(f"Valore booleano non valido: {val!r}")
+
+
+def _extract_maintenance(table: str, data: dict) -> bool | None:
+    """Return the parsed maintenance flag if present, else ``None``.
+
+    Raises:
+        ValueError: When the field is sent for a table that does not support it.
+    """
+    if "in_manutenzione" not in data:
+        return None
+    if table not in _MAINTENANCE_TABLES:
+        raise ValueError("La manutenzione è disponibile solo per Testa e Generatore.")
+    return _parse_bool(data["in_manutenzione"])
 
 
 def patch_resource(table: str, original_uid: str, data: dict) -> str:
@@ -161,14 +199,23 @@ def patch_resource(table: str, original_uid: str, data: dict) -> str:
     model_class = _get_model(table)
     columns = _TABLE_COLUMNS[table]
     updates = {key: _normalize_field_value(data[key]) for key in data if key in columns}
+    maintenance = _extract_maintenance(table, data)
+    if maintenance is not None:
+        updates["in_manutenzione"] = maintenance
     if not updates:
         raise ValueError("Nessun campo valido da aggiornare.")
 
     if "uid" in updates and not updates["uid"]:
         raise ValueError("Il campo 'uid' non può essere vuoto.")
 
-    if not model_class.objects.filter(uid=original_uid).exists():
-        raise ValueError(f"uid '{original_uid}' non trovato in {table}.")
+    try:
+        obj = model_class.objects.get(uid=original_uid)
+    except model_class.DoesNotExist:
+        raise ValueError(f"uid '{original_uid}' non trovato in {table}.") from None
+
+    became_maintenance = bool(
+        updates.get("in_manutenzione") and not getattr(obj, "in_manutenzione", False)
+    )
 
     try:
         model_class.objects.filter(uid=original_uid).update(**updates)
@@ -178,6 +225,10 @@ def patch_resource(table: str, original_uid: str, data: dict) -> str:
 
     _enqueue_patch_resource(table, original_uid, updates)
     new_uid = updates.get("uid", original_uid)
+    if became_maintenance:
+        from ui.services.maintenance import reassign_open_activities
+
+        reassign_open_activities(_TABLE_TO_TIPO[table], new_uid)
     if "plant" in updates or "uid" in updates:
         _refresh_problems_after_resource_change(table, original_uid, new_uid)
     return new_uid
@@ -201,6 +252,7 @@ def update_resource(table: str, original_uid: str, data: dict) -> None:
     model_class = _get_model(table)
     columns = _TABLE_COLUMNS[table]
     row = {col: data.get(col) or None for col in columns}
+    maintenance = _extract_maintenance(table, data)
 
     try:
         obj = model_class.objects.get(uid=original_uid)
@@ -209,8 +261,14 @@ def update_resource(table: str, original_uid: str, data: dict) -> None:
 
     old_plant = obj.plant
     old_uid = obj.uid
+    was_maintenance = bool(getattr(obj, "in_manutenzione", False))
     for col, val in row.items():
         setattr(obj, col, val)
+    if maintenance is not None:
+        obj.in_manutenzione = maintenance
+    elif table in _MAINTENANCE_TABLES:
+        obj.in_manutenzione = False
+        maintenance = False
     try:
         obj.save()
     except IntegrityError as exc:
@@ -219,6 +277,11 @@ def update_resource(table: str, original_uid: str, data: dict) -> None:
     _enqueue_update_resource(table, original_uid, data)
     new_uid = data.get("uid") or original_uid
     new_plant = data.get("plant")
+    became_maintenance = bool(maintenance) and not was_maintenance
+    if became_maintenance:
+        from ui.services.maintenance import reassign_open_activities
+
+        reassign_open_activities(_TABLE_TO_TIPO[table], new_uid)
     if new_uid != old_uid or (new_plant or "") != (old_plant or ""):
         _refresh_problems_after_resource_change(table, old_uid, new_uid)
 
@@ -256,17 +319,22 @@ def _enqueue_add_resource(table: str, data: dict, measure_col: str | None) -> No
     try:
         from ui.models import MppSyncQueue
 
+        payload = {
+            "table": table,
+            "uid": data.get("uid"),
+            "measure": data.get(measure_col) if measure_col else None,
+            "plant": data.get("plant"),
+            "notes": data.get(notes_col),
+        }
+        if table in _MAINTENANCE_TABLES:
+            payload["in_manutenzione"] = (
+                _parse_bool(data["in_manutenzione"])
+                if "in_manutenzione" in data
+                else False
+            )
         MppSyncQueue.objects.create(
             operation="add_resource",
-            payload_json=json.dumps(
-                {
-                    "table": table,
-                    "uid": data.get("uid"),
-                    "measure": data.get(measure_col) if measure_col else None,
-                    "plant": data.get("plant"),
-                    "notes": data.get(notes_col),
-                }
-            ),
+            payload_json=json.dumps(payload),
         )
     except Exception as exc:  # noqa: BLE001
         import logging
@@ -306,6 +374,10 @@ def _enqueue_update_resource(table: str, original_uid: str, data: dict) -> None:
     }
     if measure_col:
         payload["measure"] = data.get(measure_col)
+    if table in _MAINTENANCE_TABLES:
+        payload["in_manutenzione"] = (
+            _parse_bool(data["in_manutenzione"]) if "in_manutenzione" in data else False
+        )
     _enqueue_update_resource_payload(payload)
 
 
@@ -322,6 +394,8 @@ def _enqueue_patch_resource(table: str, original_uid: str, patched: dict) -> Non
     notes_col = _TABLE_NOTES_COL.get(table, "notes")
     if notes_col in patched:
         payload["notes"] = patched[notes_col]
+    if "in_manutenzione" in patched:
+        payload["in_manutenzione"] = bool(patched["in_manutenzione"])
     _enqueue_update_resource_payload(payload)
 
 

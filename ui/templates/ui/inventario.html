@@ -42,16 +42,20 @@
               <th>Modello</th>
               <th>Stabilimento</th>
               <th>Note</th>
+              <th style="width:4.5rem;">Manutenzione</th>
               <th style="width:2.5rem;"></th>
             </tr>
           </thead>
           <tbody>
             {% for row in generatori %}
-            <tr data-uid="{{ row.uid }}" data-model="{{ row.model|default:'' }}" data-plant="{{ row.plant|default:'' }}" data-notes="{{ row.notes|default:'' }}">
+            <tr data-uid="{{ row.uid }}" data-model="{{ row.model|default:'' }}" data-plant="{{ row.plant|default:'' }}" data-notes="{{ row.notes|default:'' }}" data-in-manutenzione="{% if row.in_manutenzione %}true{% else %}false{% endif %}"{% if row.in_manutenzione %} class="is-maintenance"{% endif %}>
               <td class="td-primary">{{ row.uid }}</td>
               <td>{{ row.model|default:"—" }}</td>
               <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
               <td class="td-muted">{{ row.notes|default:"—" }}</td>
+              <td class="inv-maint-cell">
+                <button type="button" class="inv-maint-switch{% if row.in_manutenzione %} is-on{% endif %}" role="switch" aria-checked="{% if row.in_manutenzione %}true{% else %}false{% endif %}" aria-label="Manutenzione" onclick="toggleMaintenance('Generatore', '{{ row.uid }}', this)"><span class="inv-maint-knob"></span></button>
+              </td>
               <td style="text-align:center;"><button class="btn-delete" onclick="deleteRow('Generatore', '{{ row.uid }}', this)" title="Elimina">🗑</button></td>
             </tr>
             {% endfor %}
@@ -170,16 +174,20 @@
               <th>Modello</th>
               <th>Stabilimento</th>
               <th>Note</th>
+              <th style="width:4.5rem;">Manutenzione</th>
               <th style="width:2.5rem;"></th>
             </tr>
           </thead>
           <tbody>
             {% for row in teste %}
-            <tr data-uid="{{ row.uid }}" data-model="{{ row.model|default:'' }}" data-plant="{{ row.plant|default:'' }}" data-notes="{{ row.notes|default:'' }}">
+            <tr data-uid="{{ row.uid }}" data-model="{{ row.model|default:'' }}" data-plant="{{ row.plant|default:'' }}" data-notes="{{ row.notes|default:'' }}" data-in-manutenzione="{% if row.in_manutenzione %}true{% else %}false{% endif %}"{% if row.in_manutenzione %} class="is-maintenance"{% endif %}>
               <td class="td-primary">{{ row.uid }}</td>
               <td>{{ row.model|default:"—" }}</td>
               <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
               <td class="td-muted">{{ row.notes|default:"—" }}</td>
+              <td class="inv-maint-cell">
+                <button type="button" class="inv-maint-switch{% if row.in_manutenzione %} is-on{% endif %}" role="switch" aria-checked="{% if row.in_manutenzione %}true{% else %}false{% endif %}" aria-label="Manutenzione" onclick="toggleMaintenance('Testa', '{{ row.uid }}', this)"><span class="inv-maint-knob"></span></button>
+              </td>
               <td style="text-align:center;"><button class="btn-delete" onclick="deleteRow('Testa', '{{ row.uid }}', this)" title="Elimina">🗑</button></td>
             </tr>
             {% endfor %}
@@ -304,12 +312,14 @@
         { name: 'model', label: 'Modello' },
         { name: 'plant', label: 'Stabilimento' },
         { name: 'notes', label: 'Note' },
+        { name: 'in_manutenzione', label: 'Manutenzione', type: 'checkbox', skipAdd: true },
       ],
       renderRow: function(d) {
         return `<td class="td-primary">${esc(d.uid)}</td>
                 <td>${esc(d.model)}</td>
                 <td>${stabBadge(d.plant)}</td>
                 <td class="td-muted">${esc(d.notes)}</td>
+                <td class="inv-maint-cell">${maintSwitchHtml('Generatore', d.uid, isMaintOn(d.in_manutenzione))}</td>
                 <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Generatore','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
       }
     },
@@ -372,12 +382,14 @@
         { name: 'model', label: 'Modello' },
         { name: 'plant', label: 'Stabilimento' },
         { name: 'notes', label: 'Note' },
+        { name: 'in_manutenzione', label: 'Manutenzione', type: 'checkbox', skipAdd: true },
       ],
       renderRow: function(d) {
         return `<td class="td-primary">${esc(d.uid)}</td>
                 <td>${esc(d.model)}</td>
                 <td>${stabBadge(d.plant)}</td>
                 <td class="td-muted">${esc(d.notes)}</td>
+                <td class="inv-maint-cell">${maintSwitchHtml('Testa', d.uid, isMaintOn(d.in_manutenzione))}</td>
                 <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Testa','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
       }
     },
@@ -388,6 +400,50 @@
   function esc(val) {
     if (val == null) return '—';
     return String(val).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function isMaintOn(val) {
+    return val === true || val === 'true' || val === '1' || val === 1;
+  }
+
+  function maintSwitchHtml(table, uid, on) {
+    var pressed = on ? 'true' : 'false';
+    var cls = on ? 'inv-maint-switch is-on' : 'inv-maint-switch';
+    return '<button type="button" class="' + cls + '" role="switch" aria-checked="' + pressed +
+           '" aria-label="Manutenzione" onclick="toggleMaintenance(\'' + esc(table) + '\',\'' +
+           esc(uid) + '\', this)"><span class="inv-maint-knob"></span></button>';
+  }
+
+  function applyMaintenanceRow(tr, on) {
+    if (!tr) return;
+    tr.setAttribute('data-in-manutenzione', on ? 'true' : 'false');
+    tr.classList.toggle('is-maintenance', on);
+    var sw = tr.querySelector('.inv-maint-switch');
+    if (sw) {
+      sw.classList.toggle('is-on', on);
+      sw.setAttribute('aria-checked', on ? 'true' : 'false');
+    }
+  }
+
+  function toggleMaintenance(table, uid, btn) {
+    var tr = btn.closest('tr');
+    var on = btn.getAttribute('aria-checked') !== 'true';
+    btn.disabled = true;
+    fetch('/api/inventario/' + table + '/' + encodeURIComponent(uid) + '/', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ in_manutenzione: on }),
+    })
+    .then(function(r) { return r.json().then(function(body) { return { ok: r.ok, body: body }; }); })
+    .then(function(res) {
+      if (!res.ok || !res.body.ok) {
+        alert(res.body.error || 'Impossibile aggiornare la manutenzione.');
+        return;
+      }
+      applyMaintenanceRow(tr, on);
+    })
+    .catch(function() { alert('Errore di rete.'); })
+    .finally(function() { btn.disabled = false; });
   }
 
   const STAB_COLORS = {{ plant_colors_json|safe }};
@@ -435,7 +491,7 @@
     var cfg = INV_CONFIG[activeKey];
     document.getElementById('add-modal-title').textContent = 'Aggiungi ' + cfg.label;
     var fieldsEl = document.getElementById('add-fields');
-    fieldsEl.innerHTML = cfg.fields.map(function(f) {
+    fieldsEl.innerHTML = cfg.fields.filter(function(f) { return !f.skipAdd; }).map(function(f) {
       var control;
       if (f.name === 'plant') {
         control = '<select id="field-plant" name="plant">' +
@@ -463,6 +519,7 @@
     var cfg = INV_CONFIG[activeKey];
     var data = {};
     cfg.fields.forEach(function(f) {
+      if (f.skipAdd) return;
       var val = document.getElementById('field-' + f.name).value.trim();
       data[f.name] = val || null;
     });
@@ -513,9 +570,15 @@
     tr.setAttribute('data-uid', data.uid || '');
     cfg.fields.forEach(function(f) {
       if (f.name !== 'uid') {
-        tr.setAttribute('data-' + f.name.replace(/_/g, '-'), data[f.name] || '');
+        var raw = data[f.name];
+        if (f.type === 'checkbox') {
+          tr.setAttribute('data-' + f.name.replace(/_/g, '-'), isMaintOn(raw) ? 'true' : 'false');
+        } else {
+          tr.setAttribute('data-' + f.name.replace(/_/g, '-'), raw || '');
+        }
       }
     });
+    if (isMaintOn(data.in_manutenzione)) tr.classList.add('is-maintenance');
     tr.classList.add('row--new');
     tr.innerHTML = cfg.renderRow(data);
     tbl.querySelector('tbody').appendChild(tr);
@@ -595,7 +658,8 @@
   function openDetailModal(tr, cfg) {
     var d = {};
     cfg.fields.forEach(function(f) {
-      d[f.name] = tr.getAttribute('data-' + f.name.replace(/_/g, '-')) || '';
+      var raw = tr.getAttribute('data-' + f.name.replace(/_/g, '-')) || '';
+      d[f.name] = f.type === 'checkbox' ? isMaintOn(raw) : raw;
     });
     detState = { tr: tr, cfg: cfg, originalData: d };
     document.getElementById('det-title').textContent = cfg.label + ': ' + (d.uid || '—');
@@ -616,7 +680,12 @@
     body.className = 'det-grid';
     body.innerHTML = detState.cfg.fields.map(function(f) {
       var label = f.label.replace(' *', '');
-      var val = detState.originalData[f.name] || '—';
+      var val;
+      if (f.type === 'checkbox') {
+        val = isMaintOn(detState.originalData[f.name]) ? 'Sì' : 'No';
+      } else {
+        val = detState.originalData[f.name] || '—';
+      }
       return '<div class="det-field">' +
              '<span class="det-label">' + label + '</span>' +
              '<span class="det-value">' + esc(val) + '</span>' +
@@ -636,6 +705,9 @@
       if (f.name === 'plant') {
         control = '<select class="det-input" id="det-field-plant" name="plant">' +
                   '<option value="">—</option>' + STAB_OPTIONS + '</select>';
+      } else if (f.type === 'checkbox') {
+        control = '<input class="det-input" id="det-field-' + f.name + '" type="checkbox"' +
+                  (isMaintOn(d[f.name]) ? ' checked' : '') + '>';
       } else {
         control = '<input class="det-input" id="det-field-' + f.name + '" type="text" value="' + esc(val) + '">';
       }
@@ -662,7 +734,12 @@
     var newData = {};
     cfg.fields.forEach(function(f) {
       var el = document.getElementById('det-field-' + f.name);
-      if (el) newData[f.name] = el.value.trim() || null;
+      if (!el) return;
+      if (f.type === 'checkbox') {
+        newData[f.name] = el.checked;
+      } else {
+        newData[f.name] = el.value.trim() || null;
+      }
     });
 
     var saveBtn = document.getElementById('det-save-btn');
@@ -684,9 +761,14 @@
         tr.setAttribute('data-uid', newData.uid || '');
         cfg.fields.forEach(function(f) {
           if (f.name !== 'uid') {
-            tr.setAttribute('data-' + f.name.replace(/_/g, '-'), newData[f.name] || '');
+            if (f.type === 'checkbox') {
+              tr.setAttribute('data-' + f.name.replace(/_/g, '-'), isMaintOn(newData[f.name]) ? 'true' : 'false');
+            } else {
+              tr.setAttribute('data-' + f.name.replace(/_/g, '-'), newData[f.name] || '');
+            }
           }
         });
+        applyMaintenanceRow(tr, isMaintOn(newData.in_manutenzione));
         closeDetailModal();
       }
     })

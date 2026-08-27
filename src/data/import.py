@@ -202,7 +202,13 @@ def _resource_to_table(resource: Resource) -> Optional[str]:
 
 
 def _resource_to_testa(r: Resource) -> TestaRow:
-    return TestaRow(uid=r.name, model=r.measure or None, plant=r.plant, notes=r.notes)
+    return TestaRow(
+        uid=r.name,
+        model=r.measure or None,
+        plant=r.plant,
+        notes=r.notes,
+        in_manutenzione=bool(r.in_manutenzione),
+    )
 
 
 def _resource_to_mandrino(r: Resource) -> MandrinoRow:
@@ -225,7 +231,11 @@ def _resource_to_maschera(r: Resource) -> MascheraRow:
 
 def _resource_to_generatore(r: Resource) -> GeneratoreRow:
     return GeneratoreRow(
-        uid=r.name, model=r.measure or None, plant=r.plant, notes=r.notes
+        uid=r.name,
+        model=r.measure or None,
+        plant=r.plant,
+        notes=r.notes,
+        in_manutenzione=bool(r.in_manutenzione),
     )
 
 
@@ -292,9 +302,7 @@ def import_from_mpp(mpp_path: str) -> None:
         item = (r.item or "").strip()
         if not item:
             continue
-        row_id_to_activity_id[row_id] = build_activity_id(
-            r.commessa, item, r.activity
-        )
+        row_id_to_activity_id[row_id] = build_activity_id(r.commessa, item, r.activity)
 
     attivita_objects: list[Attivita] = []
     task_resource_map: dict[tuple, list[str]] = {}
@@ -371,7 +379,11 @@ def import_from_mpp(mpp_path: str) -> None:
         if cat == "Testa":
             testas.append(
                 TestaItem(
-                    uid=row.uid, model=row.model, plant=row.plant, notes=row.notes
+                    uid=row.uid,
+                    model=row.model,
+                    plant=row.plant,
+                    notes=row.notes,
+                    in_manutenzione=row.in_manutenzione,
                 )
             )
         elif cat == "Mandrino":
@@ -398,7 +410,11 @@ def import_from_mpp(mpp_path: str) -> None:
         elif cat == "Generatore":
             generatori.append(
                 GeneratoreItem(
-                    uid=row.uid, model=row.model, plant=row.plant, notes=row.notes
+                    uid=row.uid,
+                    model=row.model,
+                    plant=row.plant,
+                    notes=row.notes,
+                    in_manutenzione=row.in_manutenzione,
                 )
             )
 

@@ -3765,6 +3765,7 @@ const _NOTE_TIPO_LABEL = {
   acquisto: 'Risorsa da recuperare',
   spostamento: 'Spostamento richiesto',
   sovrapposizione: 'Sovrapposizione risorse',
+  manutenzione: 'Sostituzione per manutenzione',
 };
 
 function _fmtNoteDateTime(iso) {
@@ -3997,6 +3998,8 @@ function _renderNoteItem(p) {
     description = p.descrizione || 'Risorsa da acquistare o noleggiare.';
   } else if (p.tipo === 'sovrapposizione') {
     description = p.descrizione || 'Sovrapposizione sulle risorse.';
+  } else if (p.tipo === 'manutenzione') {
+    description = p.descrizione || 'Sostituzione automatica per manutenzione.';
   } else {
     description = p.descrizione || `Spostamento richiesto da ${from} a ${to}.`;
   }

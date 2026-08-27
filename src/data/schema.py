@@ -56,6 +56,7 @@ class TestaRow:
     model: Optional[str]
     plant: Optional[str]
     notes: Optional[str]
+    in_manutenzione: bool = False
 
 
 @dataclass
@@ -96,3 +97,4 @@ class GeneratoreRow:
     model: Optional[str]
     plant: Optional[str]
     notes: Optional[str]
+    in_manutenzione: bool = False

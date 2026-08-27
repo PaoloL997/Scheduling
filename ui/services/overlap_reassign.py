@@ -221,9 +221,16 @@ def _pick_alternative(
     model_cls = _inventory_model(tipo)
     skip = occupied | {from_uid}
     if candidates is None:
-        rows = list(model_cls.objects.exclude(uid__in=skip).values())
+        qs = model_cls.objects.exclude(uid__in=skip)
+        if tipo in ("testa", "generatore"):
+            qs = qs.filter(in_manutenzione=False)
+        rows = list(qs.values())
     else:
-        rows = [r for r in candidates if r.get("uid") not in skip]
+        rows = [
+            r
+            for r in candidates
+            if r.get("uid") not in skip and not r.get("in_manutenzione")
+        ]
     if not rows:
         return None
     plant = (blocked.stabilimento or "").strip()
@@ -519,6 +526,9 @@ def apply_overlap_reassignment(blocked_pk: int) -> dict:
     except BridgeWriteError as exc:
         raise OverlapReassignError(str(exc), status_code=exc.status_code) from exc
 
+    blocked = Attivita.objects.get(pk=blocked_pk)
+    _persist_swap_notes(blocked, replacements, items[0])
+
     result["blocked_orm_id"] = blocked_pk
     result["replacements"] = replacements
     return result
@@ -763,7 +773,7 @@ def auto_resolve_resource_overlaps() -> dict:
         if not replacements:
             continue
         try:
-            result = apply_overlap_reassignment(pk)
+            apply_overlap_reassignment(pk)
         except OverlapReassignError:
             continue
         swapped_ids.append(pk)
@@ -772,11 +782,6 @@ def auto_resolve_resource_overlaps() -> dict:
             peer = item.get("peer_orm_id")
             if peer:
                 affected.add(int(peer))
-        _persist_swap_notes(
-            Attivita.objects.get(pk=pk),
-            result.get("replacements") or replacements,
-            blocked_items[0],
-        )
 
     activities = list(Attivita.objects.prefetch_related("risorse"))
     remaining = find_resource_overlaps(activities)

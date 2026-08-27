@@ -238,7 +238,7 @@ def _fetch_inventory() -> list[Resource]:
                 )
             )
 
-    for row in TestaItem.objects.all():
+    for row in TestaItem.objects.filter(in_manutenzione=False):
         model = (row.model or "").strip() or None
         if model is not None:
             resources.append(
@@ -250,7 +250,7 @@ def _fetch_inventory() -> list[Resource]:
                 )
             )
 
-    for row in GeneratoreItem.objects.all():
+    for row in GeneratoreItem.objects.filter(in_manutenzione=False):
         model = (row.model or "").strip() or None
         if model is not None:
             resources.append(
@@ -263,6 +263,24 @@ def _fetch_inventory() -> list[Resource]:
             )
 
     return resources
+
+
+def _maintenance_solver_ids() -> set[str]:
+    """Solver resource ids (``tipo:uid``) currently flagged in maintenance."""
+    ids: set[str] = set()
+    ids.update(
+        f"testa:{uid}"
+        for uid in TestaItem.objects.filter(in_manutenzione=True).values_list(
+            "uid", flat=True
+        )
+    )
+    ids.update(
+        f"generatore:{uid}"
+        for uid in GeneratoreItem.objects.filter(in_manutenzione=True).values_list(
+            "uid", flat=True
+        )
+    )
+    return ids
 
 
 def is_attivita_fixed(att: Attivita) -> bool:
@@ -424,6 +442,7 @@ def reservations_for_excluded(
 
     calendar = WorkingCalendar(horizon_start)
     reservations: list[ResourceReservation] = []
+    skip_ids = _maintenance_solver_ids()
     for att in activities:
         if att.activity_id in schedulable_ids:
             continue
@@ -434,6 +453,9 @@ def reservations_for_excluded(
         if end < horizon_start:
             continue
         resource_ids = solver_resource_ids(att)
+        if not resource_ids:
+            continue
+        resource_ids = [rid for rid in resource_ids if rid not in skip_ids]
         if not resource_ids:
             continue
         clamped_start = max(start, horizon_start)
