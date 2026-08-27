@@ -8,6 +8,9 @@
   const HEADER_H = 36;
   const BAR_H = 22;
   const GROUP_GAP = 16;
+  // Inset the plot from the card edge so bars never sit flush (~5 mm at 96 dpi).
+  const CHART_PAD_LEFT = 20;
+  const CHART_PAD_RIGHT = 8;
   const PALETTE = [
     'hsl(211,90%,60%)', 'hsl(38,95%,58%)', 'hsl(160,55%,50%)', 'hsl(280,60%,68%)',
     'hsl(0,75%,62%)', 'hsl(190,65%,52%)', 'hsl(48,90%,55%)', 'hsl(320,60%,65%)',
@@ -369,7 +372,7 @@
 
     if (!left) left = today;
 
-    // Align to the leftmost bar start; the ~1 cm visual pad is applied in render().
+    // Align to the leftmost bar start; visual left pad is applied in render().
     (tasks || []).forEach(t => {
       if (!taskIsWip(t) && !taskIsIncomplete(t)) return;
       const planned = parseDate(t.start);
@@ -801,15 +804,15 @@
       return new Date(actS.getTime() + (planF - planS));
     }
 
-    _badgeAnchorX(plannedEndX, executionEnd, dateToX, totalW) {
+    _badgeAnchorX(plannedEndX, executionEnd, dateToX, clipL, clipR) {
       // Badge always after the later of planned finish and actual/estimated finish.
       const TICK_W = 3;
       const endXraw = dateToX(executionEnd);
-      let executionEndX = Math.min(Math.max(endXraw, 0), totalW);
-      if (endXraw >= 0 && endXraw - TICK_W <= totalW) {
+      let executionEndX = Math.min(Math.max(endXraw, clipL), clipR);
+      if (endXraw >= clipL && endXraw - TICK_W <= clipR) {
         executionEndX = Math.max(
           executionEndX,
-          Math.min(endXraw + Math.ceil(TICK_W / 2), totalW)
+          Math.min(endXraw + Math.ceil(TICK_W / 2), clipR)
         );
       }
       return Math.max(plannedEndX, executionEndX);
@@ -906,18 +909,23 @@
 
       this.updateNavState();
       const totalW = this._chartWidth(barsEl);
-      // ≈ 1 cm breathing room before the first bar (96 dpi).
-      if (this.fitToData && totalW > 0 && maxD > minD) {
+      const padL = CHART_PAD_LEFT;
+      const padR = CHART_PAD_RIGHT;
+      const plotW = Math.max(1, totalW - padL - padR);
+      // Extra empty time before the first bar in fit/horizon (~1 cm at 96 dpi).
+      if (this.fitToData && plotW > 0 && maxD > minD) {
         const edgePadPx = 38;
-        const padMs = (edgePadPx / totalW) * (maxD.getTime() - minD.getTime());
+        const padMs = (edgePadPx / plotW) * (maxD.getTime() - minD.getTime());
         minD = new Date(minD.getTime() - padMs);
       }
-      const adaptive = buildAdaptiveTicks(minD, maxD, totalW);
+      const adaptive = buildAdaptiveTicks(minD, maxD, plotW);
       const ticks = adaptive.ticks;
       const tickView = adaptive.labelMode;
       const stepDays = adaptive.stepDays;
-      const pxPerMs = totalW / (maxD - minD);
-      const dateToX = d => Math.round((d - minD) * pxPerMs);
+      const pxPerMs = plotW / (maxD - minD);
+      const dateToX = d => Math.round((d - minD) * pxPerMs) + padL;
+      const clipL = padL;
+      const clipR = totalW - padR;
 
       const groupRows = [];
       let yOffset = 8;
@@ -949,7 +957,7 @@
           const visStart = new Date(Math.min(s, barStart));
           const visEnd = new Date(Math.max(f, barEnd));
           if (visStart >= maxD || visEnd <= minD) return null;
-          return { ...t, colour, x1: Math.max(dateToX(s), 0), x2: Math.min(dateToX(f), totalW) };
+          return { ...t, colour, x1: Math.max(dateToX(s), clipL), x2: Math.min(dateToX(f), clipR) };
         }).filter(Boolean);
 
         const allStarts = [];
@@ -978,8 +986,8 @@
 
         const spanStart = new Date(Math.min(...allStarts.map(d => d.getTime())));
         const spanEnd = new Date(Math.max(...allFinish.map(d => d.getTime())));
-        const summaryX1 = Math.max(dateToX(spanStart), 0);
-        const summaryX2 = Math.min(dateToX(spanEnd), totalW);
+        const summaryX1 = Math.max(dateToX(spanStart), clipL);
+        const summaryX2 = Math.min(dateToX(spanEnd), clipR);
         const groupKey = g.commessa || g.job_id;
         const expanded = this._isGroupExpanded(groupKey);
         const layoutTasks = expanded ? visibleTasks : [];
@@ -1024,7 +1032,7 @@
       axisSvg.innerHTML = '';
       ticks.forEach((tick) => {
         const x = dateToX(tick);
-        if (x < 0 || x > totalW) return;
+        if (x < clipL || x > clipR) return;
         const ln = document.createElementNS(NS, 'line');
         ln.setAttribute('x1', x); ln.setAttribute('y1', 0);
         ln.setAttribute('x2', x); ln.setAttribute('y2', AXIS_H);
@@ -1054,11 +1062,11 @@
           if (dow === 0 || dow === 6) {
             const x = dateToX(cur);
             const x2 = dateToX(addDays(cur, 1));
-            if (x < totalW && x2 > 0) {
+            if (x < clipR && x2 > clipL) {
               const wk = document.createElementNS(NS, 'rect');
-              wk.setAttribute('x', Math.max(x, 0));
+              wk.setAttribute('x', Math.max(x, clipL));
               wk.setAttribute('y', 0);
-              wk.setAttribute('width', Math.min(x2, totalW) - Math.max(x, 0));
+              wk.setAttribute('width', Math.min(x2, clipR) - Math.max(x, clipL));
               wk.setAttribute('height', totalH);
               wk.setAttribute('fill', theme.weekendFill);
               wk.setAttribute('opacity', theme.weekendOpacity);
@@ -1071,7 +1079,7 @@
 
       ticks.forEach(tick => {
         const x = dateToX(tick);
-        if (x < 0 || x > totalW) return;
+        if (x < clipL || x > clipR) return;
         const ln = document.createElementNS(NS, 'line');
         ln.setAttribute('x1', x); ln.setAttribute('y1', 0);
         ln.setAttribute('x2', x); ln.setAttribute('y2', totalH);
@@ -1082,7 +1090,7 @@
 
       if (today >= minD && today < maxD) {
         const x = dateToX(today);
-        const pxPerDay = totalW / ((maxD - minD) / 86400000);
+        const pxPerDay = plotW / ((maxD - minD) / 86400000);
         const strip = document.createElementNS(NS, 'rect');
         strip.setAttribute('x', x);
         strip.setAttribute('y', 0);
@@ -1121,7 +1129,7 @@
           const sumW = Math.max(g.summaryX2 - g.summaryX1, 20);
           const toggleKey = g.groupKey || g.commessa || g.job_id;
           const lbl = document.createElementNS(NS, 'text');
-          lbl.setAttribute('x', g.summaryX1 + 2);
+          lbl.setAttribute('x', g.summaryX1 + 6);
           lbl.setAttribute('y', sumY - 5);
           lbl.setAttribute('fill', g.colour);
           lbl.setAttribute('font-size', '12');
@@ -1256,8 +1264,8 @@
 
             const currentExt = self._plannedExtents(row);
             if (currentExt.start && currentExt.finish) {
-              const boxX1 = Math.max(dateToX(currentExt.start), 0);
-              const boxX2 = Math.min(dateToX(currentExt.finish), totalW);
+              const boxX1 = Math.max(dateToX(currentExt.start), clipL);
+              const boxX2 = Math.min(dateToX(currentExt.finish), clipR);
               const boxW = Math.max(boxX2 - boxX1, 4);
               labelX = boxX1;
               registerPos(self._drawCompareBar(barsSvg, {
@@ -1276,8 +1284,8 @@
             if (proposed) {
               const proposedExt = self._plannedExtents(proposed);
               if (proposedExt.start && proposedExt.finish) {
-                const boxX1 = Math.max(dateToX(proposedExt.start), 0);
-                const boxX2 = Math.min(dateToX(proposedExt.finish), totalW);
+                const boxX1 = Math.max(dateToX(proposedExt.start), clipL);
+                const boxX2 = Math.min(dateToX(proposedExt.finish), clipR);
                 const boxW = Math.max(boxX2 - boxX1, 4);
                 if (labelX === null) labelX = boxX1;
                 const changed = !!(self.highlightChanges && self.highlightChanges[row.activity_id]);
@@ -1299,14 +1307,14 @@
               let labelW = 40;
               if (currentExt.start && currentExt.finish) {
                 labelW = Math.max(
-                  Math.min(dateToX(currentExt.finish), totalW) - Math.max(dateToX(currentExt.start), 0),
+                  Math.min(dateToX(currentExt.finish), clipR) - Math.max(dateToX(currentExt.start), clipL),
                   4
                 );
               } else if (proposed) {
                 const pe = self._plannedExtents(proposed);
                 if (pe.start && pe.finish) {
                   labelW = Math.max(
-                    Math.min(dateToX(pe.finish), totalW) - Math.max(dateToX(pe.start), 0),
+                    Math.min(dateToX(pe.finish), clipR) - Math.max(dateToX(pe.start), clipL),
                     4
                   );
                 }
@@ -1331,8 +1339,8 @@
           const planS = parseDate(row.start);
           const planF = parseDate(row.finish);
           if (isNaN(planS) || isNaN(planF)) return;
-          const boxX1 = Math.max(dateToX(planS), 0);
-          const boxX2 = Math.min(dateToX(planF), totalW);
+          const boxX1 = Math.max(dateToX(planS), clipL);
+          const boxX2 = Math.min(dateToX(planF), clipR);
           const boxW = Math.max(boxX2 - boxX1, 4);
           const changed = self.highlightChanges && self.highlightChanges[row.activity_id];
           const RED = 'hsl(4,90%,62%)';
@@ -1371,13 +1379,13 @@
           let badgeAnchorX = plannedEndX;
           if (!self.simplified && isStarted) {
             const actEnd = self._executionEndDate(row, planS, planF);
-            badgeAnchorX = self._badgeAnchorX(plannedEndX, actEnd, dateToX, totalW);
+            badgeAnchorX = self._badgeAnchorX(plannedEndX, actEnd, dateToX, clipL, clipR);
             const actS = parseDate(row.actual_start);
             const TAIL_H = 3, TICK_H = BAR_H + 6, TICK_W = 3;
             const actX1raw = dateToX(actS);
             const actX2raw = dateToX(actEnd);
-            const tx1 = Math.max(actX1raw, 0);
-            const tx2 = Math.min(actX2raw, totalW);
+            const tx1 = Math.max(actX1raw, clipL);
+            const tx2 = Math.min(actX2raw, clipR);
             const tickY = midY - TICK_H / 2;
             const drawActualPart = (x, y, w, h, opacity) => {
               if (w <= 0) return;
@@ -1394,13 +1402,13 @@
             };
             const drawTickAt = (centerX) => {
               const x1 = centerX - Math.floor(TICK_W / 2);
-              const lx = Math.max(x1, 0);
-              const rx = Math.min(x1 + TICK_W, totalW);
+              const lx = Math.max(x1, clipL);
+              const rx = Math.min(x1 + TICK_W, clipR);
               if (rx > lx) drawActualPart(lx, tickY, rx - lx, TICK_H, '0.95');
             };
             if (tx2 > tx1) drawActualPart(tx1, midY - TAIL_H / 2, tx2 - tx1, TAIL_H, '0.90');
-            if (actX1raw + TICK_W >= 0 && actX1raw <= totalW) drawTickAt(actX1raw);
-            if (actX2raw >= 0 && actX2raw - TICK_W <= totalW) drawTickAt(actX2raw);
+            if (actX1raw + TICK_W >= clipL && actX1raw <= clipR) drawTickAt(actX1raw);
+            if (actX2raw >= clipL && actX2raw - TICK_W <= clipR) drawTickAt(actX2raw);
           }
 
           if (boxW > 0) {
@@ -1428,7 +1436,7 @@
               if (isStarted) badges.push({ text: 'IN LAVORAZIONE', color: SLATE });
               else badges.push({ text: isOverdue ? 'DA INIZIARE' : 'PIANIFICATA', color: SLATE });
             }
-            let bx = Math.max(badgeAnchorX, 0) + BADGE_PAD;
+            let bx = Math.max(badgeAnchorX, clipL) + BADGE_PAD;
             badges.forEach(({ text, color, plain, keep }) => {
               const bw = Math.ceil(text.length * charW) + (plain ? 0 : 14);
               if (!keep && bx + bw > totalW + 100) return;

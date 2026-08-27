@@ -91,15 +91,24 @@ assert(fit.view === 'horizon', `view=${fit.view}`);
 const days = (fit.maxD - fit.minD) / 86400000;
 assert(days >= 160 && days <= 200, `expected ~6 months (~180d), got ${days}`);
 
-// Left aligns to the earliest WIP planned start; the ~1 cm pad is applied at render time.
+// Left aligns to the earliest WIP planned start; visual left pad is applied at render time.
 const earliest = new Date('2026-03-01T00:00:00').getTime();
 const driftLeft = (earliest - fit.minD.getTime()) / 86400000;
 assert(Math.abs(driftLeft) < 1.5, `left not anchored at earliest bar, drift=${driftLeft}`);
 
 const chart = new GanttChart({ prefix: '', initialView: 'horizon', enableStats: false });
+const barsScroll = document.getElementById('bars-scroll');
+Object.defineProperty(barsScroll, 'clientWidth', { configurable: true, get: () => 800 });
+Object.defineProperty(barsScroll, 'clientHeight', { configurable: true, get: () => 400 });
+Object.defineProperty(barsScroll.parentElement, 'clientWidth', { configurable: true, get: () => 800 });
 chart.setData(tasks, {});
 assert(chart.view === 'horizon', 'chart should stay in horizon');
 assert(chart.fitToData === true, 'horizon uses fit window');
 assert(chart._dataMinD && chart._dataMaxD, 'horizon window missing');
+
+const bars = [...document.querySelectorAll('rect[data-task]')];
+assert(bars.length >= 1, 'expected task bars after render');
+const minBarX = Math.min(...bars.map(b => Number(b.getAttribute('x'))));
+assert(minBarX >= 20, `first bar too close to left edge: x=${minBarX}`);
 
 console.log('ok');
