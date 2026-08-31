@@ -214,13 +214,13 @@ def api_bridge_import(request: HttpRequest) -> JsonResponse:
 @bridge_read_guard
 @require_http_methods(["GET"])
 def api_bridge_dataset(request: HttpRequest) -> JsonResponse:
-    return _ok(serialize_dataset())
+    return _ok(serialize_dataset(user_stabilimento_name(request.user)))
 
 
 @bridge_read_guard
 @require_http_methods(["GET"])
 def api_bridge_attivita_list(request: HttpRequest) -> JsonResponse:
-    return _ok(serialize_attivita_list())
+    return _ok(serialize_attivita_list(user_stabilimento_name(request.user)))
 
 
 @bridge_read_guard

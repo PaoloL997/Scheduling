@@ -10,7 +10,7 @@ from django.contrib.auth.models import User
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from ui.models import Attivita, Job, MppSyncQueue, Stabilimento
+from ui.models import Attivita, Job, MppSyncQueue, Stabilimento, TestaItem, UserProfile
 from ui.services.importer import ImportStatus
 
 
@@ -97,6 +97,145 @@ class BridgeReadTest(TestCase):
         self.assertIn("attivita", payload)
         self.assertIn("inventario", payload)
         self.assertIn("stabilimenti", payload)
+
+    def test_dataset_filters_attivita_by_user_plant(self, _mock_status) -> None:
+        valbrembo = Stabilimento.objects.create(nome="Valbrembo", colore="#00aa00")
+        UserProfile.objects.create(user=self.user, stabilimento=valbrembo)
+        local = Attivita.objects.create(
+            commessa="B200",
+            item=1,
+            activity="Locale",
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+        )
+        Attivita.objects.create(
+            commessa="B300",
+            item=1,
+            activity="Altro",
+            stabilimento="Schio",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+        )
+
+        resp = self.client.get(reverse("api_bridge_dataset"))
+        self.assertEqual(resp.status_code, 200)
+        attivita = resp.json()["data"]["attivita"]
+        self.assertEqual(len(attivita), 1)
+        self.assertEqual(attivita[0]["plant"], "Valbrembo")
+        self.assertEqual(attivita[0]["orm_id"], local.pk)
+
+        list_resp = self.client.get(reverse("api_bridge_attivita_list"))
+        self.assertEqual(list_resp.status_code, 200)
+        self.assertEqual(len(list_resp.json()["data"]), 1)
+
+    def test_dataset_plant_filter_is_case_insensitive(self, _mock_status) -> None:
+        valbrembo = Stabilimento.objects.create(nome="Valbrembo", colore="#00aa00")
+        UserProfile.objects.create(user=self.user, stabilimento=valbrembo)
+        Attivita.objects.create(
+            commessa="B210",
+            item=1,
+            activity="Lowercase",
+            stabilimento="valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+        )
+
+        resp = self.client.get(reverse("api_bridge_attivita_list"))
+        plants = {row["plant"] for row in resp.json()["data"]}
+        self.assertEqual(plants, {"valbrembo"})
+
+    def test_dataset_without_profile_returns_all_activities(self, _mock_status) -> None:
+        Attivita.objects.create(
+            commessa="B220",
+            item=1,
+            activity="Altro",
+            stabilimento="Schio",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+        )
+        resp = self.client.get(reverse("api_bridge_attivita_list"))
+        self.assertEqual(len(resp.json()["data"]), 2)
+
+    def test_dataset_keeps_full_inventario_when_filtering_attivita(
+        self, _mock_status
+    ) -> None:
+        valbrembo = Stabilimento.objects.create(nome="Valbrembo", colore="#00aa00")
+        UserProfile.objects.create(user=self.user, stabilimento=valbrembo)
+        TestaItem.objects.create(uid="OV-T-SCHIO", model="TP60", plant="Schio")
+
+        resp = self.client.get(reverse("api_bridge_dataset"))
+        inventario = resp.json()["data"]["inventario"]
+        uids = {row["uid"] for row in inventario.get("Testa", [])}
+        self.assertIn("OV-T-SCHIO", uids)
+
+
+@patch("ui.views_bridge.get_status", side_effect=_ready_status)
+class BridgeInventoryWriteTest(TestCase):
+    def setUp(self) -> None:
+        self.user = User.objects.create_user("tablet-BR1", password="pass")
+        self.client = Client()
+        self.client.login(username="tablet-BR1", password="pass")
+        TestaItem.objects.create(uid="OV-T1", model="TP60", plant="Schio")
+
+    def test_create_component_at_user_plant(self, _mock_status) -> None:
+        resp = self.client.post(
+            reverse("api_bridge_inventario_create", kwargs={"table": "Testa"}),
+            data=json.dumps({"uid": "OV-T9", "model": "TP60", "plant": "Valbrembo"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        item = TestaItem.objects.get(uid="OV-T9")
+        self.assertEqual(item.plant, "Valbrembo")
+        self.assertEqual(item.model, "TP60")
+
+    def test_move_component_to_user_plant(self, _mock_status) -> None:
+        resp = self.client.patch(
+            reverse(
+                "api_bridge_inventario_detail",
+                kwargs={"table": "Testa", "uid": "OV-T1"},
+            ),
+            data=json.dumps({"plant": "Valbrembo"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        item = TestaItem.objects.get(uid="OV-T1")
+        self.assertEqual(item.plant, "Valbrembo")
+        self.assertEqual(item.model, "TP60")
+
+    def test_toggle_maintenance_on_testa(self, _mock_status) -> None:
+        resp = self.client.patch(
+            reverse(
+                "api_bridge_inventario_detail",
+                kwargs={"table": "Testa", "uid": "OV-T1"},
+            ),
+            data=json.dumps({"in_manutenzione": True}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        item = TestaItem.objects.get(uid="OV-T1")
+        self.assertTrue(item.in_manutenzione)
+
+        resp = self.client.patch(
+            reverse(
+                "api_bridge_inventario_detail",
+                kwargs={"table": "Testa", "uid": "OV-T1"},
+            ),
+            data=json.dumps({"in_manutenzione": False}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        item = TestaItem.objects.get(uid="OV-T1")
+        self.assertFalse(item.in_manutenzione)
+
+    def test_create_does_not_overwrite_existing_uid(self, _mock_status) -> None:
+        resp = self.client.post(
+            reverse("api_bridge_inventario_create", kwargs={"table": "Testa"}),
+            data=json.dumps({"uid": "OV-T1", "model": "TP70", "plant": "Valbrembo"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 409, resp.content)
+        self.assertFalse(resp.json().get("ok", True))
 
 
 class BridgeReadNotReadyTest(TestCase):

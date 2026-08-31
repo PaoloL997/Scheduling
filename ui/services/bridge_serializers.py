@@ -18,11 +18,13 @@ from ui.services.runtime_config import load_runtime_config
 from ui.views import _attivita_to_task_dict, _fetch_jobs
 
 
-def serialize_attivita_list() -> list[dict]:
-    """Return all activities with prefetched relations."""
+def serialize_attivita_list(stabilimento: str | None = None) -> list[dict]:
+    """Return activities with prefetched relations, optionally filtered by plant."""
     qs = Attivita.objects.prefetch_related("risorse", "problemi").order_by(
         "commessa", "item", "activity"
     )
+    if stabilimento and stabilimento.strip():
+        qs = qs.filter(stabilimento__iexact=stabilimento.strip())
     return [_attivita_to_task_dict(a) for a in qs]
 
 
@@ -174,10 +176,10 @@ def serialize_config_testa() -> list[dict]:
     return result
 
 
-def serialize_dataset() -> dict:
+def serialize_dataset(stabilimento: str | None = None) -> dict:
     """Full dataset snapshot for offline-friendly tablet sync."""
     return {
-        "attivita": serialize_attivita_list(),
+        "attivita": serialize_attivita_list(stabilimento),
         "jobs": serialize_jobs(),
         "inventario": serialize_inventario(),
         "stabilimenti": serialize_stabilimenti(),
