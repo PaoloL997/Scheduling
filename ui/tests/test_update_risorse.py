@@ -546,3 +546,42 @@ class PreselectDiversificationTest(TestCase):
         self.assertEqual(result["pre_tastatori"], {"TA_IDLE"})
         self.assertEqual(result["pre_maschere"], {"MA002"})
         self.assertEqual(result["pre_generatori"], {"G002"})
+
+
+class EarlyFinishAvailabilityTest(TestCase):
+    """Completed-early bookings do not hide resources after actual_finish."""
+
+    def setUp(self) -> None:
+        TestaItem.objects.create(uid="T001", model="HT200", plant="Valbrembo")
+        done = Attivita.objects.create(
+            commessa="C100",
+            item=1,
+            activity="A1",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 10),
+            actual_start=date(2026, 6, 1),
+            actual_finish=date(2026, 6, 5),
+            stabilimento="Valbrembo",
+            modello_testa="HT200",
+        )
+        RisorsaAttivita.objects.create(attivita=done, tipo="testa", risorsa_id="T001")
+
+    def test_resource_available_after_actual_finish(self) -> None:
+        result = get_available_resources(
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 6),
+            data_fine=date(2026, 6, 10),
+            modello_testa="HT200",
+        )
+        uids = {r["uid"] for r in result["teste"]}
+        self.assertIn("T001", uids)
+
+    def test_resource_still_occupied_during_actual_window(self) -> None:
+        result = get_available_resources(
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 3),
+            data_fine=date(2026, 6, 7),
+            modello_testa="HT200",
+        )
+        uids = {r["uid"] for r in result["teste"]}
+        self.assertNotIn("T001", uids)

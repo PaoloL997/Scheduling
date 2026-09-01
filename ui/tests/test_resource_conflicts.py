@@ -2,22 +2,34 @@
 
 import json
 from datetime import date
+from types import SimpleNamespace
 
 from django.contrib.auth.models import User
 from django.test import Client, RequestFactory, TestCase
 
 from ui.models import Attivita, Job, MppSyncQueue, RisorsaAttivita, TipoAttivita
+
 from ui.services.resource_conflicts import (
     ResourceAssignment,
     ResourceConflictError,
     find_conflicts,
     format_conflict_message,
+    occupied_resource_ids,
+    occupation_window,
     validate_no_conflicts,
 )
 from ui.views import api_tasks_update
 
 
-def _make_activity(commessa: str, item: int, di: str, df: str) -> Attivita:
+def _make_activity(
+    commessa: str,
+    item: int,
+    di: str,
+    df: str,
+    *,
+    actual_start: str | None = None,
+    actual_finish: str | None = None,
+) -> Attivita:
     """Create a persisted activity within a fixed date range.
 
     Args:
@@ -25,6 +37,8 @@ def _make_activity(commessa: str, item: int, di: str, df: str) -> Attivita:
         item: Item number.
         di: ISO start date.
         df: ISO end date.
+        actual_start: Optional ISO actual start.
+        actual_finish: Optional ISO actual finish.
 
     Returns:
         Attivita: The created instance.
@@ -35,6 +49,8 @@ def _make_activity(commessa: str, item: int, di: str, df: str) -> Attivita:
         activity="act",
         data_inizio=date.fromisoformat(di),
         data_fine=date.fromisoformat(df),
+        actual_start=date.fromisoformat(actual_start) if actual_start else None,
+        actual_finish=date.fromisoformat(actual_finish) if actual_finish else None,
     )
 
 
@@ -306,3 +322,235 @@ class ApiSalvaAttivitaConflictTest(TestCase):
             }
         )
         self.assertEqual(resp.status_code, 200)
+
+
+def _ns(**kwargs) -> SimpleNamespace:
+    """Build a duck-typed activity for occupation_window tests."""
+    fields = {
+        "data_inizio": None,
+        "data_fine": None,
+        "actual_start": None,
+        "actual_finish": None,
+    }
+    fields.update(kwargs)
+    return SimpleNamespace(**fields)
+
+
+class OccupationWindowTest(TestCase):
+    """occupation_window follows execution, not the planned calendar."""
+
+    def test_planned_only_uses_planned_range(self) -> None:
+        att = _ns(
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 10),
+        )
+        self.assertEqual(
+            occupation_window(att),
+            (date(2026, 6, 1), date(2026, 6, 10)),
+        )
+
+    def test_planned_missing_dates_returns_none(self) -> None:
+        self.assertIsNone(occupation_window(_ns(data_inizio=date(2026, 6, 1))))
+
+    def test_completed_early_ends_at_actual_finish(self) -> None:
+        att = _ns(
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 10),
+            actual_start=date(2026, 6, 1),
+            actual_finish=date(2026, 6, 5),
+        )
+        self.assertEqual(
+            occupation_window(att),
+            (date(2026, 6, 1), date(2026, 6, 5)),
+        )
+
+    def test_completed_uses_actual_start_when_present(self) -> None:
+        att = _ns(
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 10),
+            actual_start=date(2026, 6, 3),
+            actual_finish=date(2026, 6, 5),
+        )
+        self.assertEqual(
+            occupation_window(att),
+            (date(2026, 6, 3), date(2026, 6, 5)),
+        )
+
+    def test_in_progress_on_time_keeps_planned_end(self) -> None:
+        att = _ns(
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 10),
+            actual_start=date(2026, 6, 1),
+        )
+        self.assertEqual(
+            occupation_window(att),
+            (date(2026, 6, 1), date(2026, 6, 10)),
+        )
+
+    def test_in_progress_late_extends_to_effective_finish(self) -> None:
+        att = _ns(
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 10),
+            actual_start=date(2026, 6, 5),
+        )
+        self.assertEqual(
+            occupation_window(att),
+            (date(2026, 6, 5), date(2026, 6, 14)),
+        )
+
+    def test_in_progress_without_planned_end_occupies_one_day(self) -> None:
+        att = _ns(actual_start=date(2026, 6, 5))
+        self.assertEqual(
+            occupation_window(att),
+            (date(2026, 6, 5), date(2026, 6, 5)),
+        )
+
+
+class FindConflictsEarlyFinishTest(TestCase):
+    """Completed-early activities free resources after actual_finish."""
+
+    def test_no_conflict_after_actual_finish(self) -> None:
+        a = _make_activity(
+            "X001",
+            1,
+            "2026-06-01",
+            "2026-06-10",
+            actual_start="2026-06-01",
+            actual_finish="2026-06-05",
+        )
+        _book(a, "testa", "t1")
+        result = find_conflicts(
+            [("testa", "t1")],
+            date(2026, 6, 6),
+            date(2026, 6, 15),
+        )
+        self.assertEqual(result, [])
+
+    def test_conflict_inside_actual_window(self) -> None:
+        a = _make_activity(
+            "X001",
+            1,
+            "2026-06-01",
+            "2026-06-10",
+            actual_start="2026-06-01",
+            actual_finish="2026-06-05",
+        )
+        _book(a, "testa", "t1")
+        result = find_conflicts(
+            [("testa", "t1")],
+            date(2026, 6, 3),
+            date(2026, 6, 7),
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["data_inizio"], "2026-06-01")
+        self.assertEqual(result[0]["data_fine"], "2026-06-05")
+
+    def test_inclusive_boundary_on_actual_finish(self) -> None:
+        a = _make_activity(
+            "X001",
+            1,
+            "2026-06-01",
+            "2026-06-10",
+            actual_start="2026-06-01",
+            actual_finish="2026-06-05",
+        )
+        _book(a, "testa", "t1")
+        result = find_conflicts(
+            [("testa", "t1")],
+            date(2026, 6, 5),
+            date(2026, 6, 12),
+        )
+        self.assertEqual(len(result), 1)
+
+    def test_occupied_ids_free_after_actual_finish(self) -> None:
+        a = _make_activity(
+            "X001",
+            1,
+            "2026-06-01",
+            "2026-06-10",
+            actual_start="2026-06-01",
+            actual_finish="2026-06-05",
+        )
+        _book(a, "testa", "t1")
+        self.assertEqual(
+            occupied_resource_ids("testa", date(2026, 6, 6), date(2026, 6, 15)),
+            set(),
+        )
+        self.assertEqual(
+            occupied_resource_ids("testa", date(2026, 6, 1), date(2026, 6, 5)),
+            {"t1"},
+        )
+
+    def test_conflict_message_uses_occupancy_dates(self) -> None:
+        a = _make_activity(
+            "X001",
+            1,
+            "2026-06-01",
+            "2026-06-10",
+            actual_start="2026-06-01",
+            actual_finish="2026-06-05",
+        )
+        _book(a, "testa", "t1")
+        conflicts = find_conflicts(
+            [("testa", "t1")],
+            date(2026, 6, 3),
+            date(2026, 6, 7),
+        )
+        msg = format_conflict_message(conflicts)
+        self.assertIn("01/06/2026", msg)
+        self.assertIn("05/06/2026", msg)
+        self.assertNotIn("10/06/2026", msg)
+
+
+class FindConflictsInProgressDelayTest(TestCase):
+    """In-progress late starts occupy through effective_finish."""
+
+    def test_conflict_after_planned_end_while_delayed(self) -> None:
+        a = _make_activity(
+            "X001",
+            1,
+            "2026-06-01",
+            "2026-06-10",
+            actual_start="2026-06-05",
+        )
+        _book(a, "testa", "t1")
+        result = find_conflicts(
+            [("testa", "t1")],
+            date(2026, 6, 12),
+            date(2026, 6, 15),
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["data_inizio"], "2026-06-05")
+        self.assertEqual(result[0]["data_fine"], "2026-06-14")
+
+    def test_no_conflict_after_effective_finish(self) -> None:
+        a = _make_activity(
+            "X001",
+            1,
+            "2026-06-01",
+            "2026-06-10",
+            actual_start="2026-06-05",
+        )
+        _book(a, "testa", "t1")
+        result = find_conflicts(
+            [("testa", "t1")],
+            date(2026, 6, 15),
+            date(2026, 6, 20),
+        )
+        self.assertEqual(result, [])
+
+    def test_gap_before_late_start_is_free(self) -> None:
+        a = _make_activity(
+            "X001",
+            1,
+            "2026-06-01",
+            "2026-06-10",
+            actual_start="2026-06-05",
+        )
+        _book(a, "testa", "t1")
+        result = find_conflicts(
+            [("testa", "t1")],
+            date(2026, 6, 1),
+            date(2026, 6, 4),
+        )
+        self.assertEqual(result, [])
