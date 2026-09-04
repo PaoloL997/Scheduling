@@ -113,7 +113,11 @@ class RegistrationForm(UserCreationForm):
             stabilimento = None
             if stabilimento_name:
                 stabilimento = Stabilimento.objects.get(nome=stabilimento_name)
-            UserProfile.objects.create(user=user, stabilimento=stabilimento)
+            # The post_save signal already created the profile with the
+            # default read-only role; only the plant needs filling in.
+            UserProfile.objects.update_or_create(
+                user=user, defaults={"stabilimento": stabilimento}
+            )
         return user
 
 

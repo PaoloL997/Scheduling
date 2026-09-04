@@ -26,6 +26,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from ui.permissions import write_required
 from ui.services.excel_importer import parse_inventory_excel_generic
 from ui.services.inventory import (
     _TABLE_COLUMNS,
@@ -37,6 +38,7 @@ from ui.services.inventory import (
 logger = logging.getLogger(__name__)
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_inventario_import_excel(request: HttpRequest) -> JsonResponse:

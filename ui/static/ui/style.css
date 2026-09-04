@@ -3418,6 +3418,56 @@ a .nav-warn-badge {
   margin-top: 0.125rem;
 }
 
+.user-role-badge {
+  display: inline-block;
+  margin-top: 0.3rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-subtle);
+}
+.user-role-badge--admin {
+  color: var(--accent, var(--text));
+  border-color: var(--accent, var(--border));
+}
+.user-role-badge--lettura {
+  color: var(--text-muted);
+}
+
+#user-modal-readonly-note {
+  margin: 0 0 0.625rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+#user-modal-admin-link {
+  display: block;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text);
+  text-align: center;
+  text-decoration: none;
+}
+#user-modal-admin-link:hover {
+  background: var(--surface-2, var(--border));
+}
+
+/* Read-only accounts: hide every control that would mutate data.  The
+   server refuses the request anyway (ui.permissions), this only keeps the
+   UI honest — including rows rendered client-side after a fetch. */
+body.is-readonly .requires-write,
+body.is-readonly .btn-delete {
+  display: none !important;
+}
+
 #user-modal-logout {
   display: flex;
   align-items: center;

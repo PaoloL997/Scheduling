@@ -2,13 +2,13 @@
 
 import json
 
-from django.contrib.auth.models import User
 from django.test import Client, RequestFactory, TestCase
 from django.urls import reverse
 
 from ui.models import TipoAttivita
 from ui.services.activity_inventory import get_tipi_attivita, validate_activity_type
 from ui.views import api_tipi_attivita_create, api_tipi_attivita_detail
+from ui.tests.helpers import create_writer
 
 
 class GetTipiAttivitaTest(TestCase):
@@ -48,7 +48,7 @@ class TipiAttivitaApiTest(TestCase):
 
     def setUp(self) -> None:
         self.factory = RequestFactory()
-        self.user = User.objects.create_user(username="admin", password="p")
+        self.user = create_writer(username="admin", password="p")
 
     def test_create_and_update(self) -> None:
         req = self.factory.post(
@@ -96,7 +96,7 @@ class TipiAttivitaClientApiTest(TestCase):
 
     def setUp(self) -> None:
         self.client = Client()
-        self.user = User.objects.create_user(username="admin", password="p")
+        self.user = create_writer(username="admin", password="p")
         self.client.force_login(self.user)
 
     def test_create_via_client(self) -> None:
@@ -114,7 +114,7 @@ class ImpostazioniTipiAttivitaSectionTest(TestCase):
 
     def setUp(self) -> None:
         self.client = Client()
-        self.user = User.objects.create_user(username="settings", password="p")
+        self.user = create_writer(username="settings", password="p")
         self.client.force_login(self.user)
 
     def test_section_is_present(self) -> None:

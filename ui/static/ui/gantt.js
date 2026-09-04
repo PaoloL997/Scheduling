@@ -1548,6 +1548,8 @@
     }
 
     openDeadlineEditor(jobId, cx, cy) {
+      // Read-only accounts may not change delivery dates (see ui.permissions).
+      if (window.CAN_WRITE === false) return;
       const pop = this.el('dl-popover');
       if (!pop) return;
       const nameEl = this.el('dl-job-id-name');

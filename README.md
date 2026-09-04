@@ -45,6 +45,25 @@ jobs.xlsx   ─┘                              │
 ### WPS integration
 Activities can have a WPS (Welding Procedure Specification) PDF attached. The app uses the **Gemini API** to extract bore dimensions and tube pitch from the PDF, pre-filling the resource selection step of the activity wizard.
 
+## Access layers
+
+Every account carries one of three permission layers, stored on `UserProfile.ruolo`:
+
+| Layer | Can view | Can add/edit commesse, attività, inventory, settings | Admin panel |
+|-------|----------|------------------------------------------------------|-------------|
+| `admin` | ✅ | ✅ | ✅ |
+| `scrittura` | ✅ | ✅ | ❌ |
+| `lettura` | ✅ | ❌ | ❌ |
+
+New accounts start as `lettura`. An admin assigns the layer from the Django admin panel
+(`/admin/`), either inline on the user page or from the **Profilo e permessi** list; saving
+the role syncs `is_staff` / `is_superuser` so only admins can reach the panel.
+
+Enforcement lives in `ui/permissions.py`: the `write_required` / `admin_required`
+decorators wrap every mutating view (web app and tablet bridge) and answer HTTP 403 —
+with a JSON body for `/api/` endpoints. Templates additionally hide the controls a
+read-only account cannot use.
+
 ## Resource overlaps
 
 When a late start makes two activities share a resource:

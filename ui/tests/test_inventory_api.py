@@ -8,11 +8,13 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from ui.models import GeneratoreItem, MppSyncQueue
+from ui.tests.helpers import create_writer
 
 
 class InventoryApiTest(TestCase):
     def setUp(self) -> None:
         self.client = Client()
+        self.client.force_login(create_writer("inventarista"))
         GeneratoreItem.objects.create(
             uid="G100",
             model="g1",

@@ -25,6 +25,7 @@ from ui.services.activity_inventory import get_available_resources
 from ui.services.inventory import patch_resource
 from ui.services.optimization_problem import _fetch_inventory, reservations_for_excluded
 from ui.services.writeback import _apply_add_resource, _apply_update_resource
+from ui.tests.helpers import create_writer
 
 _data_import = importlib.import_module("src.data.import")
 
@@ -32,6 +33,7 @@ _data_import = importlib.import_module("src.data.import")
 class MaintenanceApiTest(TestCase):
     def setUp(self) -> None:
         self.client = Client()
+        self.client.force_login(create_writer("manutentore"))
         GeneratoreItem.objects.create(
             uid="G100", model="g1", plant="Valbrembo", notes="originale"
         )

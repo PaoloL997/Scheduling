@@ -15,7 +15,7 @@
         <button type="button" class="toggle-btn" data-ott-view="spiegazione" aria-pressed="false">Spiegazione</button>
         {% endif %}
       </div>
-      <button type="button" id="ott-res-accept" class="btn ott-res-accept-btn">Accetta</button>
+      {% if can_write %}<button type="button" id="ott-res-accept" class="btn ott-res-accept-btn">Accetta</button>{% endif %}
     </div>
   </header>
   <div id="ott-res-accept-error" class="ott-res-accept-error" hidden></div>

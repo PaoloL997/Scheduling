@@ -19,6 +19,7 @@ from src.optimization.feasibility import check_feasibility
 from src.optimization.solver import schedule
 
 from ui.models import Stabilimento
+from ui.permissions import write_required
 from ui.services.runtime_config import load_runtime_config
 from ui.services.optimization_problem import (
     OptimizationProblemError,
@@ -532,7 +533,7 @@ def api_ottimizzazione_spiegazione(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"ok": True, "explanation": explanation, "cached": False})
 
 
-@login_required
+@write_required
 @require_http_methods(["POST"])
 def api_ottimizzazione_accetta(request: HttpRequest) -> JsonResponse:
     """Apply the proposed optimization schedule to planning records."""

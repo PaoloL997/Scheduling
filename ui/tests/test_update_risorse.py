@@ -23,6 +23,7 @@ from ui.services.activity_inventory import get_available_resources
 from ui.services.bridge_write import BridgeWriteError, update_attivita
 from ui.views import api_tasks_update
 from ui.views_attivita import api_get_risorse
+from ui.tests.helpers import create_writer
 
 
 class UpdateAttivitaRisorseTest(TestCase):
@@ -326,7 +327,7 @@ class StrictRequirementsTest(TestCase):
 class ApiTasksUpdateRisorseTest(TestCase):
     def setUp(self) -> None:
         self.factory = RequestFactory()
-        self.user = User.objects.create_user("web", password="pass")
+        self.user = create_writer("web", password="pass")
         self.att = Attivita.objects.create(
             commessa="C100",
             item=1,

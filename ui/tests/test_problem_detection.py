@@ -12,6 +12,7 @@ from ui.models import (
 )
 from ui.services.activity_inventory import get_testa_min_requirements
 from ui.services.problem_detection import detect_and_save_problems
+from ui.tests.helpers import write_user
 
 
 class GetTestaMinRequirementsTest(TestCase):
@@ -297,7 +298,9 @@ class DetectSpostamentoProblemsTest(TestCase):
             ).exists()
         )
 
-        resp = Client().patch(
+        client = Client()
+        client.force_login(write_user())
+        resp = client.patch(
             reverse(
                 "api_inventario_detail",
                 kwargs={"table": "Testa", "uid": "T1"},

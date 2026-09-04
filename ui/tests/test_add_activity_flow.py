@@ -3,7 +3,6 @@
 import json
 from datetime import date
 
-from django.contrib.auth.models import User
 from django.test import Client, TestCase
 
 from ui.models import (
@@ -15,6 +14,7 @@ from ui.models import (
     TipoAttivita,
 )
 from ui.services.activity_inventory import find_modello_testa_in_db, get_testa_models
+from ui.tests.helpers import create_writer
 
 
 class GetTestaModelsTests(TestCase):
@@ -57,7 +57,7 @@ class AddActivityFlowTests(TestCase):
 
     def setUp(self) -> None:
         self.client = Client()
-        self.user = User.objects.create_user(username="planner", password="p")
+        self.user = create_writer(username="planner", password="p")
         self.client.force_login(self.user)
         TipoAttivita.objects.create(nome="Qualifica")
 

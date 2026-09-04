@@ -20,9 +20,11 @@
       <div class="inv-head-actions">
         <input id="inv-search" class="pian-search-input inv-search-input" type="search" placeholder="Cerca…" oninput="filterActiveTable()" aria-label="Cerca risorse">
         <div class="inv-add-wrap">
+          {% if can_write %}
           <button id="btn-add" class="btn btn-primary" onclick="toggleAddDropdown(event)">
             Aggiungi
           </button>
+          {% endif %}
           <div id="add-dropdown" style="display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px hsl(0,0%,0%,0.25);min-width:180px;overflow:hidden;">
             <button class="add-dropdown-item" onclick="openManualAddModal()">Aggiungi manualmente</button>
             <button class="add-dropdown-item" onclick="openImportModal()">Importa da Excel</button>
@@ -54,9 +56,9 @@
               <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
               <td class="td-muted">{{ row.notes|default:"—" }}</td>
               <td class="inv-maint-cell">
-                <button type="button" class="inv-maint-switch{% if row.in_manutenzione %} is-on{% endif %}" role="switch" aria-checked="{% if row.in_manutenzione %}true{% else %}false{% endif %}" aria-label="Manutenzione" onclick="toggleMaintenance('Generatore', '{{ row.uid }}', this)"><span class="inv-maint-knob"></span></button>
+                <button type="button" class="inv-maint-switch{% if row.in_manutenzione %} is-on{% endif %}"{% if not can_write %} disabled title="Accesso in sola lettura"{% endif %} role="switch" aria-checked="{% if row.in_manutenzione %}true{% else %}false{% endif %}" aria-label="Manutenzione" onclick="toggleMaintenance('Generatore', '{{ row.uid }}', this)"><span class="inv-maint-knob"></span></button>
               </td>
-              <td style="text-align:center;"><button class="btn-delete" onclick="deleteRow('Generatore', '{{ row.uid }}', this)" title="Elimina">🗑</button></td>
+              <td style="text-align:center;">{% if can_write %}<button class="btn-delete" onclick="deleteRow('Generatore', '{{ row.uid }}', this)" title="Elimina">🗑</button>{% endif %}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -88,7 +90,7 @@
               <td>{{ row.diameter|default:"—" }}</td>
               <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
               <td class="td-muted">{{ row.notes|default:"—" }}</td>
-              <td style="text-align:center;"><button class="btn-delete" onclick="deleteRow('Mandrino', '{{ row.uid }}', this)" title="Elimina">🗑</button></td>
+              <td style="text-align:center;">{% if can_write %}<button class="btn-delete" onclick="deleteRow('Mandrino', '{{ row.uid }}', this)" title="Elimina">🗑</button>{% endif %}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -120,7 +122,7 @@
               <td>{{ row.pitch|default:"—" }}</td>
               <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
               <td class="td-right">{{ row.center_distance|default:"—" }}</td>
-              <td style="text-align:center;"><button class="btn-delete" onclick="deleteRow('Maschera', '{{ row.uid }}', this)" title="Elimina">🗑</button></td>
+              <td style="text-align:center;">{% if can_write %}<button class="btn-delete" onclick="deleteRow('Maschera', '{{ row.uid }}', this)" title="Elimina">🗑</button>{% endif %}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -152,7 +154,7 @@
               <td>{{ row.diameter|default:"—" }}</td>
               <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
               <td class="td-muted">{{ row.notes|default:"—" }}</td>
-              <td style="text-align:center;"><button class="btn-delete" onclick="deleteRow('Tastatore', '{{ row.uid }}', this)" title="Elimina">🗑</button></td>
+              <td style="text-align:center;">{% if can_write %}<button class="btn-delete" onclick="deleteRow('Tastatore', '{{ row.uid }}', this)" title="Elimina">🗑</button>{% endif %}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -186,9 +188,9 @@
               <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
               <td class="td-muted">{{ row.notes|default:"—" }}</td>
               <td class="inv-maint-cell">
-                <button type="button" class="inv-maint-switch{% if row.in_manutenzione %} is-on{% endif %}" role="switch" aria-checked="{% if row.in_manutenzione %}true{% else %}false{% endif %}" aria-label="Manutenzione" onclick="toggleMaintenance('Testa', '{{ row.uid }}', this)"><span class="inv-maint-knob"></span></button>
+                <button type="button" class="inv-maint-switch{% if row.in_manutenzione %} is-on{% endif %}"{% if not can_write %} disabled title="Accesso in sola lettura"{% endif %} role="switch" aria-checked="{% if row.in_manutenzione %}true{% else %}false{% endif %}" aria-label="Manutenzione" onclick="toggleMaintenance('Testa', '{{ row.uid }}', this)"><span class="inv-maint-knob"></span></button>
               </td>
-              <td style="text-align:center;"><button class="btn-delete" onclick="deleteRow('Testa', '{{ row.uid }}', this)" title="Elimina">🗑</button></td>
+              <td style="text-align:center;">{% if can_write %}<button class="btn-delete" onclick="deleteRow('Testa', '{{ row.uid }}', this)" title="Elimina">🗑</button>{% endif %}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -286,7 +288,7 @@
     </div>
     <div class="det-footer">
       <div id="det-view-btns">
-        <button class="btn btn-primary" onclick="enterEditMode()">Modifica</button>
+        {% if can_write %}<button class="btn btn-primary" onclick="enterEditMode()">Modifica</button>{% endif %}
       </div>
       <div id="det-edit-btns" style="display:none; gap:0.5rem;">
         <button class="btn btn-ghost" onclick="cancelEdit()">Annulla</button>
@@ -409,7 +411,8 @@
   function maintSwitchHtml(table, uid, on) {
     var pressed = on ? 'true' : 'false';
     var cls = on ? 'inv-maint-switch is-on' : 'inv-maint-switch';
-    return '<button type="button" class="' + cls + '" role="switch" aria-checked="' + pressed +
+    var disabled = window.CAN_WRITE ? '' : ' disabled title="Accesso in sola lettura"';
+    return '<button type="button" class="' + cls + '"' + disabled + ' role="switch" aria-checked="' + pressed +
            '" aria-label="Manutenzione" onclick="toggleMaintenance(\'' + esc(table) + '\',\'' +
            esc(uid) + '\', this)"><span class="inv-maint-knob"></span></button>';
   }
