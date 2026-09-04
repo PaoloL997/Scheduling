@@ -20,6 +20,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from ui.models import Attivita, MppSyncQueue, RisorsaAttivita
+from ui.permissions import write_required
 from ui.services.activity_inventory import (
     find_modello_testa_in_db,
     get_available_resources,
@@ -36,7 +37,7 @@ logger = logging.getLogger(__name__)
 # ── AJAX: analizza WPS ────────────────────────────────────────────────────────
 
 
-@login_required
+@write_required
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_analizza_wps(request: HttpRequest) -> JsonResponse:
@@ -240,7 +241,7 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
 # ── AJAX: salva attività ──────────────────────────────────────────────────────
 
 
-@login_required
+@write_required
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_salva_attivita(request: HttpRequest) -> JsonResponse:

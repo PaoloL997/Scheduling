@@ -160,7 +160,30 @@ class TipoAttivita(models.Model):
 
 
 class UserProfile(models.Model):
-    """Extended profile data for a Django auth user."""
+    """Extended profile data for a Django auth user.
+
+    ``ruolo`` implements the three access layers of the application:
+
+    * ``admin`` — full write access plus the Django admin panel, where user
+      permissions are assigned.
+    * ``scrittura`` — can create and edit commesse, attività, inventory and
+      settings, but cannot reach the admin panel.
+    * ``lettura`` — read-only: every mutating endpoint is refused.
+
+    The role is kept in sync with ``User.is_staff`` / ``User.is_superuser``
+    by :func:`ui.permissions.sync_user_flags`, so promoting a user to
+    ``admin`` is enough to grant admin-panel access.
+    """
+
+    RUOLO_LETTURA = "lettura"
+    RUOLO_SCRITTURA = "scrittura"
+    RUOLO_ADMIN = "admin"
+
+    RUOLO_CHOICES = [
+        (RUOLO_LETTURA, "Lettura"),
+        (RUOLO_SCRITTURA, "Scrittura"),
+        (RUOLO_ADMIN, "Admin"),
+    ]
 
     user = models.OneToOneField(
         "auth.User",
@@ -174,16 +197,31 @@ class UserProfile(models.Model):
         blank=True,
         related_name="utenti",
     )
+    ruolo = models.CharField(
+        max_length=20,
+        choices=RUOLO_CHOICES,
+        default=RUOLO_LETTURA,
+    )
 
     class Meta:
         """Table metadata for UserProfile."""
 
         db_table = "user_profile"
 
+    @property
+    def is_admin(self) -> bool:
+        """Return ``True`` when the profile grants admin-panel access."""
+        return self.ruolo == self.RUOLO_ADMIN
+
+    @property
+    def can_write(self) -> bool:
+        """Return ``True`` when the profile grants write access."""
+        return self.ruolo in {self.RUOLO_SCRITTURA, self.RUOLO_ADMIN}
+
     def __str__(self) -> str:
         """Return a readable profile identifier."""
         stab = self.stabilimento.nome if self.stabilimento_id else "—"
-        return f"{self.user.username} ({stab})"
+        return f"{self.user.username} ({stab}, {self.get_ruolo_display()})"
 
 
 class RisorsaAttivita(models.Model):

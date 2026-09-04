@@ -55,6 +55,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "ui.context_processors.open_problems",
+                "ui.context_processors.user_permissions",
             ],
         },
     },

@@ -10,7 +10,14 @@
     <link rel="stylesheet" href="{% static 'ui/style.css' %}">
     {% block extra_head %}{% endblock %}
 </head>
-<body>
+<body{% if user.is_authenticated and not can_write %} class="is-readonly"{% endif %} data-ruolo="{{ user_ruolo }}">
+
+<script>
+    /* Permission layer of the signed-in user: "admin", "scrittura", "lettura". */
+    window.USER_RUOLO = "{{ user_ruolo|escapejs }}";
+    window.CAN_WRITE = {{ can_write|yesno:"true,false" }};
+    window.IS_ADMIN = {{ is_admin_user|yesno:"true,false" }};
+</script>
 
 <nav id="navbar">
     <div id="navbar-brand">
@@ -43,8 +50,15 @@
             <div>
                 <div id="user-modal-fullname">{% if user.get_full_name %}{{ user.get_full_name }}{% else %}{{ user.username }}{% endif %}</div>
                 <div id="user-modal-username">@{{ user.username }}</div>
+                <div id="user-modal-role" class="user-role-badge user-role-badge--{{ user_ruolo }}">{{ user_ruolo_label }}</div>
             </div>
         </div>
+        {% if not can_write %}
+        <p id="user-modal-readonly-note">Il tuo account può solo consultare i dati. Per modificarli chiedi a un amministratore di assegnarti i permessi di scrittura.</p>
+        {% endif %}
+        {% if is_admin_user %}
+        <a id="user-modal-admin-link" href="{% url 'admin:index' %}">Pannello admin</a>
+        {% endif %}
         <form method="post" action="{% url 'logout' %}">
             {% csrf_token %}
             <button type="submit" id="user-modal-logout">

@@ -12,6 +12,7 @@ from django.urls import reverse
 
 from ui.models import Attivita, Job, MppSyncQueue, Stabilimento, TestaItem, UserProfile
 from ui.services.importer import ImportStatus
+from ui.tests.helpers import create_writer
 
 
 def _ready_status():
@@ -100,7 +101,9 @@ class BridgeReadTest(TestCase):
 
     def test_dataset_filters_attivita_by_user_plant(self, _mock_status) -> None:
         valbrembo = Stabilimento.objects.create(nome="Valbrembo", colore="#00aa00")
-        UserProfile.objects.create(user=self.user, stabilimento=valbrembo)
+        UserProfile.objects.update_or_create(
+            user=self.user, defaults={"stabilimento": valbrembo}
+        )
         local = Attivita.objects.create(
             commessa="B200",
             item=1,
@@ -131,7 +134,9 @@ class BridgeReadTest(TestCase):
 
     def test_dataset_plant_filter_is_case_insensitive(self, _mock_status) -> None:
         valbrembo = Stabilimento.objects.create(nome="Valbrembo", colore="#00aa00")
-        UserProfile.objects.create(user=self.user, stabilimento=valbrembo)
+        UserProfile.objects.update_or_create(
+            user=self.user, defaults={"stabilimento": valbrembo}
+        )
         Attivita.objects.create(
             commessa="B210",
             item=1,
@@ -161,7 +166,9 @@ class BridgeReadTest(TestCase):
         self, _mock_status
     ) -> None:
         valbrembo = Stabilimento.objects.create(nome="Valbrembo", colore="#00aa00")
-        UserProfile.objects.create(user=self.user, stabilimento=valbrembo)
+        UserProfile.objects.update_or_create(
+            user=self.user, defaults={"stabilimento": valbrembo}
+        )
         TestaItem.objects.create(uid="OV-T-SCHIO", model="TP60", plant="Schio")
 
         resp = self.client.get(reverse("api_bridge_dataset"))
@@ -173,7 +180,7 @@ class BridgeReadTest(TestCase):
 @patch("ui.views_bridge.get_status", side_effect=_ready_status)
 class BridgeInventoryWriteTest(TestCase):
     def setUp(self) -> None:
-        self.user = User.objects.create_user("tablet-BR1", password="pass")
+        self.user = create_writer("tablet-BR1", password="pass")
         self.client = Client()
         self.client.login(username="tablet-BR1", password="pass")
         TestaItem.objects.create(uid="OV-T1", model="TP60", plant="Schio")
@@ -253,7 +260,7 @@ class BridgeReadNotReadyTest(TestCase):
 @patch("ui.views_bridge.get_status", side_effect=_ready_status)
 class BridgeWriteTest(TestCase):
     def setUp(self) -> None:
-        self.user = User.objects.create_user("writer", password="pass")
+        self.user = create_writer("writer", password="pass")
         self.client = Client()
         self.client.login(username="writer", password="pass")
         self.att = Attivita.objects.create(
@@ -326,7 +333,7 @@ class BridgeWriteTest(TestCase):
 
 class BridgeImportTest(TestCase):
     def setUp(self) -> None:
-        self.user = User.objects.create_user("importer", password="pass")
+        self.user = create_writer("importer", password="pass")
         self.client = Client()
         self.client.login(username="importer", password="pass")
 

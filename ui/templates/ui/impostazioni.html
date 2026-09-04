@@ -14,7 +14,9 @@
                 <span class="settings-accordion-label">Stabilimenti</span>
                 <span class="settings-accordion-count">{{ stabilimenti|length }}</span>
             </button>
+            {% if can_write %}
             <button type="button" class="btn btn-primary" onclick="openModal('stabilimento', null)">Aggiungi</button>
+            {% endif %}
         </div>
         <div class="settings-accordion-panel" id="panel-stabilimenti" hidden>
         <div class="settings-accordion-panel-inner">
@@ -35,8 +37,8 @@
                         {{ s.colore }}
                     </td>
                     <td class="actions">
-                        <button class="btn btn-ghost" title="Modifica" onclick="openModal('stabilimento', {{ s.id }})">Modifica</button>
-                        <button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete('stabilimento', {{ s.id }}, '{{ s.nome|escapejs }}')">Elimina</button>
+                        {% if can_write %}<button class="btn btn-ghost" title="Modifica" onclick="openModal('stabilimento', {{ s.id }})">Modifica</button>{% endif %}
+                        {% if can_write %}<button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete('stabilimento', {{ s.id }}, '{{ s.nome|escapejs }}')">Elimina</button>{% endif %}
                     </td>
                 </tr>
                 {% empty %}
@@ -59,7 +61,9 @@
                 <span class="settings-accordion-label">Responsabili</span>
                 <span class="settings-accordion-count">{{ responsabili|length }}</span>
             </button>
+            {% if can_write %}
             <button type="button" class="btn btn-primary" onclick="openModal('responsabile', null)">Aggiungi</button>
+            {% endif %}
         </div>
         <div class="settings-accordion-panel" id="panel-responsabili" hidden>
         <div class="settings-accordion-panel-inner">
@@ -75,8 +79,8 @@
                 <tr data-id="{{ r.id }}">
                     <td>{{ r.nome }}</td>
                     <td class="actions">
-                        <button class="btn btn-ghost" title="Modifica" onclick="openModal('responsabile', {{ r.id }})">Modifica</button>
-                        <button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete('responsabile', {{ r.id }}, '{{ r.nome|escapejs }}')">Elimina</button>
+                        {% if can_write %}<button class="btn btn-ghost" title="Modifica" onclick="openModal('responsabile', {{ r.id }})">Modifica</button>{% endif %}
+                        {% if can_write %}<button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete('responsabile', {{ r.id }}, '{{ r.nome|escapejs }}')">Elimina</button>{% endif %}
                     </td>
                 </tr>
                 {% empty %}
@@ -99,7 +103,9 @@
                 <span class="settings-accordion-label">Tipi attività</span>
                 <span class="settings-accordion-count">{{ tipi_attivita|length }}</span>
             </button>
+            {% if can_write %}
             <button type="button" class="btn btn-primary" onclick="openModal('tipo-attivita', null)">Aggiungi</button>
+            {% endif %}
         </div>
         <div class="settings-accordion-panel" id="panel-tipi-attivita" hidden>
         <div class="settings-accordion-panel-inner">
@@ -115,8 +121,8 @@
                 <tr data-id="{{ t.id }}">
                     <td>{{ t.nome }}</td>
                     <td class="actions">
-                        <button class="btn btn-ghost" title="Modifica" onclick="openModal('tipo-attivita', {{ t.id }})">Modifica</button>
-                        <button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete('tipo-attivita', {{ t.id }}, '{{ t.nome|escapejs }}')">Elimina</button>
+                        {% if can_write %}<button class="btn btn-ghost" title="Modifica" onclick="openModal('tipo-attivita', {{ t.id }})">Modifica</button>{% endif %}
+                        {% if can_write %}<button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete('tipo-attivita', {{ t.id }}, '{{ t.nome|escapejs }}')">Elimina</button>{% endif %}
                     </td>
                 </tr>
                 {% empty %}
@@ -139,7 +145,9 @@
                 <span class="settings-accordion-label">Configurazione modelli testa</span>
                 <span class="settings-accordion-count">{{ configurazioni_teste|length }}</span>
             </button>
+            {% if can_write %}
             <button type="button" class="btn btn-primary" onclick="openModal('config-testa', null)">Aggiungi</button>
+            {% endif %}
         </div>
         <div class="settings-accordion-panel" id="panel-config-testa" hidden>
         <div class="settings-accordion-panel-inner settings-accordion-panel-inner--wide">
@@ -166,9 +174,10 @@
                                     data-gen-id="{{ gen.id }}"
                                     data-modello="{{ gen.modello_generatore|escapejs }}"
                                     data-cfg-id="{{ item.cfg.id }}"
-                                    title="Clicca per rimuovere"
+                                    {% if can_write %}title="Clicca per rimuovere"{% else %}disabled title="Accesso in sola lettura"{% endif %}
                                     onclick="removeGeneratore({{ gen.id }}, {{ item.cfg.id }})">{{ gen.modello_generatore }} ✕</button>
                             {% endfor %}
+                            {% if can_write %}
                             {% for mod in item.disponibili %}
                             <button class="chip chip--available"
                                     data-modello="{{ mod|escapejs }}"
@@ -176,6 +185,7 @@
                                     title="Clicca per aggiungere"
                                     onclick="addGeneratore('{{ mod|escapejs }}', {{ item.cfg.id }})">+ {{ mod }}</button>
                             {% endfor %}
+                            {% endif %}
                             {% if not item.aggiunti and not item.disponibili %}
                             <span class="chips-empty">Nessun generatore disponibile</span>
                             {% endif %}
@@ -186,8 +196,8 @@
                     <td style="text-align:center;" id="min-maschere-{{ item.cfg.id }}">{{ item.cfg.min_maschere }}</td>
                     <td style="text-align:center;" id="min-generatori-{{ item.cfg.id }}">{{ item.cfg.min_generatori }}</td>
                     <td class="actions">
-                        <button class="btn btn-ghost" title="Modifica risorse minime" onclick="openEditTesta({{ item.cfg.id }})">Modifica</button>
-                        <button class="btn btn-danger-ghost" title="Elimina" onclick="deleteConfigTesta({{ item.cfg.id }}, '{{ item.cfg.modello_testa|escapejs }}')">Elimina</button>
+                        {% if can_write %}<button class="btn btn-ghost" title="Modifica risorse minime" onclick="openEditTesta({{ item.cfg.id }})">Modifica</button>{% endif %}
+                        {% if can_write %}<button class="btn btn-danger-ghost" title="Elimina" onclick="deleteConfigTesta({{ item.cfg.id }}, '{{ item.cfg.modello_testa|escapejs }}')">Elimina</button>{% endif %}
                     </td>
                 </tr>
                 {% empty %}
@@ -509,8 +519,8 @@ function toggleSettingsAccordion(btn) {
                 '<td>' + escHtml(data.nome) + '</td>' +
                 '<td><span class="color-swatch" style="background:' + escHtml(data.colore) + ';"></span>' + escHtml(data.colore) + '</td>' +
                 '<td class="actions">' +
-                  '<button class="btn btn-ghost" title="Modifica" onclick="openModal(\'stabilimento\',' + data.id + ')">Modifica</button>' +
-                  '<button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete(\'stabilimento\',' + data.id + ',\'' + escJs(data.nome) + '\')">Elimina</button>' +
+                  '{% if can_write %}<button class="btn btn-ghost" title="Modifica" onclick="openModal(\'stabilimento\',' + data.id + ')">Modifica</button>{% endif %}' +
+                  '{% if can_write %}<button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete(\'stabilimento\',' + data.id + ',\'' + escJs(data.nome) + '\')">Elimina</button>{% endif %}' +
                 '</td>';
 
             closeModal("stabilimento");
@@ -557,8 +567,8 @@ function toggleSettingsAccordion(btn) {
             tr.innerHTML =
                 '<td>' + escHtml(data.nome) + '</td>' +
                 '<td class="actions">' +
-                  '<button class="btn btn-ghost" title="Modifica" onclick="openModal(\'responsabile\',' + data.id + ')">Modifica</button>' +
-                  '<button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete(\'responsabile\',' + data.id + ',\'' + escJs(data.nome) + '\')">Elimina</button>' +
+                  '{% if can_write %}<button class="btn btn-ghost" title="Modifica" onclick="openModal(\'responsabile\',' + data.id + ')">Modifica</button>{% endif %}' +
+                  '{% if can_write %}<button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete(\'responsabile\',' + data.id + ',\'' + escJs(data.nome) + '\')">Elimina</button>{% endif %}' +
                 '</td>';
 
             closeModal("responsabile");
@@ -605,8 +615,8 @@ function toggleSettingsAccordion(btn) {
             tr.innerHTML =
                 '<td>' + escHtml(data.nome) + '</td>' +
                 '<td class="actions">' +
-                  '<button class="btn btn-ghost" title="Modifica" onclick="openModal(\'tipo-attivita\',' + data.id + ')">Modifica</button>' +
-                  '<button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete(\'tipo-attivita\',' + data.id + ',\'' + escJs(data.nome) + '\')">Elimina</button>' +
+                  '{% if can_write %}<button class="btn btn-ghost" title="Modifica" onclick="openModal(\'tipo-attivita\',' + data.id + ')">Modifica</button>{% endif %}' +
+                  '{% if can_write %}<button class="btn btn-danger-ghost" title="Elimina" onclick="confirmDelete(\'tipo-attivita\',' + data.id + ',\'' + escJs(data.nome) + '\')">Elimina</button>{% endif %}' +
                 '</td>';
 
             closeModal("tipo-attivita");
@@ -728,11 +738,11 @@ function toggleSettingsAccordion(btn) {
                 ' data-gen-id="' + g.id + '"' +
                 ' data-modello="' + escHtml(g.modello) + '"' +
                 ' data-cfg-id="' + cfgId + '"' +
-                ' title="Clicca per rimuovere"' +
+                (window.CAN_WRITE ? ' title="Clicca per rimuovere"' : ' disabled title="Accesso in sola lettura"') +
                 ' onclick="removeGeneratore(' + g.id + ',' + cfgId + ')">' +
                 escHtml(g.modello) + ' ✕</button>';
         });
-        (st.disponibili || []).forEach(function (m) {
+        (window.CAN_WRITE ? (st.disponibili || []) : []).forEach(function (m) {
             html +=
                 '<button class="chip chip--available"' +
                 ' data-modello="' + escHtml(m) + '"' +
@@ -928,8 +938,8 @@ function toggleSettingsAccordion(btn) {
                     '<td style="text-align:center;" id="min-maschere-' + data.id + '">' + data.min_maschere + '</td>' +
                     '<td style="text-align:center;" id="min-generatori-' + data.id + '">' + data.min_generatori + '</td>' +
                     '<td class="actions">' +
-                      '<button class="btn btn-ghost" onclick="openEditTesta(' + data.id + ')">Modifica</button>' +
-                      '<button class="btn btn-danger-ghost" onclick="deleteConfigTesta(' + data.id + ',\'' + escJs(data.modello_testa) + '\')">Elimina</button>' +
+                      '{% if can_write %}<button class="btn btn-ghost" onclick="openEditTesta(' + data.id + ')">Modifica</button>{% endif %}' +
+                      '{% if can_write %}<button class="btn btn-danger-ghost" onclick="deleteConfigTesta(' + data.id + ',\'' + escJs(data.modello_testa) + '\')">Elimina</button>{% endif %}' +
                     '</td>';
                 tbody.appendChild(tr);
                 rebuildChips(data.id);

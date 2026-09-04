@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 
-from django.contrib.auth.models import User
 from django.test import Client, TestCase
 
 from ui.models import Attivita, Job
 from ui.views import _parse_job_money, _parse_job_penalty
+from ui.tests.helpers import create_writer
 
 
 class ParseJobMoneyTest(TestCase):
@@ -42,7 +42,7 @@ class ParseJobPenaltyTest(TestCase):
 
 class JobsUpdateApiTest(TestCase):
     def setUp(self) -> None:
-        self.user = User.objects.create_user("jobapi", password="pass")
+        self.user = create_writer("jobapi", password="pass")
         self.client = Client()
         self.client.force_login(self.user)
         self.job = Job.objects.create(

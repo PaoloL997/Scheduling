@@ -12,6 +12,7 @@ from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from ui.permissions import deny_if_read_only, write_required
 from ui.services.bridge_write import (
     BridgeWriteError,
     delete_attivita,
@@ -716,6 +717,7 @@ def api_heartbeat(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"ok": True})
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_inventario_add(request: HttpRequest, table: str) -> JsonResponse:
@@ -767,6 +769,7 @@ def api_inventario_add(request: HttpRequest, table: str) -> JsonResponse:
     return JsonResponse({"ok": True, "uid": uid}, status=201)
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["PUT", "PATCH", "DELETE"])
 def api_inventario_detail(request: HttpRequest, table: str, uid: str) -> JsonResponse:
@@ -857,6 +860,7 @@ def api_inventario_detail(request: HttpRequest, table: str, uid: str) -> JsonRes
     return JsonResponse({"ok": True, "uid": new_uid})
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["PUT"])
 def api_tasks_update(request: HttpRequest) -> JsonResponse:
@@ -899,7 +903,7 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"ok": True, **result})
 
 
-@login_required
+@write_required
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_jobs_create(request: HttpRequest) -> JsonResponse:
@@ -987,7 +991,7 @@ def api_jobs_create(request: HttpRequest) -> JsonResponse:
     )
 
 
-@login_required
+@write_required
 @csrf_exempt
 @require_http_methods(["PUT"])
 def api_jobs_update(request: HttpRequest) -> JsonResponse:
@@ -1157,6 +1161,7 @@ def api_app_settings(request: HttpRequest) -> JsonResponse:
 _reconcile_delete = reconcile_delete
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["DELETE"])
 def api_attivita_delete(request: HttpRequest) -> JsonResponse:
@@ -1202,6 +1207,7 @@ def api_attivita_delete(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"ok": True})
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["DELETE"])
 def api_jobs_delete(request: HttpRequest) -> JsonResponse:
@@ -1380,6 +1386,9 @@ def api_commesse_deadline(request: HttpRequest) -> JsonResponse:
         request: The incoming request.
     """
     if request.method == "POST":
+        denied = deny_if_read_only(request)
+        if denied is not None:
+            return denied
         return _handle_deadline_update(request)
     rows = Job.objects.values("job_id", "delivery_date")
     return JsonResponse({r["job_id"]: r["delivery_date"] for r in rows})
@@ -1471,6 +1480,7 @@ def impostazioni(request: HttpRequest):
     )
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_stabilimenti_create(request: HttpRequest) -> JsonResponse:
@@ -1507,6 +1517,7 @@ def api_stabilimenti_create(request: HttpRequest) -> JsonResponse:
     )
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["PUT", "DELETE"])
 def api_stabilimenti_detail(request: HttpRequest, pk: int) -> JsonResponse:
@@ -1557,6 +1568,7 @@ def api_stabilimenti_detail(request: HttpRequest, pk: int) -> JsonResponse:
     )
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_responsabili_create(request: HttpRequest) -> JsonResponse:
@@ -1588,6 +1600,7 @@ def api_responsabili_create(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"ok": True, "id": obj.pk, "nome": obj.nome}, status=201)
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["PUT", "DELETE"])
 def api_responsabili_detail(request: HttpRequest, pk: int) -> JsonResponse:
@@ -1633,6 +1646,7 @@ def api_responsabili_detail(request: HttpRequest, pk: int) -> JsonResponse:
     return JsonResponse({"ok": True, "id": obj.pk, "nome": obj.nome})
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_tipi_attivita_create(request: HttpRequest) -> JsonResponse:
@@ -1664,6 +1678,7 @@ def api_tipi_attivita_create(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"ok": True, "id": obj.pk, "nome": obj.nome}, status=201)
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["PUT", "DELETE"])
 def api_tipi_attivita_detail(request: HttpRequest, pk: int) -> JsonResponse:
@@ -1711,6 +1726,7 @@ def api_tipi_attivita_detail(request: HttpRequest, pk: int) -> JsonResponse:
 # ── Configurazione Testa ──────────────────────────────────────────────────────
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_config_testa_create(request: HttpRequest) -> JsonResponse:
@@ -1769,6 +1785,7 @@ def api_config_testa_create(request: HttpRequest) -> JsonResponse:
     )
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["PUT", "DELETE"])
 def api_config_testa_detail(request: HttpRequest, pk: int) -> JsonResponse:
@@ -1819,6 +1836,7 @@ def api_config_testa_detail(request: HttpRequest, pk: int) -> JsonResponse:
     )
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_gen_compatibile_create(request: HttpRequest, config_pk: int) -> JsonResponse:
@@ -1866,6 +1884,7 @@ def api_gen_compatibile_create(request: HttpRequest, config_pk: int) -> JsonResp
     )
 
 
+@write_required
 @csrf_exempt
 @require_http_methods(["DELETE"])
 def api_gen_compatibile_detail(request: HttpRequest, pk: int) -> JsonResponse:
@@ -1939,7 +1958,7 @@ def api_attivita_problemi(request: HttpRequest, pk: int) -> JsonResponse:
     return JsonResponse({"ok": True, "problemi": problemi})
 
 
-@login_required
+@write_required
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_overlap_reschedule_accept(request: HttpRequest, pk: int) -> JsonResponse:
@@ -1976,7 +1995,7 @@ def api_overlap_reschedule_accept(request: HttpRequest, pk: int) -> JsonResponse
     return JsonResponse({"ok": True, **result})
 
 
-@login_required
+@write_required
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_overlap_reschedule_reject(request: HttpRequest, pk: int) -> JsonResponse:

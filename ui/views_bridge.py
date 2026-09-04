@@ -12,6 +12,12 @@ from django.test import RequestFactory
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from ui.permissions import (
+    WRITE_DENIED_MESSAGE,
+    get_ruolo,
+    has_write_access,
+    is_admin_user,
+)
 from ui.services.bridge_import import request_import
 from ui.services.bridge_serializers import (
     serialize_app_settings,
@@ -36,7 +42,7 @@ _factory = RequestFactory()
 
 
 def _user_payload(user) -> dict:
-    """Serialize core user fields for bridge auth responses."""
+    """Serialize core user fields and permission layer for bridge auth responses."""
     return {
         "id": user.pk,
         "username": user.username,
@@ -44,6 +50,9 @@ def _user_payload(user) -> dict:
         "last_name": user.last_name,
         "email": user.email,
         "stabilimento": user_stabilimento_name(user),
+        "ruolo": get_ruolo(user),
+        "can_write": has_write_access(user),
+        "is_admin": is_admin_user(user),
     }
 
 
@@ -83,12 +92,19 @@ def bridge_read_guard(view):
 
 
 def bridge_write_guard(view):
-    """Require authenticated user and READY import status for mutating endpoints."""
+    """Require write permission and READY import status for mutating endpoints.
+
+    Read-only accounts (``lettura`` layer) are refused with HTTP 403 before
+    the dataset status is even considered, so the tablet can show a clear
+    "sola lettura" message.
+    """
 
     @wraps(view)
     @login_required
     @csrf_exempt
     def wrapper(request: HttpRequest, *args, **kwargs):
+        if not has_write_access(request.user):
+            return _err(WRITE_DENIED_MESSAGE, status=403)
         status = get_status()
         if status == ImportStatus.WRITING:
             return _err("Write-back in corso.", status=409)
@@ -196,7 +212,14 @@ def api_bridge_status(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST"])
 @login_required
 def api_bridge_import(request: HttpRequest) -> JsonResponse:
-    """Trigger a fresh MPP/XLSX import."""
+    """Trigger a fresh MPP/XLSX import.
+
+    Re-importing replaces the working dataset, so it is reserved to accounts
+    with write permission.
+    """
+    if not has_write_access(request.user):
+        return _err(WRITE_DENIED_MESSAGE, status=403)
+
     parsed = _parse_json(request)
     if isinstance(parsed, JsonResponse):
         return parsed

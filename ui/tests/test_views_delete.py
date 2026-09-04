@@ -5,16 +5,19 @@ import json
 from django.test import TestCase, RequestFactory
 
 from ui.models import Attivita, Job, MppSyncQueue
+from ui.tests.helpers import write_user
 from ui.views import api_attivita_delete, api_jobs_delete
 
 
 def _delete_request(factory: RequestFactory, body: dict):
-    """Build a DELETE request with a JSON body."""
-    return factory.delete(
+    """Build a DELETE request with a JSON body, signed by a write user."""
+    request = factory.delete(
         "/fake/",
         data=json.dumps(body),
         content_type="application/json",
     )
+    request.user = write_user()
+    return request
 
 
 class AttivitaDeleteImportedTest(TestCase):

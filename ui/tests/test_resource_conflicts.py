@@ -4,7 +4,6 @@ import json
 from datetime import date
 from types import SimpleNamespace
 
-from django.contrib.auth.models import User
 from django.test import Client, RequestFactory, TestCase
 
 from ui.models import Attivita, Job, MppSyncQueue, RisorsaAttivita, TipoAttivita
@@ -19,6 +18,7 @@ from ui.services.resource_conflicts import (
     validate_no_conflicts,
 )
 from ui.views import api_tasks_update
+from ui.tests.helpers import create_writer, write_user
 
 
 def _make_activity(
@@ -224,12 +224,14 @@ class ApiTasksUpdateConflictTest(TestCase):
         _book(self.b, "testa", "t1")
 
     def _put(self, body: dict):
-        """Build a PUT request with a JSON body."""
-        return self.factory.put(
+        """Build a PUT request with a JSON body, signed by a write user."""
+        request = self.factory.put(
             "/fake/",
             data=json.dumps(body),
             content_type="application/json",
         )
+        request.user = write_user()
+        return request
 
     def test_conflict_returns_409(self) -> None:
         req = self._put({"orm_id": self.a.pk, "finish": "2026-06-22"})
@@ -266,7 +268,7 @@ class ApiSalvaAttivitaConflictTest(TestCase):
 
     def setUp(self) -> None:
         self.client = Client()
-        self.user = User.objects.create_user(username="u", password="p")
+        self.user = create_writer(username="u", password="p")
         self.client.force_login(self.user)
         TipoAttivita.objects.create(nome="act")
         self.existing = _make_activity("X001", 1, "2026-06-01", "2026-06-10")

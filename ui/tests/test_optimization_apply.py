@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import date
 
-from django.contrib.auth.models import User
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -23,6 +22,7 @@ from ui.services.optimization_apply import (
     solver_resource_id_to_assignment,
 )
 from ui.views_ottimizzazione import SESSION_EXPLANATION_KEY, SESSION_RESULT_KEY
+from ui.tests.helpers import create_writer
 
 
 def _seed_inventory() -> None:
@@ -220,7 +220,7 @@ class ApplyOptimizationResultTest(TestCase):
 class OptimizationAcceptApiTest(TestCase):
     def setUp(self) -> None:
         _seed_inventory()
-        self.user = User.objects.create_user("acceptuser", password="pass")
+        self.user = create_writer("acceptuser", password="pass")
         self.client = Client()
         self.client.force_login(self.user)
         Job.objects.create(commessa="T011", delivery_date="2026-12-31")
