@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-07
+
+### Added
+
+- **TP60 Custom (Sporgenza Tubo-Piastra)** flag in the add-activity wizard, under the *Misure Gemini* card. Resources are still pre-selected as usual, but consumables left unselected (mandrini, tastatori, maschere) no longer raise an `acquisto` problem. Stored on `Attivita.tp60_custom`.
+
 ## 2026-09-04
 
 ### Added

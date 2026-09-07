@@ -1972,6 +1972,29 @@ a .nav-warn-badge {
 /* Measured fields lose bottom margin inside card */
 .wiz-meas-grid .wiz-field { margin-bottom: 0; }
 
+/* Optional flag rendered under the measurements grid (e.g. TP60 Custom) */
+.wiz-flag-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.875rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid hsl(220 10% 22%);
+  cursor: pointer;
+}
+.wiz-flag-check input[type="checkbox"] {
+  margin: 0.15rem 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.wiz-flag-check-text { display: flex; flex-direction: column; gap: 0.15rem; }
+.wiz-flag-check-title { font-size: 0.8125rem; color: var(--text); }
+.wiz-flag-check-hint {
+  font-size: 0.6875rem;
+  color: var(--text-subtle);
+  line-height: 1.35;
+}
+
 /* AI-filled field highlight */
 .wiz-field input.is-ai-fill,
 .wiz-field select.is-ai-fill {
