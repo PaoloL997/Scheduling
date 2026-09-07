@@ -45,6 +45,7 @@ _TIPO_TO_CAT: dict[str, str] = {tipo: cat for cat, tipo in _CAT_TO_TIPO.items()}
 
 _SPOSTAMENTO_RESOLVED_NOTE = "Risorsa spostata allo stabilimento di lavorazione."
 _STALE_CONDITION_NOTE = "Condizione non piu verificata dopo aggiornamento attivita."
+_RITARDO_RESOLVED_NOTE = "Attivita avviata o ripianificata."
 
 
 def _shortfall_description(
@@ -344,18 +345,40 @@ def _peer_identity(attivita) -> dict:
     }
 
 
+def _overlap_roles(first, second) -> tuple:
+    """Return ``(late, blocked)`` for an overlapping pair.
+
+    *blocked* is the activity that can still be moved: the one that has not
+    started.  When both have started (or neither has), the one planned to
+    start later is the blocked side; ``pk`` breaks a remaining tie so the
+    pair is always ordered deterministically.
+    """
+    first_started = bool(first.actual_start)
+    second_started = bool(second.actual_start)
+    if first_started != second_started:
+        return (first, second) if first_started else (second, first)
+
+    first_start = first.data_inizio or date.max
+    second_start = second.data_inizio or date.max
+    if first_start != second_start:
+        return (first, second) if first_start < second_start else (second, first)
+    return (first, second) if first.pk < second.pk else (second, first)
+
+
 def find_resource_overlaps(activities: list | None = None) -> dict[int, list[dict]]:
-    """Compute delay-caused resource overlaps without persisting notes.
+    """Compute resource overlaps from the shared occupancy windows.
 
-    Activity **X** (has ``actual_start``) occupies its resources until
-    ``effective_finish(X)``.  Activity **Y** conflicts when it is distinct,
-    starts on or after ``X.data_inizio``, starts before that effective
-    finish, and shares at least one assigned resource.
+    Two activities conflict when their
+    :func:`~ui.services.resource_conflicts.occupation_window` intervals
+    intersect and they share at least one assigned resource.  That single
+    definition covers every case: a delayed activity holding a resource past
+    its planned end, a completed one releasing it at ``actual_finish``, and a
+    never-started one still holding its planned window.
 
-    The visual window is
-    ``[Y.data_inizio, min(Y.data_fine, effective_finish(X))]``.
-    The same payload is attached to both activities (``role`` is ``late``
-    on X and ``blocked`` on Y).
+    The same payload is attached to both activities, with ``role`` set to
+    ``late`` on the reserving side and ``blocked`` on the side that should
+    move (see :func:`_overlap_roles`).  Pairs whose blocked side is already
+    finished are skipped: there is nothing left to reschedule.
 
     Args:
         activities: Optional prefetched :class:`~ui.models.Attivita` list.
@@ -366,50 +389,42 @@ def find_resource_overlaps(activities: list | None = None) -> dict[int, list[dic
         descriptors.  Activities without overlaps are omitted.
     """
     from ui.models import Attivita
+    from ui.services.resource_conflicts import occupation_window
 
     if activities is None:
         activities = list(Attivita.objects.prefetch_related("risorse"))
 
     pairs = {a.pk: _resource_pairs(a) for a in activities}
-    result: dict[int, list[dict]] = {}
-    seen_pairs: set[tuple[int, int]] = set()
+    windows: dict[int, tuple[date, date]] = {}
+    for att in activities:
+        if not pairs[att.pk]:
+            continue
+        window = occupation_window(att)
+        if window is not None:
+            windows[att.pk] = window
 
-    for late in activities:
-        fine = effective_finish(late)
-        if fine is None or not late.data_inizio:
-            continue
-        late_pairs = pairs[late.pk]
-        if not late_pairs:
-            continue
-        for blocked in activities:
-            if blocked.pk == late.pk or not blocked.data_inizio:
+    ordered = [a for a in activities if a.pk in windows]
+    result: dict[int, list[dict]] = {}
+
+    for index, first in enumerate(ordered):
+        first_start, first_end = windows[first.pk]
+        for second in ordered[index + 1 :]:
+            second_start, second_end = windows[second.pk]
+            if first_start > second_end or second_start > first_end:
                 continue
-            if blocked.data_inizio < late.data_inizio or blocked.data_inizio >= fine:
-                continue
-            # Same planned start and both started: emit the pair once.
-            if (
-                blocked.actual_start
-                and blocked.data_inizio == late.data_inizio
-                and blocked.pk < late.pk
-            ):
-                continue
-            pair_key = (min(late.pk, blocked.pk), max(late.pk, blocked.pk))
-            if pair_key in seen_pairs:
-                continue
-            shared = late_pairs & pairs[blocked.pk]
+            shared = pairs[first.pk] & pairs[second.pk]
             if not shared:
                 continue
-            seen_pairs.add(pair_key)
-            overlap_end = fine
-            if blocked.data_fine:
-                overlap_end = min(blocked.data_fine, fine)
+            late, blocked = _overlap_roles(first, second)
+            if blocked.actual_finish:
+                continue
             resources = [
                 _serialize_overlap_resource(tipo, uid) for tipo, uid in sorted(shared)
             ]
             base = {
                 "resources": resources,
-                "overlap_start": blocked.data_inizio.isoformat(),
-                "overlap_end": overlap_end.isoformat(),
+                "overlap_start": max(first_start, second_start).isoformat(),
+                "overlap_end": min(first_end, second_end).isoformat(),
             }
             result.setdefault(late.pk, []).append(
                 {**base, **_peer_identity(blocked), "role": "late"}
@@ -420,6 +435,98 @@ def find_resource_overlaps(activities: list | None = None) -> dict[int, list[dic
     return result
 
 
+def overdue_not_started(attivita, today: date | None = None) -> bool:
+    """Return whether an activity is past its planned finish and never started.
+
+    Args:
+        attivita: The :class:`~ui.models.Attivita` to test.
+        today: Reference date; defaults to :meth:`datetime.date.today`.
+
+    Returns:
+        bool: ``True`` when no actual date is set and ``data_fine`` is in the
+            past.
+    """
+    if attivita.actual_start or attivita.actual_finish:
+        return False
+    if not attivita.data_fine:
+        return False
+    return attivita.data_fine < (today or date.today())
+
+
+def _overdue_description(attivita) -> str:
+    """Italian description for a never-started, past-due activity."""
+    return (
+        "Non iniziata: la fine prevista era il "
+        f"{attivita.data_fine.strftime('%d/%m/%Y')}. Le risorse restano "
+        "prenotate finche' l'attivita' non viene avviata o ripianificata."
+    )
+
+
+def sync_overdue_problems(
+    activities: list | None = None,
+    today: date | None = None,
+) -> int:
+    """Create or close ``ritardo`` notes for never-started, past-due activities.
+
+    The condition is re-evaluated on every call: a note closes as soon as the
+    activity is started or its planned window is moved forward, mirroring the
+    reconciliation used for ``acquisto`` / ``spostamento``.
+
+    Args:
+        activities: Optional prefetched :class:`~ui.models.Attivita` list.
+        today: Reference date; defaults to :meth:`datetime.date.today`.
+
+    Returns:
+        int: Number of new :class:`~ui.models.ProblemaAttivita` rows created.
+    """
+    from django.utils import timezone
+    from ui.models import Attivita, ProblemaAttivita
+
+    if activities is None:
+        activities = list(Attivita.objects.all())
+    reference = today or date.today()
+
+    desired = {att.pk: att for att in activities if overdue_not_started(att, reference)}
+
+    now = timezone.now()
+    seen: set[int] = set()
+    for problema in ProblemaAttivita.objects.filter(
+        tipo=ProblemaAttivita.TIPO_RITARDO,
+        risolto=False,
+    ):
+        att = desired.get(problema.attivita_id)
+        if att is None:
+            problema.risolto = True
+            problema.note_risoluzione = _RITARDO_RESOLVED_NOTE
+            problema.data_risoluzione = now
+            problema.save(
+                update_fields=["risolto", "note_risoluzione", "data_risoluzione"]
+            )
+            continue
+        seen.add(problema.attivita_id)
+        descrizione = _overdue_description(att)
+        if problema.descrizione != descrizione:
+            problema.descrizione = descrizione
+            problema.bloccata_fino = att.data_fine
+            problema.save(update_fields=["descrizione", "bloccata_fino"])
+
+    to_create = [
+        ProblemaAttivita(
+            attivita=att,
+            tipo=ProblemaAttivita.TIPO_RITARDO,
+            risorsa_tipo="",
+            risorsa_uid="",
+            descrizione=_overdue_description(att),
+            bloccata_fino=att.data_fine,
+        )
+        for pk, att in desired.items()
+        if pk not in seen
+    ]
+    if to_create:
+        ProblemaAttivita.objects.bulk_create(to_create)
+    return len(to_create)
+
+
 def detect_for_all_activities() -> int:
     """Run problem detection for every activity in the database.
 
@@ -427,8 +534,10 @@ def detect_for_all_activities() -> int:
     open ``acquisto`` / ``spostamento`` notes stay aligned with current
     assignments.  Stale open notes are auto-resolved; new conditions create
     fresh rows.  Delay overlaps are auto-swapped when possible; remaining
-    ones become open ``sovrapposizione`` problems.  Resolved swap notes
-    are kept.
+    ones become open ``sovrapposizione`` problems.  Never-started activities
+    past their planned finish raise a ``ritardo`` note (both handled inside
+    :func:`~ui.services.overlap_reassign.auto_resolve_resource_overlaps`).
+    Resolved swap notes are kept.
 
     Returns:
         int: Total number of new :class:`~ui.models.ProblemaAttivita` rows
@@ -440,7 +549,7 @@ def detect_for_all_activities() -> int:
     auto_resolve_resource_overlaps()
 
     total = 0
-    activitas = Attivita.objects.prefetch_related("risorse").all()
+    activitas = list(Attivita.objects.prefetch_related("risorse").all())
     for a in activitas:
         total += refresh_problems_for_attivita(a)
 
@@ -472,6 +581,7 @@ def restore_resolved_notes() -> int:
         ProblemaAttivita.TIPO_SPOSTAMENTO,
         ProblemaAttivita.TIPO_ACQUISTO,
         ProblemaAttivita.TIPO_MANUTENZIONE,
+        ProblemaAttivita.TIPO_RITARDO,
     }
     for r in resoluzioni:
         if r.tipo in skipped_types:

@@ -257,7 +257,8 @@
     const planS = t.start ? new Date(t.start + 'T00:00:00') : null;
     if (actS && actF) return false;
     const startedLate = !!(actS && planS && actS > planS);
-    const overdue = !!(!actS && planS && today > planS);
+    // Server uses ``today >= data_inizio`` (ui/views.py); keep both in step.
+    const overdue = !!(!actS && planS && today >= planS);
     return startedLate || overdue;
   }
 
@@ -1357,6 +1358,9 @@
           const isCompleted = !!(row.actual_start && row.actual_finish);
           const isOverdue = !isStarted && today >= planS;
           const isLate = !!(row.actual_start && parseDate(row.actual_start) > planS);
+          // Never started and already past the planned finish: the plan is
+          // stale. Mirrors _compute_activity_status in ui/views.py.
+          const isExpired = !isStarted && !row.actual_finish && today > planF;
           const boxStrokeW = (!self.simplified && isOverdue) ? '1.5' : (changed ? '2' : '1');
           const boxStrokeOp = theme.barStrokeOpacity;
 
@@ -1434,6 +1438,7 @@
             else {
               if (isLate || isOverdue) badges.push({ text: 'IN RITARDO', color: RED });
               if (isStarted) badges.push({ text: 'IN LAVORAZIONE', color: SLATE });
+              else if (isExpired) badges.push({ text: 'NON INIZIATA · SCADUTA', color: 'hsl(18,90%,48%)' });
               else badges.push({ text: isOverdue ? 'DA INIZIARE' : 'PIANIFICATA', color: SLATE });
             }
             let bx = Math.max(badgeAnchorX, clipL) + BADGE_PAD;

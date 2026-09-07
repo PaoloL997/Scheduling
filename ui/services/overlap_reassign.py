@@ -5,9 +5,10 @@ is reassigned to a compatible free item if one exists.  Successful swaps are
 recorded as resolved notes; remaining overlaps become open problems with no
 resolution action yet.
 
-Occupancy includes the delayed finish
-(:func:`~ui.services.problem_detection.effective_finish`), not only the
-planned ``data_inizio``/``data_fine`` window.
+Occupancy comes from the single shared definition in
+:func:`ui.services.resource_conflicts.occupation_window`, so a delayed
+activity holds its resources past the planned end and a completed one
+releases them at ``actual_finish``.
 """
 
 from __future__ import annotations
@@ -21,9 +22,13 @@ from ui.services.problem_detection import (
     _TIPO_TO_CAT,
     _resource_pairs,
     _serialize_overlap_resource,
-    effective_finish,
     find_resource_overlaps,
+    overdue_not_started,
+    sync_overdue_problems,
 )
+
+#: Problem types whose open rows carry a single-activity reschedule proposal.
+_RESCHEDULABLE_TIPI = ("sovrapposizione", "ritardo")
 
 
 class OverlapReassignError(Exception):
@@ -34,48 +39,24 @@ class OverlapReassignError(Exception):
         self.status_code = status_code
 
 
-def _occupation_window(attivita) -> tuple[date, date] | None:
-    """Return the occupancy interval used for overlap suggestions.
-
-    Completed activities (actual start and finish) occupy nothing.
-    Delayed activities occupy ``[data_inizio, max(data_fine, effective_finish)]``.
-    """
-    if attivita.actual_start and attivita.actual_finish:
-        return None
-    if not (attivita.data_inizio and attivita.data_fine):
-        return None
-    end = attivita.data_fine
-    fine = effective_finish(attivita)
-    if fine is not None and fine > end:
-        end = fine
-    return attivita.data_inizio, end
-
-
 def occupied_ids_with_delay(
     tipo: str,
     data_inizio: date,
     data_fine: date,
     exclude_activity_id: int | None,
-    activities: list,
-    pairs: dict[int, set[tuple[str, str]]],
+    activities: list | None = None,
+    pairs: dict[int, set[tuple[str, str]]] | None = None,
 ) -> set[str]:
     """Resource IDs of *tipo* occupying ``[data_inizio, data_fine]``.
 
-    Union of planned-date bookings and delay-extended occupation.
+    Thin wrapper kept for call-site compatibility: occupancy now has a single
+    definition in :func:`ui.services.resource_conflicts.occupation_window`,
+    which :func:`~ui.services.resource_conflicts.occupied_resource_ids`
+    already applies.  ``activities`` and ``pairs`` are accepted and ignored.
     """
     from ui.services.resource_conflicts import occupied_resource_ids
 
-    occupied = occupied_resource_ids(tipo, data_inizio, data_fine, exclude_activity_id)
-    for att in activities:
-        if exclude_activity_id is not None and att.pk == exclude_activity_id:
-            continue
-        window = _occupation_window(att)
-        if window is None:
-            continue
-        start, end = window
-        if start <= data_fine and end >= data_inizio:
-            occupied.update(uid for t, uid in pairs.get(att.pk, set()) if t == tipo)
-    return occupied
+    return occupied_resource_ids(tipo, data_inizio, data_fine, exclude_activity_id)
 
 
 def _inventory_model(tipo):
@@ -621,14 +602,13 @@ def _sync_open_overlap_problems(
         att = by_id.get(pk)
         if att is None:
             continue
-        # The overlap problem belongs to the activity still to start (the one
-        # that can be rescheduled): the already-started peer only reserves the
-        # resource, it is not itself flagged.
-        if att.actual_start is not None:
-            continue
         for item in items:
-            peer_id = item.get("peer_activity_id") or ""
+            # The note belongs to the side that can still be moved; the peer
+            # only reserves the resource and is not itself flagged.
             role = item.get("role") or "blocked"
+            if role != "blocked":
+                continue
+            peer_id = item.get("peer_activity_id") or ""
             for res in item.get("resources") or []:
                 tipo = res.get("tipo") or ""
                 uid = res.get("uid") or ""
@@ -751,7 +731,14 @@ def auto_resolve_resource_overlaps() -> dict:
     overlaps = find_resource_overlaps(activities)
     if not overlaps:
         _sync_open_overlap_problems({}, activities)
-        return {"swapped_blocked_ids": [], "activity_updates": {}}
+        overdue_pks = {a.pk for a in activities if overdue_not_started(a)}
+        sync_overdue_problems(activities)
+        _sync_reschedule_proposals({}, overdue_pks)
+        updates = {
+            str(att.pk): _activity_update_payload(att)
+            for att in Attivita.objects.filter(pk__in=overdue_pks)
+        }
+        return {"swapped_blocked_ids": [], "activity_updates": updates}
 
     enrich_overlaps_with_suggestions(overlaps, activities)
     swapped_ids: list[int] = []
@@ -786,9 +773,12 @@ def auto_resolve_resource_overlaps() -> dict:
     activities = list(Attivita.objects.prefetch_related("risorse"))
     remaining = find_resource_overlaps(activities)
     _sync_open_overlap_problems(remaining, activities)
-    _sync_reschedule_proposals(remaining)
+    overdue_pks = {a.pk for a in activities if overdue_not_started(a)}
+    sync_overdue_problems(activities)
+    _sync_reschedule_proposals(remaining, overdue_pks)
     for pk in remaining:
         affected.add(pk)
+    affected |= overdue_pks
 
     updates = {}
     if affected:
@@ -977,13 +967,18 @@ def propose_reschedule(blocked_pk: int) -> dict | None:
     }
 
 
-def _sync_reschedule_proposals(remaining: dict[int, list[dict]]) -> None:
-    """Compute and persist reschedule proposals on open overlap problems.
+def _sync_reschedule_proposals(
+    remaining: dict[int, list[dict]],
+    extra_pks: set[int] | None = None,
+) -> None:
+    """Compute and persist reschedule proposals on open problems.
 
-    Only activities in the ``blocked`` role are re-planned. The solver runs
-    only when at least one open ``sovrapposizione`` row for the activity has no
-    proposal yet (``proposta_json is None``): already-computed or user-rejected
-    proposals are left untouched, so a plain gantt reload never re-solves.
+    Activities in the ``blocked`` role of an overlap are re-planned, as are
+    those in *extra_pks* (never-started activities past their planned finish).
+    The solver runs only when at least one open ``sovrapposizione`` /
+    ``ritardo`` row for the activity has no proposal yet
+    (``proposta_json is None``): already-computed or user-rejected proposals
+    are left untouched, so a plain gantt reload never re-solves.
     """
     from ui.models import ProblemaAttivita
 
@@ -992,12 +987,13 @@ def _sync_reschedule_proposals(remaining: dict[int, list[dict]]) -> None:
         for pk, items in remaining.items()
         if any(it.get("role") == "blocked" for it in items)
     }
+    blocked_pks |= extra_pks or set()
     if not blocked_pks:
         return
 
     rows_by_pk: dict[int, list[ProblemaAttivita]] = defaultdict(list)
     for row in ProblemaAttivita.objects.filter(
-        tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+        tipo__in=_RESCHEDULABLE_TIPI,
         risolto=False,
         attivita_id__in=blocked_pks,
     ):
@@ -1018,7 +1014,7 @@ def _stored_proposal(blocked_pk: int) -> dict | None:
 
     for row in ProblemaAttivita.objects.filter(
         attivita_id=blocked_pk,
-        tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+        tipo__in=_RESCHEDULABLE_TIPI,
         risolto=False,
     ):
         payload = row.proposta_json
@@ -1065,7 +1061,7 @@ def reject_reschedule(blocked_pk: int) -> dict:
     count = 0
     for row in ProblemaAttivita.objects.filter(
         attivita_id=blocked_pk,
-        tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+        tipo__in=_RESCHEDULABLE_TIPI,
         risolto=False,
     ):
         if (

@@ -148,14 +148,9 @@
                 </span>
                 <span class="pian-col-date pian-col-date--actual-start">{{ task.actual_start|default:"—" }}</span>
                 <span class="pian-col-date pian-col-date--actual-finish">{{ task.actual_finish|default:"—" }}</span>
+                {# Single source of truth: _compute_activity_status in ui/views.py. #}
                 <span class="pian-col-status">
-                  {% if task.actual_finish %}
-                    <span class="status-pill status-pill--completata">COMPLETATA</span>
-                  {% elif task.actual_start %}
-                    <span class="status-pill status-pill--in_lavorazione">IN LAVORAZIONE</span>
-                  {% else %}
-                    {% for pill in task.status_pills %}<span class="status-pill status-pill--{{ pill.key }}">{{ pill.label }}</span>{% empty %}<span class="status-pill status-pill--da_iniziare">DA INIZIARE</span>{% endfor %}
-                  {% endif %}
+                  {% for pill in task.status_pills %}<span class="status-pill status-pill--{{ pill.key }}">{{ pill.label }}</span>{% empty %}<span class="status-pill status-pill--da_iniziare">DA INIZIARE</span>{% endfor %}
                 </span>
                 <span class="pian-col-stab stab-plant-cell" data-stab="{{ task.plant|default:'' }}">{{ task.plant|default:"—" }}</span>
                 <span class="pian-col-resp">{{ task.responsible|default:"—" }}</span>
@@ -2001,7 +1996,16 @@ const _RISORSE_LAST_OPTS = { s5: null, rp: null };
 const _RISORSE_RELAXED = { s5: {}, rp: {} };
 const _RISORSE_RELAXED_CACHE = { s5: null, rp: null };
 let _RISORSE_ACTIVE_PREFIX = 's5';
-let _RISORSE_TARGET = null;
+// One selection target per flow: 's5' is the wizard, 'rp' the edit picker.
+// A single shared global used to leak the wizard's state into the picker.
+const _RISORSE_TARGETS = { s5: null, rp: null };
+// Resources the activity already had when the picker opened: they must survive
+// the availability filters, otherwise confirming would delete the booking.
+const _RISORSE_ORIGINAL = { s5: {}, rp: {} };
+
+function _risorseTarget(prefix) {
+  return _RISORSE_TARGETS[prefix] || null;
+}
 
 const TIPO_TO_CAT = {
   testa: 'teste',
@@ -2085,7 +2089,12 @@ function _shortfallNoteHtml(catKey, selected, min, available) {
 async function _loadRisorse(prefix, opts) {
   const dom = _risorseDom(prefix);
   _RISORSE_ACTIVE_PREFIX = prefix;
-  _RISORSE_TARGET = opts.risorseTarget;
+  _RISORSE_TARGETS[prefix] = opts.risorseTarget;
+  _RISORSE_ORIGINAL[prefix] = opts.useServerPreselect
+    ? {}
+    : Object.fromEntries(
+        _RISORSE_CAT_KEYS.map(c => [c, [...((opts.risorseTarget || {})[c] || [])]])
+      );
   _RISORSE_LAST_OPTS[prefix] = { ...opts, risorseTarget: opts.risorseTarget };
   _RISORSE_RELAXED[prefix] = {};
   _RISORSE_RELAXED_CACHE[prefix] = null;
@@ -2223,17 +2232,42 @@ async function _s5LoadRisorse() {
   });
 }
 
+const _RISORSA_REASONS = {
+  manutenzione:      ['in manutenzione',  'Attualmente in manutenzione.'],
+  occupata:          ['occupata',         'Gia\u0300 impegnata da un\u2019altra attivita\u0300 nel periodo.'],
+  non_compatibile:   ['fuori requisiti',  'Non soddisfa i requisiti di modello/misura dell\u2019attivita\u0300.'],
+  altro_stabilimento:['altro stabilimento', 'Si trova in uno stabilimento diverso da quello dell\u2019attivita\u0300.'],
+  non_elencata:      ['non piu\u0300 in elenco', 'Non risulta piu\u0300 fra le risorse disponibili.'],
+};
+
+function _risorsaReasonLabel(r) {
+  const hit = _RISORSA_REASONS[r.unavailable_reason];
+  return hit ? `assegnata \u00b7 ${hit[0]}` : 'assegnata';
+}
+
+function _risorsaReasonTitle(r) {
+  const hit = _RISORSA_REASONS[r.unavailable_reason];
+  return hit
+    ? `Risorsa attualmente assegnata a questa attivita\u0300. ${hit[1]}`
+    : 'Risorsa attualmente assegnata a questa attivita\u0300.';
+}
+
 function _resourceUid(r) {
   return r.uid || r.id || String(r);
 }
 
 function _pruneRisorseToAvailable(prefix) {
-  if (!_RISORSE_TARGET) return;
+  const target = _risorseTarget(prefix);
+  if (!target) return;
+  const original = _RISORSE_ORIGINAL[prefix] || {};
   _RISORSE_CAT_KEYS.forEach(cat => {
     const available = new Set(
       (_RISORSE_DATA_STORES[prefix][cat] || []).map(_resourceUid)
     );
-    _RISORSE_TARGET[cat] = (_RISORSE_TARGET[cat] || []).filter(uid => available.has(uid));
+    const kept = new Set(original[cat] || []);
+    target[cat] = (target[cat] || []).filter(
+      uid => available.has(uid) || kept.has(uid)
+    );
   });
 }
 
@@ -2241,8 +2275,14 @@ function _renderRisorseCat(prefix, key, items, preSelected) {
   const list = items || [];
   _RISORSE_DATA_STORES[prefix][key] = list;
   const available = new Set(list.map(_resourceUid));
-  const pre = (preSelected || []).filter(uid => available.has(uid));
-  if (_RISORSE_TARGET) _RISORSE_TARGET[key] = [...pre];
+  const kept = new Set((_RISORSE_ORIGINAL[prefix] || {})[key] || []);
+  // Keep what the activity already had even if the filters hide it: the badge
+  // in the list explains why it is not freely available.
+  const pre = (preSelected || []).filter(
+    uid => available.has(uid) || kept.has(uid)
+  );
+  const target = _risorseTarget(prefix);
+  if (target) target[key] = [...pre];
   _refreshRisorseItems(prefix, key, '');
   _updateRisorseLabel(prefix, key);
 }
@@ -2253,7 +2293,7 @@ function _refreshRisorseItems(prefix, key, query) {
   if (!container) return;
   const items = _RISORSE_DATA_STORES[prefix][key] || [];
   const q = query.toLowerCase();
-  const filtered = q
+  let filtered = q
     ? items.filter(r => {
         const uid  = (r.uid || r.id || '').toLowerCase();
         const desc = (r.model || r.diameter || r.pitch || r.description || '').toLowerCase();
@@ -2278,7 +2318,15 @@ function _refreshRisorseItems(prefix, key, query) {
     }
     return;
   }
-  const sel = new Set((_RISORSE_TARGET && _RISORSE_TARGET[key]) || []);
+  const target = _risorseTarget(prefix);
+  const sel = new Set((target && target[key]) || []);
+  // A selected resource the server did not return (deleted from inventory, or
+  // filtered out in a relaxed reload) still gets a row, so it is never lost.
+  const shown = new Set(filtered.map(_resourceUid));
+  const orphans = [...sel]
+    .filter(uid => !shown.has(uid))
+    .map(uid => ({ uid, assigned_current: true, unavailable_reason: 'non_elencata' }));
+  filtered = orphans.concat(filtered);
   const relaxedNote = _RISORSE_RELAXED[prefix]?.[key]
     ? '<div class="ms-relaxed-banner">Elenco completo (senza filtri requisiti)</div>'
     : '';
@@ -2299,6 +2347,10 @@ function _refreshRisorseItems(prefix, key, query) {
     else if (r.plant)
       plantHtml = stabBadge(r.plant);
 
+    const reasonHtml = r.assigned_current
+      ? `<span class="ms-item-assigned" title="${esc(_risorsaReasonTitle(r))}">${esc(_risorsaReasonLabel(r))}</span>`
+      : '';
+
     let notesHtml = '';
     if (key === 'mandrini' && r.notes)
       notesHtml = `<span class="ms-item-notes" title="Max Ø ${r.notes} mm">Max Ø ${r.notes} mm</span>`;
@@ -2310,7 +2362,7 @@ function _refreshRisorseItems(prefix, key, query) {
     return `<label class="ms-item">
       <input type="checkbox" value="${uid}" ${sel.has(uid)?'checked':''}
         onchange="risorseToggle('${prefix}','${key}','${uid}',this.checked)">
-      <span class="ms-item-id">${uid}</span>${measureHtml}${plantHtml}${notesHtml}
+      <span class="ms-item-id">${uid}</span>${measureHtml}${plantHtml}${reasonHtml}${notesHtml}
     </label>`;
   }).join('');
 }
@@ -2436,7 +2488,8 @@ function _updateRisorseLabel(prefix, key) {
   const dom = _risorseDom(prefix);
   const lbl = document.getElementById(dom.lblId(key));
   if (!lbl) return;
-  const sel = (_RISORSE_TARGET && _RISORSE_TARGET[key]) || [];
+  const target = _risorseTarget(prefix);
+  const sel = (target && target[key]) || [];
   const min = (_RISORSE_MIN_REQUIREMENTS[prefix] || {})[key] ?? 1;
   const empty = { teste:'Nessuna selezionata', mandrini:'Nessuno selezionato',
                   tastatori:'Nessuno selezionato', maschere:'Nessuna selezionata',
@@ -2495,8 +2548,9 @@ function toggleMs(wrapId) {
 
 function risorseToggle(prefix, cat, uid, checked) {
   _RISORSE_ACTIVE_PREFIX = prefix;
-  if (!_RISORSE_TARGET) return;
-  const arr = _RISORSE_TARGET[cat];
+  const target = _risorseTarget(prefix);
+  if (!target) return;
+  const arr = target[cat];
   if (checked) { if (!arr.includes(uid)) arr.push(uid); }
   else { const i = arr.indexOf(uid); if (i !== -1) arr.splice(i, 1); }
   _updateRisorseLabel(prefix, cat);
@@ -2557,6 +2611,8 @@ async function openRisorsePickerForEdit() {
     exclude_activity_id: d.ormId || '',
     risorseTarget: _detState.editRisorse,
     useServerPreselect: false,
+    // The server echoes the current assignment back via always_include, keyed
+    // off exclude_activity_id, so nothing has to be sent explicitly here.
   });
 }
 
@@ -2778,16 +2834,20 @@ function _computeActivityStatus(start, finish, actualStart, actualFinish) {
   if (!start || !finish) return [{ key: 'non_pianificata', label: 'NON PIANIFICATA' }];
   const today = new Date(); today.setHours(0,0,0,0);
   const planS = new Date(start);
+  const planF = new Date(finish);
   const actS  = actualStart  ? new Date(actualStart)  : null;
   const actF  = actualFinish ? new Date(actualFinish) : null;
   const isCompleted = !!(actS && actF);
   const isStarted   = !!(actS && !actF);
   const isLate      = !!(actS && actS > planS);
   const isOverdue   = !actS && today >= planS;
+  // Mirrors _compute_activity_status in ui/views.py.
+  const isExpired   = !actS && !actF && today > planF;
   if (isCompleted) return [{ key: 'completata', label: 'COMPLETATA' }];
   const pills = [];
   if (isLate || isOverdue) pills.push({ key: 'in_ritardo', label: 'IN RITARDO' });
   if (isStarted)           pills.push({ key: 'in_lavorazione', label: 'IN LAVORAZIONE' });
+  else if (isExpired)      pills.push({ key: 'scaduta', label: 'NON INIZIATA · SCADUTA' });
   else if (isOverdue)      pills.push({ key: 'da_iniziare', label: 'DA INIZIARE' });
   else                     pills.push({ key: 'pianificata', label: 'PIANIFICATA' });
   return pills;
@@ -3319,6 +3379,7 @@ function openDetailModal(tr, entityType) {
   }
   _detState = { tr, entityType, originalData: { ...data }, fields };
   document.getElementById('det-title').textContent = title;
+  document.getElementById('det-error').classList.remove('det-error--warn');
   document.getElementById('det-error').style.display = 'none';
   _renderPianViewMode(data, fields);
   document.getElementById('det-view-btns').style.display = '';
@@ -3499,6 +3560,7 @@ function cancelEdit() {
   _renderPianViewMode(_detState.originalData, _detState.fields);
   document.getElementById('det-view-btns').style.display = '';
   document.getElementById('det-edit-btns').style.display = 'none';
+  document.getElementById('det-error').classList.remove('det-error--warn');
   document.getElementById('det-error').style.display = 'none';
 }
 
@@ -3650,6 +3712,9 @@ async function saveEdit() {
     _renderPianViewMode(newData, fields);
     document.getElementById('det-view-btns').style.display = '';
     document.getElementById('det-edit-btns').style.display = 'none';
+    // Recording a fact is never refused, but it can create a conflict: show it
+    // as a notice, not as a failure.
+    if (json.warning_message) _showPianDetWarning(json.warning_message);
     saveBtn.disabled = false;
     saveBtn.textContent = 'Salva';
   } catch (_) {
@@ -3677,6 +3742,14 @@ function _refreshJobCard(cardEl, data) {
 
 function _showPianDetError(msg) {
   const el = document.getElementById('det-error');
+  el.classList.remove('det-error--warn');
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+function _showPianDetWarning(msg) {
+  const el = document.getElementById('det-error');
+  el.classList.add('det-error--warn');
   el.textContent = msg;
   el.style.display = '';
 }

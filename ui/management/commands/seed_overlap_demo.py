@@ -16,6 +16,12 @@ chain around the late Saldatura; R305 has Montaggio blocked on RS-T1 plus
 Collaudo/Imballo linked by precedence and an independent Documentazione
 that must stay put. The optimizer proposes a new date for the blocked
 chain, viewable/acceptable from Pianificazione → Note.
+
+Use ``--overdue`` for the reported commessa 25078 shape: a qualifica closed
+late and a production activity that was never started and is already past its
+planned finish, both holding testa H14. Closing the qualifica must succeed and
+raise a ``sovrapposizione`` note plus a ``ritardo`` note on the production
+activity.
 """
 
 from __future__ import annotations
@@ -54,6 +60,12 @@ _RS_HEAD_MODEL = "TP80"
 _RS_STD_MODEL = "STD"
 _RS_TESTA = "RS-T1"
 
+# Overdue demo: reproduces the reported 25078 case. The qualifica overruns and
+# is closed today; 02-SNC never started and its planned window is already past.
+_OD_COMMESSA = "25078D"
+_OD_HEAD_MODEL = "TS2000"
+_OD_TESTA = "OD-H14"
+
 _ACTIVITY_DEFAULTS = {
     "stabilimento": _PLANT,
     "responsabile": "Demo Overlap",
@@ -83,6 +95,14 @@ class Command(BaseCommand):
             help="Remove the demo commesse and their activities, then exit.",
         )
         parser.add_argument(
+            "--overdue",
+            action="store_true",
+            help=(
+                "Seed the commessa 25078 shape: a qualifica to close late and a "
+                "never-started activity already past its planned finish."
+            ),
+        )
+        parser.add_argument(
             "--reschedule",
             action="store_true",
             help=(
@@ -92,6 +112,10 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options) -> None:
+        if options["overdue"] and not options["clear"]:
+            self._handle_overdue()
+            return
+
         if options["reschedule"] and not options["clear"]:
             self._handle_reschedule()
             return
@@ -194,9 +218,104 @@ class Command(BaseCommand):
             _LEGACY_COMMESSA,
             _RS_LATE_COMMESSA,
             _RS_BLOCKED_COMMESSA,
+            _OD_COMMESSA,
         )
         Attivita.objects.filter(commessa__in=commesse).delete()
         Job.objects.filter(commessa__in=commesse).delete()
+
+    def _handle_overdue(self) -> None:
+        """Seed the commessa 25078 shape and report what to try in the UI."""
+        from datetime import timedelta
+
+        from django.utils.timezone import localdate
+
+        today = localdate()
+        with transaction.atomic():
+            Attivita.objects.filter(commessa=_OD_COMMESSA).delete()
+            Job.objects.filter(commessa=_OD_COMMESSA).delete()
+
+            Stabilimento.objects.update_or_create(
+                nome=_PLANT, defaults={"colore": "#16a34a"}
+            )
+            cfg, _ = ConfigurazioneTesta.objects.update_or_create(
+                modello_testa=_OD_HEAD_MODEL,
+                defaults={
+                    "min_mandrini": 0,
+                    "min_tastatori": 0,
+                    "min_maschere": 0,
+                    "min_generatori": 0,
+                },
+            )
+            GeneratoreCompatibile.objects.get_or_create(
+                configurazione=cfg, modello_generatore="P6"
+            )
+            # A single head of this model: no swap is possible, so the conflict
+            # has to surface as a note plus a reschedule proposal.
+            TestaItem.objects.update_or_create(
+                uid=_OD_TESTA,
+                defaults={
+                    "model": _OD_HEAD_MODEL,
+                    "plant": _PLANT,
+                    "notes": "demo overdue (unica testa TS2000)",
+                },
+            )
+            Job.objects.update_or_create(
+                commessa=_OD_COMMESSA,
+                defaults={
+                    "total_cost": 90_000.0,
+                    "penalty": 2.0,
+                    "delivery_date": (today + timedelta(days=30)).isoformat(),
+                },
+            )
+
+            qualifica = self._seed_reschedule_activity(
+                _OD_COMMESSA,
+                "02",
+                "qualifica",
+                start=today - timedelta(days=44),
+                finish=today - timedelta(days=18),
+                duration_min=2400,
+                modello_testa=_OD_HEAD_MODEL,
+                actual_start=today - timedelta(days=44),
+            )
+            snc = self._seed_reschedule_activity(
+                _OD_COMMESSA,
+                "02-SNC",
+                "produzione",
+                start=today - timedelta(days=10),
+                finish=today - timedelta(days=3),
+                duration_min=2400,
+                modello_testa=_OD_HEAD_MODEL,
+            )
+            for att in (qualifica, snc):
+                RisorsaAttivita.objects.update_or_create(
+                    attivita=att, tipo="testa", defaults={"risorsa_id": _OD_TESTA}
+                )
+
+        from ui.services.overlap_reassign import auto_resolve_resource_overlaps
+
+        auto_resolve_resource_overlaps()
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Demo ritardo creata su commessa {_OD_COMMESSA} "
+                f"(testa {_OD_TESTA}, modello {_OD_HEAD_MODEL})."
+            )
+        )
+        self.stdout.write(
+            f"  {qualifica.activity_id}: iniziata il {qualifica.actual_start}, "
+            f"fine prevista {qualifica.data_fine}, ancora aperta."
+        )
+        self.stdout.write(
+            f"  {snc.activity_id}: mai iniziata, finestra "
+            f"{snc.data_inizio} -> {snc.data_fine} gia' scaduta."
+        )
+        self.stdout.write(
+            "Prova: Pianificazione -> qualifica -> Modifica -> "
+            "«Fine effett.» = oggi -> Salva. Deve salvare con avviso, non "
+            "con errore. Poi apri 02-SNC: badge NON INIZIATA - SCADUTA, "
+            "Note con proposta, e «Modifica risorse» con la testa preselezionata."
+        )
 
     def _clear_reschedule_demo(self) -> None:
         commesse = (_RS_LATE_COMMESSA, _RS_BLOCKED_COMMESSA)

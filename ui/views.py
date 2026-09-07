@@ -418,6 +418,9 @@ def _compute_activity_status(
     is_started = bool(actual_start and not actual_finish)
     is_late = bool(actual_start and actual_start > data_inizio)
     is_overdue = not actual_start and today >= data_inizio
+    # Never started and already past the planned finish: the plan is stale and
+    # the activity still holds its resources.
+    is_expired = not actual_start and not actual_finish and today > data_fine
 
     if is_completed:
         return [{"key": "completata", "label": "COMPLETATA"}]
@@ -428,6 +431,8 @@ def _compute_activity_status(
 
     if is_started:
         pills.append({"key": "in_lavorazione", "label": "IN LAVORAZIONE"})
+    elif is_expired:
+        pills.append({"key": "scaduta", "label": "NON INIZIATA · SCADUTA"})
     elif is_overdue:
         pills.append({"key": "da_iniziare", "label": "DA INIZIARE"})
     else:
@@ -861,7 +866,6 @@ def api_inventario_detail(request: HttpRequest, table: str, uid: str) -> JsonRes
 
 
 @write_required
-@csrf_exempt
 @require_http_methods(["PUT"])
 def api_tasks_update(request: HttpRequest) -> JsonResponse:
     """Update a single Attivita record and enqueue a write-back entry.
@@ -1162,7 +1166,6 @@ _reconcile_delete = reconcile_delete
 
 
 @write_required
-@csrf_exempt
 @require_http_methods(["DELETE"])
 def api_attivita_delete(request: HttpRequest) -> JsonResponse:
     """Delete a single Attivita record and reconcile the MppSyncQueue.
@@ -1208,7 +1211,6 @@ def api_attivita_delete(request: HttpRequest) -> JsonResponse:
 
 
 @write_required
-@csrf_exempt
 @require_http_methods(["DELETE"])
 def api_jobs_delete(request: HttpRequest) -> JsonResponse:
     """Delete a job and all its associated activities, reconciling the MppSyncQueue.

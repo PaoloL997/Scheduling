@@ -11,6 +11,8 @@ from django.db import transaction
 from ui.models import Attivita, MppSyncQueue, RisorsaAttivita
 from ui.services.resource_conflicts import (
     ResourceConflictError,
+    find_conflicts,
+    occupation_window,
     format_conflict_message,
     validate_no_conflicts,
 )
@@ -54,13 +56,34 @@ class BridgeWriteError(Exception):
         self.conflicts = conflicts
 
 
-def _parse_date(val) -> datetime.date | None:
-    if val:
-        try:
-            return datetime.date.fromisoformat(val)
-        except ValueError:
-            pass
-    return None
+def _parse_date(val, field: str = "data"):
+    """Parse an ISO date, telling an intentional clear from a bad value.
+
+    An absent or empty value clears the field; anything unparsable is a
+    client error rather than a silent clear.
+
+    Args:
+        val: Raw value from the request payload.
+        field: Field name used in the error message.
+
+    Returns:
+        datetime.date | None: The parsed date, or ``None`` to clear.
+
+    Raises:
+        BridgeWriteError: When *val* is a non-empty unparsable value.
+    """
+    if val is None:
+        return None
+    text = str(val).strip()
+    if not text:
+        return None
+    try:
+        return datetime.date.fromisoformat(text)
+    except ValueError as exc:
+        raise BridgeWriteError(
+            f"Data non valida per «{field}»: «{text}». Formato atteso AAAA-MM-GG.",
+            status_code=400,
+        ) from exc
 
 
 def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -> dict:
@@ -120,14 +143,25 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
                 status_code=409,
             )
 
+    old_inizio, old_fine = a.data_inizio, a.data_fine
     if "start" in data:
-        a.data_inizio = _parse_date(data["start"])
+        a.data_inizio = _parse_date(data["start"], "Inizio")
     if "finish" in data:
-        a.data_fine = _parse_date(data["finish"])
+        a.data_fine = _parse_date(data["finish"], "Fine")
     if "actual_start" in data:
-        a.actual_start = _parse_date(data["actual_start"])
+        a.actual_start = _parse_date(data["actual_start"], "Inizio effettivo")
     if "actual_finish" in data:
-        a.actual_finish = _parse_date(data["actual_finish"])
+        a.actual_finish = _parse_date(data["actual_finish"], "Fine effettiva")
+
+    # The planned window is only "edited" when it actually moves: the
+    # pianificazione panel always echoes start/finish back, even untouched.
+    plan_dates_changed = (a.data_inizio, a.data_fine) != (old_inizio, old_fine)
+
+    if a.actual_finish and a.actual_start and a.actual_finish < a.actual_start:
+        raise BridgeWriteError(
+            "La fine effettiva non puo' precedere l'inizio effettivo.",
+            status_code=400,
+        )
     if "plant" in data:
         a.stabilimento = data["plant"] or ""
     if "responsible" in data:
@@ -156,12 +190,13 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
         if not isinstance(risorse_data, dict):
             raise BridgeWriteError("Formato risorse non valido.", status_code=400)
         new_risorse_pairs = _risorse_to_pairs(risorse_data)
-        if a.data_inizio and a.data_fine:
+        window = occupation_window(a)
+        if window is not None:
             try:
                 validate_no_conflicts(
                     new_risorse_pairs,
-                    a.data_inizio,
-                    a.data_fine,
+                    window[0],
+                    window[1],
                     exclude_activity_id=a.pk,
                 )
             except ResourceConflictError as exc:
@@ -182,31 +217,40 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
                 status_code=400,
             )
 
-    if ("start" in data or "finish" in data) and a.data_inizio and a.data_fine:
-        existing_pairs = list(
+    # Re-planning is validated up front; recording a fact never is.  Setting
+    # «Inizio/Fine effettiva» states what already happened, so it can surface a
+    # conflict but must never be refused -- the conflict becomes a note plus a
+    # reschedule proposal on the activity that has not started yet.
+    # When new resources came in they were already validated above; otherwise
+    # check the ones currently booked.
+    existing_pairs = (
+        new_risorse_pairs
+        if new_risorse_pairs is not None
+        else list(
             RisorsaAttivita.objects.filter(attivita_id=a.pk).values_list(
                 "tipo", "risorsa_id"
             )
         )
-        try:
-            validate_no_conflicts(
-                existing_pairs,
-                a.data_inizio,
-                a.data_fine,
-                exclude_activity_id=a.pk,
-            )
-        except ResourceConflictError as exc:
+    )
+    window = occupation_window(a)
+    warnings: list[dict] = []
+    if existing_pairs and window is not None:
+        conflicts = find_conflicts(
+            existing_pairs, window[0], window[1], exclude_activity_id=a.pk
+        )
+        if conflicts and plan_dates_changed:
             raise BridgeWriteError(
                 format_conflict_message(
-                    exc.conflicts,
+                    conflicts,
                     action_hint=(
                         "Usa «Modifica risorse» per sostituirle o rimuoverle, "
                         "oppure accorcia il periodo dell'attività."
                     ),
                 ),
                 status_code=409,
-                conflicts=exc.conflicts,
-            ) from exc
+                conflicts=conflicts,
+            )
+        warnings = conflicts
 
     with transaction.atomic():
         a.save()
@@ -259,6 +303,16 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
         "job_id": a.job_id,
         "activity_id": a.activity_id,
     }
+    if warnings:
+        result["warnings"] = warnings
+        result["warning_message"] = format_conflict_message(
+            warnings,
+            action_hint=(
+                "La registrazione e' stata salvata. Il conflitto e' segnalato "
+                "sull'attività non ancora iniziata, con proposta di "
+                "ripianificazione."
+            ),
+        )
     if risorse_data is not None:
         risorse_all = list(RisorsaAttivita.objects.filter(attivita_id=a.pk))
         res_fmt = format_activity_resources(risorse_all)
@@ -272,7 +326,7 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
         )
     if resolve_overlaps:
         should_resolve = risorse_data is not None or any(
-            key in data for key in ("actual_start", "start", "finish")
+            key in data for key in ("actual_start", "actual_finish", "start", "finish")
         )
         if should_resolve:
             from ui.services.overlap_reassign import auto_resolve_resource_overlaps

@@ -50,7 +50,7 @@ class AttivitaDeleteImportedTest(TestCase):
         entry = MppSyncQueue.objects.get(operation="delete_task")
         payload = json.loads(entry.payload_json)
         self.assertEqual(payload["commessa"], "A001")
-        self.assertEqual(payload["item"], 1)
+        self.assertEqual(payload["item"], "1")
         self.assertEqual(payload["activity"], "sal")
 
 
@@ -214,7 +214,7 @@ class JobsDeleteTest(TestCase):
         )
         payloads = [json.loads(p) for p in delete_entries]
         items = [p["item"] for p in payloads]
-        self.assertIn(1, items)  # imported activity
+        self.assertIn("1", items)  # imported activity
 
     def test_delete_task_enqueued_for_synced_wizard_activity(self) -> None:
         req = _delete_request(self.factory, {"job_id": self.job_id})

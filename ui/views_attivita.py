@@ -123,6 +123,32 @@ def api_analizza_wps(request: HttpRequest) -> JsonResponse:
 # ── AJAX: risorse disponibili ─────────────────────────────────────────────────
 
 
+def _assigned_uids_by_cat(attivita_id: int) -> dict[str, list[str]]:
+    """Return the resources already booked by an activity, keyed by category.
+
+    Feeds ``always_include`` so the edit picker can never drop an existing
+    assignment just because it fails the availability filters.
+
+    Args:
+        attivita_id: Primary key of the activity being edited.
+
+    Returns:
+        dict[str, list[str]]: Wizard category name to list of UIDs.
+    """
+    from ui.models import RisorsaAttivita
+    from ui.services.problem_detection import _TIPO_TO_CAT
+
+    out: dict[str, list[str]] = {}
+    rows = RisorsaAttivita.objects.filter(attivita_id=attivita_id).values_list(
+        "tipo", "risorsa_id"
+    )
+    for tipo, uid in rows:
+        cat = _TIPO_TO_CAT.get(tipo)
+        if cat and uid:
+            out.setdefault(cat, []).append(uid)
+    return out
+
+
 @login_required
 def api_get_risorse(request: HttpRequest) -> JsonResponse:
     """Return available resources for the candidate activity.
@@ -151,6 +177,7 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
         except (ValueError, TypeError):
             return None
 
+    always_include: dict[str, list[str]] | None = None
     exclude_activity_id = None
     raw_exclude = request.GET.get("exclude_activity_id", "").strip()
     if raw_exclude:
@@ -199,8 +226,11 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
             tube_pitch = float(att.tube_pitch)
         if not stabilimento and att.stabilimento:
             stabilimento = att.stabilimento
-        if not relax_requirements:
+        # Strict filtering empties a category when its requirement is unset,
+        # which would leave the edit picker with nothing to choose from.
+        if not relax_requirements and modello_testa:
             strict_requirements = True
+        always_include = _assigned_uids_by_cat(exclude_activity_id)
 
     result = get_available_resources(
         stabilimento=stabilimento,
@@ -214,6 +244,7 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
         exclude_activity_id=exclude_activity_id,
         strict_requirements=strict_requirements,
         relax_requirements=relax_requirements,
+        always_include=always_include,
     )
 
     lookup_pairs = parse_resource_lookup_param(request.GET.get("lookup", ""))

@@ -64,6 +64,31 @@ decorators wrap every mutating view (web app and tablet bridge) and answer HTTP 
 with a JSON body for `/api/` endpoints. Templates additionally hide the controls a
 read-only account cannot use.
 
+## Resource occupancy
+
+`ui/services/resource_conflicts.occupation_window` is the single definition of
+when a resource is held:
+
+| Activity state | Occupies |
+|---|---|
+| planned only | `[data_inizio, data_fine]` |
+| in progress | `[actual_start, max(data_fine, effective_finish)]` |
+| completed | `[actual_start or data_inizio, actual_finish]` |
+
+Overlap detection, reassignment and availability lists all read that one
+function; nothing re-implements it.
+
+**Facts are never refused.** Writing `actual_start` / `actual_finish` records
+something that already happened, so the save always succeeds. A resulting
+conflict becomes a `sovrapposizione` note on the activity that has not started
+yet, plus a reschedule proposal. Only a real change to the planned dates or to
+the assigned resources can be rejected with a 409.
+
+An activity that was never started and is already past `data_fine` raises a
+`ritardo` note, shows a **NON INIZIATA · SCADUTA** badge, and gets a reschedule
+proposal. It keeps its bookings until the proposal is accepted, so no one else
+can quietly take the resource.
+
 ## Resource overlaps
 
 When a late start makes two activities share a resource:
@@ -79,6 +104,7 @@ Overlap warnings on the home Gantt open the same notes modal.
 python manage.py seed_overlap_demo              # late overlap with a spare testa (auto-swap)
 python manage.py seed_overlap_demo --reschedule # same delay, unique testa → reschedule proposal
 python manage.py seed_overlap_demo --clear
+python manage.py seed_overlap_demo --overdue    # commessa 25078D: close late + never-started overdue
 
 python manage.py seed_optimization_demo         # penalty + load-balancing commesse
 python manage.py seed_optimization_demo --clear

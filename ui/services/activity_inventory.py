@@ -288,6 +288,104 @@ def _get_testa_config(modello_testa: str | None) -> tuple[int, int, int, int, se
     )
 
 
+#: Why a currently-assigned resource would not otherwise be listed, most
+#: specific first.
+_UNAVAILABLE_REASONS = (
+    "manutenzione",
+    "occupata",
+    "non_compatibile",
+    "altro_stabilimento",
+)
+
+
+def _unavailable_reason(
+    row: dict,
+    *,
+    occupied: set[str],
+    stabilimento: str,
+    compatible_uids: set[str] | None,
+) -> str | None:
+    """Return why *row* is not freely selectable, or ``None`` when it is.
+
+    Args:
+        row: Inventory row dict (``uid``, ``plant``, ``in_manutenzione``, …).
+        occupied: UIDs booked by another activity in the period.
+        stabilimento: Plant of the activity being edited.
+        compatible_uids: UIDs passing the model/bore/pitch filter, or ``None``
+            when no such filter applies.
+
+    Returns:
+        str | None: One of :data:`_UNAVAILABLE_REASONS`, or ``None``.
+    """
+    if row.get("in_manutenzione"):
+        return "manutenzione"
+    if row["uid"] in occupied:
+        return "occupata"
+    if compatible_uids is not None and row["uid"] not in compatible_uids:
+        return "non_compatibile"
+    if stabilimento and (row.get("plant") or "") != stabilimento:
+        return "altro_stabilimento"
+    return None
+
+
+def _ensure_assigned_present(
+    rows: list[dict],
+    model_cls,
+    uids: list[str],
+    *,
+    occupied: set[str],
+    stabilimento: str,
+    compatible_uids: set[str] | None,
+) -> list[dict]:
+    """Return *rows* with every currently-assigned UID present and annotated.
+
+    A resource already booked by the activity being edited must always be
+    offered back, even when it fails the availability filters — otherwise the
+    picker would silently drop the assignment.  Each such row is marked
+    ``assigned_current`` and carries an ``unavailable_reason`` so the UI can
+    explain the badge.
+
+    Args:
+        rows: Rows produced by the normal availability query.
+        model_cls: Inventory model used to fetch any missing row.
+        uids: UIDs currently assigned to the activity.
+        occupied: UIDs booked by another activity in the period.
+        stabilimento: Plant of the activity being edited.
+        compatible_uids: UIDs passing the model/bore/pitch filter, or ``None``.
+
+    Returns:
+        list[dict]: Assigned rows first, then the rest in their original order.
+    """
+    if not uids:
+        return rows
+
+    by_uid = {r["uid"]: r for r in rows}
+    missing = [u for u in uids if u and u not in by_uid]
+    if missing:
+        for extra in model_cls.objects.filter(uid__in=missing).order_by("uid").values():
+            rows = [*rows, extra]
+            by_uid[extra["uid"]] = extra
+
+    assigned: list[dict] = []
+    for uid in uids:
+        row = by_uid.get(uid)
+        if row is None:
+            continue
+        row["assigned_current"] = True
+        row["unavailable_reason"] = _unavailable_reason(
+            row,
+            occupied=occupied,
+            stabilimento=stabilimento,
+            compatible_uids=compatible_uids,
+        )
+        if stabilimento and (row.get("plant") or "") != stabilimento:
+            row.setdefault("stab_esterno", row.get("plant") or "—")
+        assigned.append(row)
+
+    assigned_uids = {r["uid"] for r in assigned}
+    return assigned + [r for r in rows if r["uid"] not in assigned_uids]
+
+
 def get_available_resources(
     stabilimento: str,
     data_inizio: date,
@@ -300,6 +398,7 @@ def get_available_resources(
     exclude_activity_id: int | None = None,
     strict_requirements: bool = False,
     relax_requirements: bool = False,
+    always_include: dict[str, list[str]] | None = None,
 ) -> dict:
     """Build the full resource availability context for the wizard step 5.
 
@@ -347,6 +446,10 @@ def get_available_resources(
             return every inventory item free in the activity interval (same-plant
             first, then other plants with ``stab_esterno``). Overrides
             ``strict_requirements``.
+        always_include: Category name to list of UIDs that must appear in the
+            result whatever the filters say — the resources currently assigned
+            to the activity being edited.  Those rows are returned first and
+            annotated with ``assigned_current`` and ``unavailable_reason``.
 
     Returns:
         dict: With keys ``teste``, ``mandrini``, ``tastatori``, ``maschere``,
@@ -462,7 +565,7 @@ def get_available_resources(
             QuerySet: Filtered or unmodified queryset.
         """
         if modello_testa:
-            return qs.filter(model=modello_testa)
+            return qs.filter(model__iexact=modello_testa.strip())
         return qs
 
     def _gen_model_filter(qs):
@@ -528,6 +631,47 @@ def get_available_resources(
     maschere = _maschere_available()
     generatori = _generatori_available()
 
+    if always_include:
+
+        def _compatible(model_cls, filter_fn, active: bool) -> set[str] | None:
+            """UIDs passing the model/bore/pitch filter, or None when unfiltered."""
+            if not active:
+                return None
+            return set(filter_fn(model_cls.objects.all()).values_list("uid", flat=True))
+
+        has_bore = bore_min is not None and bore_max is not None
+        specs = (
+            ("teste", TestaItem, _model_filter, occ_testa, bool(modello_testa)),
+            ("mandrini", MandrinoItem, _bore_filter, occ_m, has_bore),
+            ("tastatori", TastatoreItem, _bore_filter, occ_t, has_bore),
+            ("maschere", MascheraItem, _pitch_filter, occ_ma, tube_pitch is not None),
+            ("generatori", GeneratoreItem, _gen_model_filter, occ_g, bool(gen_models)),
+        )
+        lists = {
+            "teste": teste,
+            "mandrini": mandrini,
+            "tastatori": tastatori,
+            "maschere": maschere,
+            "generatori": generatori,
+        }
+        for key, model_cls, filter_fn, occ, filter_active in specs:
+            uids = [u for u in (always_include.get(key) or []) if u]
+            if not uids:
+                continue
+            lists[key] = _ensure_assigned_present(
+                lists[key],
+                model_cls,
+                uids,
+                occupied=occ,
+                stabilimento=stabilimento,
+                compatible_uids=_compatible(model_cls, filter_fn, filter_active),
+            )
+        teste = lists["teste"]
+        mandrini = lists["mandrini"]
+        tastatori = lists["tastatori"]
+        maschere = lists["maschere"]
+        generatori = lists["generatori"]
+
     busy_testa = _open_assignment_ids("testa", exclude_activity_id)
     busy_m = _open_assignment_ids("mandrino", exclude_activity_id)
     busy_t = _open_assignment_ids("tastatore", exclude_activity_id)
@@ -555,9 +699,13 @@ def get_available_resources(
         Returns:
             list: Pre-selected items first, remaining items after.
         """
-        return [x for x in lst if x["uid"] in pre] + [
-            x for x in lst if x["uid"] not in pre
-        ]
+        keep = [x for x in lst if x.get("assigned_current")]
+        rest = [x for x in lst if not x.get("assigned_current")]
+        return (
+            keep
+            + [x for x in rest if x["uid"] in pre]
+            + [x for x in rest if x["uid"] not in pre]
+        )
 
     return {
         "teste": _pre_first(teste, pre_testa),

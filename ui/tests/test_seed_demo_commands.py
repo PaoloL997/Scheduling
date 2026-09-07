@@ -4,8 +4,10 @@ from datetime import date
 
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils.timezone import localdate
 
 from ui.models import Attivita, Job, ProblemaAttivita, RisorsaAttivita
+from ui.services.bridge_write import update_attivita
 from ui.services.overlap_reassign import apply_reschedule
 from ui.services.problem_detection import detect_for_all_activities
 
@@ -32,6 +34,51 @@ class SeedOptimizationDemoTest(TestCase):
         call_command("seed_optimization_demo", "--clear")
 
         self.assertFalse(Job.objects.filter(commessa__in=["OPT01", "OPT02"]).exists())
+
+
+class SeedOverdueDemoTest(TestCase):
+    """``--overdue`` reproduces the reported commessa 25078 shape."""
+
+    def test_seed_creates_the_two_activities(self) -> None:
+        call_command("seed_overlap_demo", "--overdue")
+
+        atts = {a.item: a for a in Attivita.objects.filter(commessa="25078D")}
+        self.assertEqual(set(atts), {"02", "02-SNC"})
+        self.assertIsNotNone(atts["02"].actual_start)
+        self.assertIsNone(atts["02"].actual_finish)
+        self.assertIsNone(atts["02-SNC"].actual_start)
+        self.assertLess(atts["02-SNC"].data_fine, localdate())
+
+    def test_seed_raises_the_overdue_note(self) -> None:
+        call_command("seed_overlap_demo", "--overdue")
+
+        snc = Attivita.objects.get(commessa="25078D", item="02-SNC")
+        self.assertTrue(
+            ProblemaAttivita.objects.filter(
+                attivita=snc,
+                tipo=ProblemaAttivita.TIPO_RITARDO,
+                risolto=False,
+            ).exists()
+        )
+
+    def test_closing_the_qualifica_is_not_refused(self) -> None:
+        call_command("seed_overlap_demo", "--overdue")
+        qualifica = Attivita.objects.get(commessa="25078D", item="02")
+
+        result = update_attivita(
+            qualifica.pk, {"actual_finish": localdate().isoformat()}
+        )
+
+        qualifica.refresh_from_db()
+        self.assertEqual(qualifica.actual_finish, localdate())
+        self.assertIn("warnings", result)
+
+    def test_clear_removes_it(self) -> None:
+        call_command("seed_overlap_demo", "--overdue")
+        call_command("seed_overlap_demo", "--clear")
+
+        self.assertFalse(Attivita.objects.filter(commessa="25078D").exists())
+        self.assertFalse(Job.objects.filter(commessa="25078D").exists())
 
 
 class SeedOverlapDemoTest(TestCase):

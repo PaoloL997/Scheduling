@@ -1015,6 +1015,7 @@ body {
 .status-pill--in_lavorazione,
 .status-pill--pianificata,
 .status-pill--da_iniziare            { background: var(--text-subtle); }
+.status-pill--scaduta                { background: hsl(18, 90%, 48%); }
 .status-pill--non_pianificata        { background: var(--border); }
 
 /* ── compact resource display ────────────────────────────────────────────── */
@@ -2348,6 +2349,14 @@ a .nav-warn-badge {
   white-space: pre-line;
 }
 
+/* Same box, amber: the save succeeded but raised a conflict note. */
+.det-error--warn {
+  color: hsl(38 90% 62%);
+  background: hsl(38 30% 13%);
+  border-color: hsl(38 40% 28%);
+  border-left-color: hsl(38 95% 55%);
+}
+
 /* Clickable rows hint */
 .data-table tbody tr { cursor: pointer; }
 
@@ -3214,6 +3223,18 @@ a .nav-warn-badge {
   font-size: 0.7rem; color: var(--text-subtle); font-style: italic;
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Currently-assigned resource kept in the picker despite the filters. */
+.ms-item-assigned {
+  display: inline-flex; align-items: center;
+  padding: 1px 6px;
+  border-radius: 0.2rem;
+  font-size: 0.68rem; font-weight: 500;
+  white-space: nowrap; flex-shrink: 0;
+  color: hsl(38 90% 42%);
+  background: color-mix(in srgb, hsl(38 95% 55%) 14%, transparent);
+  border: 1px solid color-mix(in srgb, hsl(38 95% 55%) 35%, transparent);
 }
 
 /* ── Stabilimento colour badge ──────────────────────────────────────────── */
