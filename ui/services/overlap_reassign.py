@@ -935,7 +935,12 @@ def propose_reschedule(blocked_pk: int) -> dict | None:
                 "started": att.actual_start is not None,
             }
         )
-    gantt_acts.sort(key=lambda a: (a["start"] or "9999", a["label"]))
+    # Same order as the main Gantt, which reads the activities through
+    # _fetch_tasks (job_id, data_inizio, activity_id). A missing planned
+    # start sorts first there too.
+    gantt_acts.sort(
+        key=lambda a: (a["job_id"] or "", a["start"] or "", a["activity_id"])
+    )
 
     return {
         "status": "proposed",

@@ -7,10 +7,10 @@
 - **Lo sforamento della durata stimata si vede nel Gantt.** Un'attivita'
   iniziata e non ancora chiusa la cui fine stimata (inizio effettivo +
   durata da preventivo) e' gia' passata prosegue con una linea orizzontale
-  tratteggiata fino a oggi, chiusa da una barretta verticale come le altre
-  estremita' della finestra effettiva. I badge di stato si spostano dopo lo
-  sforamento. Nuova voce in leggenda: «Sforamento della durata stimata (fino
-  a oggi)».
+  tratteggiata fino a oggi. Finche' sfora, l'unica barretta verticale di
+  fine e' quella su oggi: sulla fine stimata comincia il tratteggio, non
+  c'e' una seconda fine. I badge di stato si spostano dopo lo sforamento.
+  Nuova voce in leggenda: «Sforamento della durata stimata (fino a oggi)».
 
 ### Fixed
 
@@ -38,6 +38,11 @@
   volta sulla prima riga aperta che la porta, qualunque sia il tipo.
 - **Nel modal problemi/note le voci aperte stanno in cima**, quelle risolte
   sotto; dentro ogni gruppo resta l'ordine di creazione.
+- Il gantt della proposta di ripianificazione elenca le attivita' nello
+  stesso ordine del gantt principale: la chiave di ordinamento e' ora
+  `(job_id, data_inizio, activity_id)`, la stessa di `_fetch_tasks`, al
+  posto di `(inizio, etichetta)`. Le due coincidevano finche' tutte le
+  attivita' avevano una data di inizio pianificata.
 - La nota di tipo `ritardo` mostrava la chiave grezza «ritardo» al posto
   dell'etichetta: ora e' «Attivita' in ritardo».
 - **I riferimenti fra attivita' si confrontano senza distinzione di
