@@ -61,6 +61,23 @@ def build_activity_id(commessa: str, item: int | str, activity: str) -> str:
     return f"{_enc(commessa)}-{_enc(str(item))}-{_enc(activity)}"
 
 
+def normalize_activity_id(activity_id: str) -> str:
+    """Return the comparison key for an ``activity_id``.
+
+    Renaming an activity rebuilds its ``activity_id`` but does not rewrite
+    the ``predecessors`` strings pointing at it, so a reference can differ
+    from the current id by case or surrounding spaces only. Compare ids
+    through this helper instead of matching them verbatim.
+
+    Args:
+        activity_id (str): Canonical activity identifier, possibly stale.
+
+    Returns:
+        str: Trimmed, case-folded identifier used as a lookup key.
+    """
+    return (activity_id or "").strip().casefold()
+
+
 def parse_job_id(job_id: str) -> str:
     """Decode a canonical job_id back to the commessa name.
 

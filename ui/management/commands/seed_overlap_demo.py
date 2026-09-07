@@ -162,17 +162,21 @@ class Command(BaseCommand):
 
     def _handle_reschedule(self) -> None:
         """Seed the no-swap scenario and print the generated reschedule proposal."""
-        from ui.models import ProblemaAttivita
-
         with transaction.atomic():
             self._clear_reschedule_demo()
             self._seed_reschedule_reference()
             self._seed_reschedule_inventory()
             late, blocked = self._seed_reschedule_activities()
 
-        from ui.services.overlap_reassign import auto_resolve_resource_overlaps
+        from ui.services.overlap_reassign import (
+            auto_resolve_resource_overlaps,
+            compute_reschedule_proposal,
+        )
 
         auto_resolve_resource_overlaps()
+        # The app solves a proposal when the planner opens the problem; the
+        # demo materialises one right away so the seeded state shows it.
+        proposta = compute_reschedule_proposal(blocked.pk)
 
         self.stdout.write(
             self.style.SUCCESS(
@@ -183,17 +187,7 @@ class Command(BaseCommand):
             )
         )
 
-        row = (
-            ProblemaAttivita.objects.filter(
-                attivita=blocked,
-                tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
-                risolto=False,
-            )
-            .exclude(proposta_json__isnull=True)
-            .first()
-        )
-        proposta = row.proposta_json if row else None
-        if proposta and proposta.get("status") == "proposed":
+        if proposta.get("status") == "proposed":
             b = proposta["blocked"]
             deadline = (
                 "entro scadenza" if proposta.get("meets_deadline") else "oltre scadenza"

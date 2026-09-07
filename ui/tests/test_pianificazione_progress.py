@@ -1,6 +1,9 @@
 """Tests for the pianificazione job header metrics."""
 
+import shutil
+import subprocess
 from datetime import date, timedelta
+from pathlib import Path
 
 from django.contrib.auth.models import User
 from django.test import Client, TestCase
@@ -149,3 +152,30 @@ class PianificazioneProgressBarTests(TestCase):
             ),
             3,
         )
+
+
+class NotesModalScriptTest(TestCase):
+    """The notes modal renders the reschedule proposal and sorts open first."""
+
+    def test_notes_modal_script_in_node(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("Node.js not available")
+        script = Path(__file__).resolve().parent / "fixtures" / "notes_modal_test.mjs"
+        if not script.is_file():
+            self.fail(f"Missing modal test script: {script}")
+        root = Path(__file__).resolve().parents[2]
+        if not (root / "node_modules" / "jsdom").is_dir():
+            self.skipTest("Run `npm install --no-save jsdom` to enable JS tests")
+        proc = subprocess.run(
+            ["node", str(script)],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            check=False,
+        )
+        if proc.returncode != 0:
+            self.fail(
+                "notes_modal_test.mjs failed:\n"
+                + (proc.stderr or proc.stdout or "unknown error")
+            )
+        self.assertIn("ok", proc.stdout)

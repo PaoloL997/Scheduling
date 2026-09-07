@@ -1845,6 +1845,15 @@ a .nav-warn-badge {
 }
 .reschedule-badge--ok { background: hsl(145 60% 40% / .18); color: hsl(145 55% 65%); }
 .reschedule-badge--late { background: hsl(0 70% 50% / .18); color: hsl(0 70% 70%); }
+/* Placeholder while the solver runs: the proposal is computed on open. */
+.reschedule-pending {
+  margin-top: .6rem;
+  padding: .6rem .75rem;
+  border: 1px dashed hsl(215 40% 40% / .35);
+  border-radius: .5rem;
+  font-size: .8125rem;
+  color: var(--text-muted);
+}
 .pg-compare {
   margin: .7rem 0 .45rem;
   display: flex;

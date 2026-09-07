@@ -33,6 +33,7 @@ from ui.models import (
     TastatoreItem,
     TestaItem,
 )
+from ui.services.identifiers import normalize_activity_id
 
 MINUTES_PER_WORKING_DAY = 8 * 60
 
@@ -477,17 +478,21 @@ def _parse_predecessor_ids(att: Attivita, known_ids: set[str]) -> list[str]:
     """Parse the comma-separated ``predecessors`` field of an Attivita row.
 
     Only references to other activities of the same problem job are kept;
-    unknown ids (e.g. activities of other commesse) are dropped.
+    unknown ids (e.g. activities of other commesse) are dropped. Matching
+    goes through :func:`~ui.services.identifiers.normalize_activity_id` and
+    the canonical id of the known activity is what comes back.
     """
     raw = (att.predecessors or "").strip()
     if not raw:
         return []
+    canonical = {normalize_activity_id(known): known for known in known_ids}
+    self_key = normalize_activity_id(att.activity_id)
     seen: list[str] = []
     for token in raw.split(","):
-        pred_id = token.strip()
-        if pred_id and pred_id != att.activity_id and pred_id in known_ids:
-            if pred_id not in seen:
-                seen.append(pred_id)
+        key = normalize_activity_id(token)
+        pred_id = canonical.get(key)
+        if pred_id and key != self_key and pred_id not in seen:
+            seen.append(pred_id)
     return seen
 
 
@@ -643,7 +648,7 @@ def build_scheduling_problem(
         for att in fixed_rows:
             window = fixed_calendar_window(att)
             if window is not None:
-                fixed_end_by_id[att.activity_id] = window[1]
+                fixed_end_by_id[normalize_activity_id(att.activity_id)] = window[1]
 
         job_row = job_rows.get(commessa)
         job_id = rows[0].job_id or commessa
@@ -657,7 +662,7 @@ def build_scheduling_problem(
             # bound: the successor starts after the locked window ends.
             pred_bound: date | None = None
             for raw_pred in (att.predecessors or "").split(","):
-                end = fixed_end_by_id.get(raw_pred.strip())
+                end = fixed_end_by_id.get(normalize_activity_id(raw_pred))
                 if end is not None:
                     candidate = end + timedelta(days=1)
                     if pred_bound is None or candidate > pred_bound:
@@ -801,7 +806,7 @@ def build_reschedule_problem(
             continue
         window = fixed_calendar_window(att)
         if window is not None:
-            fixed_end_by_id[att.activity_id] = window[1]
+            fixed_end_by_id[normalize_activity_id(att.activity_id)] = window[1]
 
     job_row = JobModel.objects.filter(commessa=commessa).first()
     job_id = schedulable[0].job_id or commessa
@@ -811,7 +816,7 @@ def build_reschedule_problem(
     for order, att in enumerate(rows, 1):
         pred_bound: date | None = None
         for raw_pred in (att.predecessors or "").split(","):
-            end = fixed_end_by_id.get(raw_pred.strip())
+            end = fixed_end_by_id.get(normalize_activity_id(raw_pred))
             if end is not None:
                 candidate = end + timedelta(days=1)
                 if pred_bound is None or candidate > pred_bound:

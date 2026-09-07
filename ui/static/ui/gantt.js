@@ -255,11 +255,20 @@
     const actS = t.actual_start ? new Date(t.actual_start + 'T00:00:00') : null;
     const actF = t.actual_finish ? new Date(t.actual_finish + 'T00:00:00') : null;
     const planS = t.start ? new Date(t.start + 'T00:00:00') : null;
+    const planF = t.finish ? new Date(t.finish + 'T00:00:00') : null;
     if (actS && actF) return false;
     const startedLate = !!(actS && planS && actS > planS);
     // Server uses ``today >= data_inizio`` (ui/views.py); keep both in step.
     const overdue = !!(!actS && planS && today >= planS);
-    return startedLate || overdue;
+    // Still open past the planned finish, however punctual the start was.
+    const pastDue = !!(!actF && planF && today > planF);
+    return startedLate || overdue || pastDue;
+  }
+
+  /** Comparison key for an activity_id: a rename can change the case of the
+   *  activity component without rewriting the predecessors pointing at it. */
+  function normActivityId(value) {
+    return String(value == null ? '' : value).trim().toLowerCase();
   }
 
   function parseIsoNoon(raw) {
@@ -805,6 +814,15 @@
       return new Date(actS.getTime() + (planF - planS));
     }
 
+    _overrunEndDate(row, executionEnd, today) {
+      // In-progress activity whose estimated end (actual start + planned
+      // duration) is already behind us: the execution is running over, so the
+      // window keeps stretching up to today.
+      if (!row || !row.actual_start || row.actual_finish) return null;
+      if (!executionEnd || isNaN(executionEnd)) return null;
+      return today > executionEnd ? today : null;
+    }
+
     _badgeAnchorX(plannedEndX, executionEnd, dateToX, clipL, clipR) {
       // Badge always after the later of planned finish and actual/estimated finish.
       const TICK_W = 3;
@@ -1260,7 +1278,7 @@
             ];
             const registerPos = (pos) => {
               if (!pos) return;
-              posKeys.forEach(k => { if (k) taskPosMap[k] = pos; });
+              posKeys.forEach(k => { if (k) taskPosMap[normActivityId(k)] = pos; });
             };
 
             const currentExt = self._plannedExtents(row);
@@ -1352,15 +1370,17 @@
             (row.commessa || '') + (row.item ? '-' + row.item : '') + (row.activity ? '-' + row.activity : ''),
             (row.commessa || '') + (row.item ? '_' + row.item : '') + (row.activity ? '_' + row.activity : ''),
           ];
-          posKeys.forEach(k => { if (k) taskPosMap[k] = taskPos; });
+          posKeys.forEach(k => { if (k) taskPosMap[normActivityId(k)] = taskPos; });
 
           const isStarted = !!(row.actual_start);
           const isCompleted = !!(row.actual_start && row.actual_finish);
           const isOverdue = !isStarted && today >= planS;
           const isLate = !!(row.actual_start && parseDate(row.actual_start) > planS);
+          // Still open past the planned finish: late even if it started on time.
+          const isPastDue = !row.actual_finish && today > planF;
           // Never started and already past the planned finish: the plan is
           // stale. Mirrors _compute_activity_status in ui/views.py.
-          const isExpired = !isStarted && !row.actual_finish && today > planF;
+          const isExpired = !isStarted && isPastDue;
           const boxStrokeW = (!self.simplified && isOverdue) ? '1.5' : (changed ? '2' : '1');
           const boxStrokeOp = theme.barStrokeOpacity;
 
@@ -1383,7 +1403,10 @@
           let badgeAnchorX = plannedEndX;
           if (!self.simplified && isStarted) {
             const actEnd = self._executionEndDate(row, planS, planF);
-            badgeAnchorX = self._badgeAnchorX(plannedEndX, actEnd, dateToX, clipL, clipR);
+            const overrunEnd = self._overrunEndDate(row, actEnd, today);
+            badgeAnchorX = self._badgeAnchorX(
+              plannedEndX, overrunEnd || actEnd, dateToX, clipL, clipR
+            );
             const actS = parseDate(row.actual_start);
             const TAIL_H = 3, TICK_H = BAR_H + 6, TICK_W = 3;
             const actX1raw = dateToX(actS);
@@ -1413,6 +1436,27 @@
             if (tx2 > tx1) drawActualPart(tx1, midY - TAIL_H / 2, tx2 - tx1, TAIL_H, '0.90');
             if (actX1raw + TICK_W >= clipL && actX1raw <= clipR) drawTickAt(actX1raw);
             if (actX2raw >= clipL && actX2raw - TICK_W <= clipR) drawTickAt(actX2raw);
+            if (overrunEnd) {
+              // Dashed tail from the estimated end up to today, closed by a
+              // tick, so the overrun reads apart from the estimated window.
+              const ovX2raw = dateToX(overrunEnd);
+              const ox1 = Math.max(actX2raw, clipL);
+              const ox2 = Math.min(ovX2raw, clipR);
+              if (ox2 > ox1) {
+                const dash = document.createElementNS(NS, 'line');
+                dash.setAttribute('x1', ox1);
+                dash.setAttribute('y1', midY);
+                dash.setAttribute('x2', ox2);
+                dash.setAttribute('y2', midY);
+                dash.setAttribute('stroke', C);
+                dash.setAttribute('stroke-width', TAIL_H);
+                dash.setAttribute('stroke-dasharray', '4,3');
+                dash.setAttribute('opacity', '0.85');
+                dash.setAttribute('pointer-events', 'none');
+                barsSvg.appendChild(dash);
+              }
+              if (ovX2raw >= clipL && ovX2raw - TICK_W <= clipR) drawTickAt(ovX2raw);
+            }
           }
 
           if (boxW > 0) {
@@ -1436,7 +1480,7 @@
             const badges = [];
             if (isCompleted) badges.push({ text: '✓ COMPLETATA', color: 'hsl(142,55%,40%)' });
             else {
-              if (isLate || isOverdue) badges.push({ text: 'IN RITARDO', color: RED });
+              if (isLate || isOverdue || isPastDue) badges.push({ text: 'IN RITARDO', color: RED });
               if (isStarted) badges.push({ text: 'IN LAVORAZIONE', color: SLATE });
               else if (isExpired) badges.push({ text: 'NON INIZIATA · SCADUTA', color: 'hsl(18,90%,48%)' });
               else badges.push({ text: isOverdue ? 'DA INIZIARE' : 'PIANIFICATA', color: SLATE });
@@ -1488,7 +1532,7 @@
         row.predecessors.split(/[;,]/).forEach(predRef => {
           const predKey = predRef.trim();
           if (!predKey) return;
-          const predPos = taskPosMap[predKey];
+          const predPos = taskPosMap[normActivityId(predKey)];
           if (!predPos || predPos.x1 === null || pos.x1 === null) return;
           const fx = predPos.x1 + (predPos.x2 - predPos.x1) / 2;
           const fy = predPos.barBotY;

@@ -50,10 +50,10 @@ const tasks = [
     start: '2099-06-01', finish: '2099-06-10',
   },
   {
-    // started on time, still open → wip only
+    // started on time, planned finish still ahead → wip only
     commessa: 'C1', job_id: 'C1', activity_id: 'C1-wip',
     item: '1', activity: 'wip',
-    start: '2020-01-01', finish: '2020-01-10',
+    start: '2020-01-01', finish: '2099-01-10',
     actual_start: '2020-01-01',
   },
   {
@@ -69,6 +69,13 @@ const tasks = [
     start: '2020-03-01', finish: '2020-03-10',
     actual_start: '2020-03-05',
   },
+  {
+    // started on time but still open past the planned finish → late + wip
+    commessa: 'C3', job_id: 'C3', activity_id: 'C3-overrun',
+    item: '1', activity: 'overrun',
+    start: '2020-04-01', finish: '2020-04-10',
+    actual_start: '2020-04-01',
+  },
 ];
 
 const chart = new GanttChart({
@@ -78,16 +85,16 @@ const chart = new GanttChart({
 });
 chart.setData(tasks, {});
 
-assert(chart.displayTasks().length === 4, 'default shows all tasks');
-assert(document.getElementById('stat-total').textContent === '4', 'total count');
-assert(document.getElementById('stat-wip').textContent === '2', 'wip count');
-assert(document.getElementById('stat-late').textContent === '2', 'late count');
+assert(chart.displayTasks().length === 5, 'default shows all tasks');
+assert(document.getElementById('stat-total').textContent === '5', 'total count');
+assert(document.getElementById('stat-wip').textContent === '3', 'wip count');
+assert(document.getElementById('stat-late').textContent === '3', 'late count');
 
 chart.setStatFilter('wip');
 assert(chart.statFilter === 'wip', 'wip filter active');
 const wipIds = chart.displayTasks().map(t => t.activity_id).sort();
 assert(
-  JSON.stringify(wipIds) === JSON.stringify(['C1-wip', 'C2-late-wip']),
+  JSON.stringify(wipIds) === JSON.stringify(['C1-wip', 'C2-late-wip', 'C3-overrun']),
   `wip filter got ${wipIds.join(',')}`
 );
 assert(
@@ -98,13 +105,13 @@ assert(
 chart.setStatFilter('late');
 const lateIds = chart.displayTasks().map(t => t.activity_id).sort();
 assert(
-  JSON.stringify(lateIds) === JSON.stringify(['C2-late', 'C2-late-wip']),
+  JSON.stringify(lateIds) === JSON.stringify(['C2-late', 'C2-late-wip', 'C3-overrun']),
   `late filter got ${lateIds.join(',')}`
 );
 
 chart.setStatFilter('late'); // toggle off
 assert(chart.statFilter === null, 're-click clears filter');
-assert(chart.displayTasks().length === 4, 'cleared filter shows all');
+assert(chart.displayTasks().length === 5, 'cleared filter shows all');
 
 chart.setStatFilter('wip');
 chart.setStatFilter('total');

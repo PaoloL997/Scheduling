@@ -13,7 +13,6 @@ releases them at ``actual_finish``.
 
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import date
 
 from ui.services.problem_detection import (
@@ -733,7 +732,6 @@ def auto_resolve_resource_overlaps() -> dict:
         _sync_open_overlap_problems({}, activities)
         overdue_pks = {a.pk for a in activities if overdue_not_started(a)}
         sync_overdue_problems(activities)
-        _sync_reschedule_proposals({}, overdue_pks)
         updates = {
             str(att.pk): _activity_update_payload(att)
             for att in Attivita.objects.filter(pk__in=overdue_pks)
@@ -775,7 +773,6 @@ def auto_resolve_resource_overlaps() -> dict:
     _sync_open_overlap_problems(remaining, activities)
     overdue_pks = {a.pk for a in activities if overdue_not_started(a)}
     sync_overdue_problems(activities)
-    _sync_reschedule_proposals(remaining, overdue_pks)
     for pk in remaining:
         affected.add(pk)
     affected |= overdue_pks
@@ -967,45 +964,46 @@ def propose_reschedule(blocked_pk: int) -> dict | None:
     }
 
 
-def _sync_reschedule_proposals(
-    remaining: dict[int, list[dict]],
-    extra_pks: set[int] | None = None,
-) -> None:
-    """Compute and persist reschedule proposals on open problems.
+def compute_reschedule_proposal(blocked_pk: int, *, store: bool = True) -> dict:
+    """Solve a fresh reschedule proposal for one activity.
 
-    Activities in the ``blocked`` role of an overlap are re-planned, as are
-    those in *extra_pks* (never-started activities past their planned finish).
-    The solver runs only when at least one open ``sovrapposizione`` /
-    ``ritardo`` row for the activity has no proposal yet
-    (``proposta_json is None``): already-computed or user-rejected proposals
-    are left untouched, so a plain gantt reload never re-solves.
+    The notes modal asks for this every time it opens. A proposal is never
+    reused: editing any other activity can invalidate it, and a stale one is
+    worse than none. A proposal the planner rejected is returned untouched,
+    so dismissing it stays a decision and not a one-render pause.
+
+    Args:
+        blocked_pk: Primary key of the activity to re-plan.
+        store: Persist the payload on the activity's open reschedulable
+            rows, which is what :func:`apply_reschedule` later applies.
+            Read-only callers pass ``False``.
+
+    Returns:
+        dict: The proposal payload, or a ``status``-only marker
+        (``no_problem``, ``no_proposal``, ``rejected``).
     """
     from ui.models import ProblemaAttivita
 
-    blocked_pks = {
-        pk
-        for pk, items in remaining.items()
-        if any(it.get("role") == "blocked" for it in items)
-    }
-    blocked_pks |= extra_pks or set()
-    if not blocked_pks:
-        return
+    rows = list(
+        ProblemaAttivita.objects.filter(
+            attivita_id=blocked_pk,
+            tipo__in=_RESCHEDULABLE_TIPI,
+            risolto=False,
+        )
+    )
+    if not rows:
+        return {"status": "no_problem"}
+    for row in rows:
+        payload = row.proposta_json
+        if isinstance(payload, dict) and payload.get("status") == "rejected":
+            return payload
 
-    rows_by_pk: dict[int, list[ProblemaAttivita]] = defaultdict(list)
-    for row in ProblemaAttivita.objects.filter(
-        tipo__in=_RESCHEDULABLE_TIPI,
-        risolto=False,
-        attivita_id__in=blocked_pks,
-    ):
-        rows_by_pk[row.attivita_id].append(row)
-
-    for pk, prob_rows in rows_by_pk.items():
-        if not any(r.proposta_json is None for r in prob_rows):
-            continue
-        payload = propose_reschedule(pk) or {"status": "no_proposal"}
-        for row in prob_rows:
+    payload = propose_reschedule(blocked_pk) or {"status": "no_proposal"}
+    if store:
+        for row in rows:
             row.proposta_json = payload
             row.save(update_fields=["proposta_json"])
+    return payload
 
 
 def _stored_proposal(blocked_pk: int) -> dict | None:

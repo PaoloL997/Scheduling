@@ -194,6 +194,54 @@ class GanttResultsPageTest(TestCase):
             )
         self.assertIn("ok", proc.stdout)
 
+    def test_gantt_dependency_arrow_matches_ids_case_insensitively(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("Node.js not available")
+        script = (
+            Path(__file__).resolve().parent / "fixtures" / "gantt_dependency_test.mjs"
+        )
+        if not script.is_file():
+            self.fail(f"Missing gantt test script: {script}")
+        root = Path(__file__).resolve().parents[2]
+        if not (root / "node_modules" / "jsdom").is_dir():
+            self.skipTest("Run `npm install --no-save jsdom` to enable Gantt JS tests")
+        proc = subprocess.run(
+            ["node", str(script)],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            check=False,
+        )
+        if proc.returncode != 0:
+            self.fail(
+                "gantt_dependency_test.mjs failed:\n"
+                + (proc.stderr or proc.stdout or "unknown error")
+            )
+        self.assertIn("ok", proc.stdout)
+
+    def test_gantt_overrun_draws_dashed_tail_to_today(self) -> None:
+        if not shutil.which("node"):
+            self.skipTest("Node.js not available")
+        script = Path(__file__).resolve().parent / "fixtures" / "gantt_overrun_test.mjs"
+        if not script.is_file():
+            self.fail(f"Missing gantt test script: {script}")
+        root = Path(__file__).resolve().parents[2]
+        if not (root / "node_modules" / "jsdom").is_dir():
+            self.skipTest("Run `npm install --no-save jsdom` to enable Gantt JS tests")
+        proc = subprocess.run(
+            ["node", str(script)],
+            capture_output=True,
+            text=True,
+            cwd=root,
+            check=False,
+        )
+        if proc.returncode != 0:
+            self.fail(
+                "gantt_overrun_test.mjs failed:\n"
+                + (proc.stderr or proc.stdout or "unknown error")
+            )
+        self.assertIn("ok", proc.stdout)
+
     def test_gantt_actual_window_draws_ticks(self) -> None:
         if not shutil.which("node"):
             self.skipTest("Node.js not available")

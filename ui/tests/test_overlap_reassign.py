@@ -1,8 +1,9 @@
 """Tests for overlap auto-reassignment and persisted notes/problems."""
 
-from datetime import date
+from datetime import date, timedelta
 
-from django.test import TestCase
+from django.test import Client, TestCase
+from django.utils.timezone import localdate
 
 from ui.models import (
     Attivita,
@@ -16,6 +17,7 @@ from ui.services.optimization_problem import reservations_for_excluded
 from ui.services.overlap_reassign import (
     apply_reschedule,
     auto_resolve_resource_overlaps,
+    compute_reschedule_proposal,
     build_suggestion,
     propose_reschedule,
     reject_reschedule,
@@ -24,6 +26,7 @@ from ui.services.problem_detection import (
     detect_for_all_activities,
     find_resource_overlaps,
 )
+from ui.tests.helpers import write_user
 
 
 class OverlapReassignTest(TestCase):
@@ -254,25 +257,66 @@ class RescheduleProposalTest(TestCase):
         new_start = proposal["blocked"]["start"]
         self.assertNotEqual(new_start, self.blocked.data_inizio.isoformat())
 
-    def test_auto_resolve_persists_proposal_and_is_stable(self) -> None:
-        auto_resolve_resource_overlaps()
-        row = ProblemaAttivita.objects.filter(
+    def _open_row(self):
+        return ProblemaAttivita.objects.filter(
             attivita=self.blocked,
             tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
             risolto=False,
         ).first()
-        self.assertIsNotNone(row)
-        self.assertEqual(row.proposta_json.get("status"), "proposed")
-        first_start = row.proposta_json["blocked"]["start"]
 
-        # A second pass must not recompute (guard on proposta_json is not None).
+    def test_auto_resolve_does_not_presolve(self) -> None:
+        """Loading a page must not spend the solver on unopened problems."""
         auto_resolve_resource_overlaps()
+        row = self._open_row()
+        self.assertIsNotNone(row)
+        self.assertIsNone(row.proposta_json)
+
+    def test_compute_stores_a_fresh_proposal(self) -> None:
+        auto_resolve_resource_overlaps()
+        payload = compute_reschedule_proposal(self.blocked.pk)
+        self.assertEqual(payload["status"], "proposed")
+        row = self._open_row()
         row.refresh_from_db()
-        self.assertEqual(row.proposta_json.get("status"), "proposed")
-        self.assertEqual(row.proposta_json["blocked"]["start"], first_start)
+        self.assertEqual(
+            row.proposta_json["blocked"]["start"], payload["blocked"]["start"]
+        )
+
+    def test_compute_follows_the_current_plan(self) -> None:
+        """A proposal is never reused: moving the blocker re-solves it."""
+        auto_resolve_resource_overlaps()
+        first = compute_reschedule_proposal(self.blocked.pk)
+        # The blocker now holds OV-T1 well past the first proposed slot.
+        self.late.data_fine = date(2026, 10, 15)
+        self.late.save(update_fields=["data_fine"])
+        second = compute_reschedule_proposal(self.blocked.pk)
+        self.assertNotEqual(first["blocked"]["start"], second["blocked"]["start"])
+        row = self._open_row()
+        row.refresh_from_db()
+        self.assertEqual(
+            row.proposta_json["blocked"]["start"], second["blocked"]["start"]
+        )
+
+    def test_compute_keeps_a_rejected_proposal_dismissed(self) -> None:
+        auto_resolve_resource_overlaps()
+        compute_reschedule_proposal(self.blocked.pk)
+        reject_reschedule(self.blocked.pk)
+        self.assertEqual(
+            compute_reschedule_proposal(self.blocked.pk),
+            {"status": "rejected"},
+        )
+
+    def test_compute_can_skip_storing(self) -> None:
+        """Read-only callers get the payload without writing it."""
+        auto_resolve_resource_overlaps()
+        payload = compute_reschedule_proposal(self.blocked.pk, store=False)
+        self.assertEqual(payload["status"], "proposed")
+        row = self._open_row()
+        row.refresh_from_db()
+        self.assertIsNone(row.proposta_json)
 
     def test_reject_marks_proposal_rejected(self) -> None:
         auto_resolve_resource_overlaps()
+        compute_reschedule_proposal(self.blocked.pk)
         reject_reschedule(self.blocked.pk)
         row = ProblemaAttivita.objects.filter(
             attivita=self.blocked,
@@ -284,6 +328,7 @@ class RescheduleProposalTest(TestCase):
 
     def test_apply_reschedule_resolves_overlap(self) -> None:
         auto_resolve_resource_overlaps()
+        compute_reschedule_proposal(self.blocked.pk)
         apply_reschedule(self.blocked.pk)
         self.blocked.refresh_from_db()
         self.assertNotEqual(self.blocked.data_inizio, date(2026, 8, 20))
@@ -296,3 +341,69 @@ class RescheduleProposalTest(TestCase):
             ["OV-T1"],
         )
         self.assertEqual(find_resource_overlaps(), {})
+
+
+class OverdueRescheduleProposalTest(TestCase):
+    """A late activity carries a proposal even without any overlap.
+
+    Reproduces 25078-02-SNA/SNB: never started, past the planned finish and
+    sharing no resource with anyone, so the only open row is ``ritardo``.
+    The proposal must still be computed and exposed by the problems API,
+    which is what the notes modal renders.
+    """
+
+    def setUp(self) -> None:
+        ConfigurazioneTesta.objects.create(
+            modello_testa="TP60",
+            min_mandrini=0,
+            min_tastatori=0,
+            min_maschere=0,
+            min_generatori=0,
+        )
+        TestaItem.objects.create(uid="OV-T9", model="TP60", plant="Valbrembo")
+        Job.objects.create(
+            commessa="C300", delivery_date=localdate() + timedelta(days=90)
+        )
+        self.late = Attivita.objects.create(
+            commessa="C300",
+            item=2,
+            activity="SNA-produzione",
+            stabilimento="Valbrembo",
+            modello_testa="TP60",
+            data_inizio=localdate() - timedelta(days=20),
+            data_fine=localdate() - timedelta(days=10),
+        )
+        RisorsaAttivita.objects.create(
+            attivita=self.late, tipo="testa", risorsa_id="OV-T9"
+        )
+
+    def test_ritardo_row_carries_the_proposal(self) -> None:
+        auto_resolve_resource_overlaps()
+        compute_reschedule_proposal(self.late.pk)
+        self.assertFalse(
+            ProblemaAttivita.objects.filter(
+                attivita=self.late,
+                tipo=ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
+            ).exists(),
+            "No resource is shared: there must be no overlap row.",
+        )
+        row = ProblemaAttivita.objects.get(
+            attivita=self.late,
+            tipo=ProblemaAttivita.TIPO_RITARDO,
+            risolto=False,
+        )
+        self.assertEqual(row.proposta_json.get("status"), "proposed")
+
+    def test_proposal_endpoint_solves_for_a_ritardo_only_activity(self) -> None:
+        auto_resolve_resource_overlaps()
+        client = Client()
+        client.force_login(write_user())
+        resp = client.get(f"/api/attivita/{self.late.pk}/riprogramma/proposta/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["proposta"]["status"], "proposed")
+        row = ProblemaAttivita.objects.get(
+            attivita=self.late,
+            tipo=ProblemaAttivita.TIPO_RITARDO,
+            risolto=False,
+        )
+        self.assertEqual(row.proposta_json.get("status"), "proposed")

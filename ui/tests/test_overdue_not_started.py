@@ -125,6 +125,34 @@ class OverdueStatusPillTest(TestCase):
         )
         self.assertNotIn("scaduta", [p["key"] for p in pills])
 
+    def test_open_activity_past_planned_finish_is_late(self) -> None:
+        """Started on time but still running past the planned finish."""
+        pills = _compute_activity_status(
+            date(2026, 8, 25), date(2026, 9, 1), date(2026, 8, 25), None, TODAY
+        )
+        keys = [p["key"] for p in pills]
+        self.assertIn("in_ritardo", keys)
+        self.assertIn("in_lavorazione", keys)
+        self.assertNotIn("scaduta", keys)
+
+    def test_open_activity_inside_planned_window_is_not_late(self) -> None:
+        pills = _compute_activity_status(
+            date(2026, 9, 1), date(2026, 9, 20), date(2026, 9, 1), None, TODAY
+        )
+        keys = [p["key"] for p in pills]
+        self.assertNotIn("in_ritardo", keys)
+        self.assertIn("in_lavorazione", keys)
+
+    def test_activity_closed_after_planned_finish_stays_completed(self) -> None:
+        pills = _compute_activity_status(
+            date(2026, 8, 25),
+            date(2026, 9, 1),
+            date(2026, 8, 25),
+            date(2026, 9, 3),
+            TODAY,
+        )
+        self.assertEqual([p["key"] for p in pills], ["completata"])
+
 
 class Commessa25078ClosingTest(TestCase):
     """Closing a late activity is a fact, not a plan: it can never be refused."""

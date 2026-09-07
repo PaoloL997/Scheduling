@@ -244,6 +244,11 @@ urlpatterns = [
         name="api_attivita_problemi",
     ),
     path(
+        "api/attivita/<int:pk>/riprogramma/proposta/",
+        views.api_overlap_reschedule_proposal,
+        name="api_overlap_reschedule_proposal",
+    ),
+    path(
         "api/attivita/<int:pk>/riprogramma/accetta/",
         views.api_overlap_reschedule_accept,
         name="api_overlap_reschedule_accept",

@@ -2842,10 +2842,11 @@ function _computeActivityStatus(start, finish, actualStart, actualFinish) {
   const isLate      = !!(actS && actS > planS);
   const isOverdue   = !actS && today >= planS;
   // Mirrors _compute_activity_status in ui/views.py.
-  const isExpired   = !actS && !actF && today > planF;
+  const isPastDue   = !actF && today > planF;
+  const isExpired   = !actS && isPastDue;
   if (isCompleted) return [{ key: 'completata', label: 'COMPLETATA' }];
   const pills = [];
-  if (isLate || isOverdue) pills.push({ key: 'in_ritardo', label: 'IN RITARDO' });
+  if (isLate || isOverdue || isPastDue) pills.push({ key: 'in_ritardo', label: 'IN RITARDO' });
   if (isStarted)           pills.push({ key: 'in_lavorazione', label: 'IN LAVORAZIONE' });
   else if (isExpired)      pills.push({ key: 'scaduta', label: 'NON INIZIATA · SCADUTA' });
   else if (isOverdue)      pills.push({ key: 'da_iniziare', label: 'DA INIZIARE' });
@@ -3843,6 +3844,7 @@ const _NOTE_TIPO_LABEL = {
   spostamento: 'Spostamento richiesto',
   sovrapposizione: 'Sovrapposizione risorse',
   manutenzione: 'Sostituzione per manutenzione',
+  ritardo: 'Attività in ritardo',
 };
 
 function _fmtNoteDateTime(iso) {
@@ -4036,8 +4038,7 @@ function _mountProposalGantt(prop) {
   gantt.renderWhenReady();
 }
 
-function _renderProposalBlock(p) {
-  const prop = p.proposta_json;
+function _renderProposalBlock(prop) {
   if (!prop || prop.status !== 'proposed') return '';
   const b = prop.blocked || {};
   const start = _fmtIsoDay(b.start);
@@ -4066,7 +4067,7 @@ function _renderProposalBlock(p) {
   </div>`;
 }
 
-function _renderNoteItem(p) {
+function _renderNoteItem(p, withProposal) {
   const typeLabel = _NOTE_TIPO_LABEL[p.tipo] || p.tipo;
   const from = p.stabilimento_origine || '?';
   const to = p.stabilimento_attivita || '?';
@@ -4088,7 +4089,11 @@ function _renderNoteItem(p) {
     footHtml = `<p class="note-item__resolved">${esc(p.note_risoluzione)}${esc(when)}</p>`;
   }
 
-  const proposalHtml = (p.tipo === 'sovrapposizione' && isOpen) ? _renderProposalBlock(p) : '';
+  // The caller picks the single row that hosts the proposal; it is solved
+  // after the notes are on screen and dropped into this slot.
+  const proposalHtml = withProposal
+    ? '<div id="reschedule-slot" class="reschedule-pending">Calcolo della proposta di ripianificazione…</div>'
+    : '';
 
   return `<li class="note-item${isOpen ? ' note-item--open' : ''}${p.tipo === 'sovrapposizione' ? ' note-item--overlap' : ''}">
     <div class="note-item__row">
@@ -4099,6 +4104,31 @@ function _renderNoteItem(p) {
     ${proposalHtml}
     ${footHtml}
   </li>`;
+}
+
+async function _loadReschedule(ormId) {
+  const slot = document.getElementById('reschedule-slot');
+  if (!slot) return;
+  try {
+    const resp = await fetch(`/api/attivita/${ormId}/riprogramma/proposta/`);
+    const data = resp.ok ? await resp.json() : null;
+    // The modal may have been closed or reopened while the solver ran.
+    if (_notesModalOrmId !== ormId) return;
+    const current = document.getElementById('reschedule-slot');
+    if (!current) return;
+    const prop = (data && data.ok) ? data.proposta : null;
+    const html = _renderProposalBlock(prop);
+    if (html) {
+      current.className = '';
+      current.innerHTML = html;
+      _mountProposalGantt(prop);
+    } else {
+      current.remove();
+    }
+  } catch (e) {
+    const current = document.getElementById('reschedule-slot');
+    if (current) current.remove();
+  }
 }
 
 async function acceptReschedule(pk) {
@@ -4155,7 +4185,9 @@ async function openNotesModal(ormId) {
       return;
     }
     const data = await resp.json();
-    const problemi = data.problemi || [];
+    const problemi = (data.problemi || [])
+      .slice()
+      .sort((a, b) => (a.risolto === b.risolto ? 0 : (a.risolto ? 1 : -1)));
     if (!problemi.length) {
       body.innerHTML = '<p class="notes-modal-status">Nessuna nota per questa attività.</p>';
       return;
@@ -4167,12 +4199,15 @@ async function openNotesModal(ormId) {
     if (resolvedCount) parts.push(`${resolvedCount} risolt${resolvedCount === 1 ? 'a' : 'e'}`);
     subtitleEl.textContent = parts.join(', ');
     _teardownProposalGantt();
-    body.innerHTML = `<ul class="note-list">${problemi.map(_renderNoteItem).join('')}</ul>`;
-    const proposed = problemi.find(p =>
-      p.tipo === 'sovrapposizione' && !p.risolto
-      && p.proposta_json && p.proposta_json.status === 'proposed'
+    // Any open row of a reschedulable type hosts the proposal, which is
+    // solved on demand: a payload computed earlier may no longer be valid.
+    const host = problemi.find(p =>
+      !p.risolto && (p.tipo === 'sovrapposizione' || p.tipo === 'ritardo')
     );
-    if (proposed) _mountProposalGantt(proposed.proposta_json);
+    body.innerHTML = `<ul class="note-list">${problemi
+      .map(p => _renderNoteItem(p, !!host && p.id === host.id))
+      .join('')}</ul>`;
+    if (host) await _loadReschedule(ormId);
   } catch (e) {
     console.error('openNotesModal error:', e);
     body.innerHTML = '<p class="notes-modal-status notes-modal-status--error">Errore di rete.</p>';

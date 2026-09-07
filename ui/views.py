@@ -20,7 +20,7 @@ from ui.services.bridge_write import (
     update_attivita,
 )
 from ui.services.importer import ImportStatus, get_error_detail, get_status
-from ui.services.identifiers import parse_job_id
+from ui.services.identifiers import normalize_activity_id, parse_job_id
 from ui.services.resource_display import (
     format_activity_resources,
     format_activity_resources_html,
@@ -341,7 +341,7 @@ def _fetch_tasks() -> list[dict]:
             "job_id", "data_inizio", "activity_id"
         )
     )
-    id_to_name = {a.activity_id: a.activity for a in activities}
+    id_to_name = {normalize_activity_id(a.activity_id): a.activity for a in activities}
 
     result = []
     for a in activities:
@@ -361,23 +361,24 @@ def _resolve_predecessor_name(activity_id: str, id_to_name: dict) -> str:
     """Return a short, human-readable name for a predecessor activity_id.
 
     Tries three strategies in order:
-    1. Exact lookup in the provided id_to_name mapping (fastest, most accurate).
+    1. Case-insensitive lookup in id_to_name (fastest, most accurate).
     2. Parse the canonical ``commessa-item-activity`` format and URL-decode the
        activity component.
     3. Return the raw string unchanged as a last resort.
 
     Args:
         activity_id (str): The canonical activity identifier to resolve.
-        id_to_name (dict): Mapping of ``activity_id`` → ``activity`` for the
-            current activity set.
+        id_to_name (dict): Mapping of normalized ``activity_id`` →
+            ``activity`` for the current activity set.
 
     Returns:
         str: The resolved activity name, or the raw ``activity_id`` as fallback.
     """
     from urllib.parse import unquote
 
-    if activity_id in id_to_name:
-        return id_to_name[activity_id]
+    key = normalize_activity_id(activity_id)
+    if key in id_to_name:
+        return id_to_name[key]
 
     parts = activity_id.split("-", 2)
     if len(parts) == 3:
@@ -418,15 +419,18 @@ def _compute_activity_status(
     is_started = bool(actual_start and not actual_finish)
     is_late = bool(actual_start and actual_start > data_inizio)
     is_overdue = not actual_start and today >= data_inizio
+    # Still open past the planned finish: the activity is running late even
+    # when it started on time.
+    is_past_due = not actual_finish and today > data_fine
     # Never started and already past the planned finish: the plan is stale and
     # the activity still holds its resources.
-    is_expired = not actual_start and not actual_finish and today > data_fine
+    is_expired = not actual_start and is_past_due
 
     if is_completed:
         return [{"key": "completata", "label": "COMPLETATA"}]
 
     pills = []
-    if is_late or is_overdue:
+    if is_late or is_overdue or is_past_due:
         pills.append({"key": "in_ritardo", "label": "IN RITARDO"})
 
     if is_started:
@@ -1958,6 +1962,33 @@ def api_attivita_problemi(request: HttpRequest, pk: int) -> JsonResponse:
             p["bloccata_fino"] = p["bloccata_fino"].isoformat()
 
     return JsonResponse({"ok": True, "problemi": problemi})
+
+
+@login_required
+@require_http_methods(["GET"])
+def api_overlap_reschedule_proposal(request: HttpRequest, pk: int) -> JsonResponse:
+    """Solve a reschedule proposal for an activity, fresh at every call.
+
+    The notes modal calls this each time it opens instead of reading a
+    stored payload: any edit to another activity can make an earlier
+    proposal invalid, and applying a stale one would move the activity
+    into a slot that is no longer free.
+
+    Args:
+        request: GET request.
+        pk: Primary key of the activity to re-plan.
+
+    Returns:
+        JsonResponse: ``{"ok": true, "proposta": {...}}``. The payload
+            carries ``status`` ``proposed``, ``rejected``, ``no_proposal``
+            or ``no_problem``. Read-only accounts get the proposal without
+            it being stored, since they cannot apply it anyway.
+    """
+    from ui.permissions import has_write_access
+    from ui.services.overlap_reassign import compute_reschedule_proposal
+
+    proposta = compute_reschedule_proposal(pk, store=has_write_access(request.user))
+    return JsonResponse({"ok": True, "proposta": proposta})
 
 
 @write_required

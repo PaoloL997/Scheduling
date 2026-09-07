@@ -451,6 +451,22 @@
       </svg>
       <span class="gl-txt">Finestra effettiva (inizio effettivo + durata stimata)</span>
     </div>
+    <!-- Sforamento oltre la durata stimata -->
+    <div class="gl-item">
+      <svg width="38" height="14" viewBox="0 0 38 14" fill="none">
+        <!-- left tick: estimated end -->
+        <rect x="0" y="1" width="3" height="12" rx="1.5" class="gl-bar-sample gl-bar-sample--actual"
+              fill="hsl(211,90%,60%)" opacity="0.95"/>
+        <!-- dashed overrun tail -->
+        <line x1="3" y1="7" x2="35" y2="7" class="gl-bar-sample gl-bar-sample--actual"
+              stroke="hsl(211,90%,60%)" stroke-width="3"
+              stroke-dasharray="4,3" opacity="0.85"/>
+        <!-- right tick: today -->
+        <rect x="35" y="1" width="3" height="12" rx="1.5" class="gl-bar-sample gl-bar-sample--actual"
+              fill="hsl(211,90%,60%)" opacity="0.95"/>
+      </svg>
+      <span class="gl-txt">Sforamento della durata stimata (fino a oggi)</span>
+    </div>
     <!-- Consegna -->
     <div class="gl-item">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none">

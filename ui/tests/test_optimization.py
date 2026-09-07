@@ -15,6 +15,7 @@ from ui.models import Attivita, Job, MandrinoItem, RisorsaAttivita, TastatoreIte
 from ui.services.optimization_problem import (
     OptimizationProblemError,
     _duration_days,
+    _parse_predecessor_ids,
     activities_for_job_ids,
     activities_to_gantt_tasks,
     build_scheduling_problem,
@@ -357,6 +358,54 @@ class BuildSchedulingProblemTest(TestCase):
         hydrate_gantt_tasks_resources(stale)
         self.assertEqual(stale[0]["assigned_resources"], ["T9"])
         self.assertEqual(stale[0]["resources"], "T9")
+
+
+class PredecessorMatchingTest(TestCase):
+    """Predecessor references survive a case change of the activity name.
+
+    Real data (25078-02): the Qualifica activity was renamed, so its
+    ``activity_id`` became ``25078-02-Qualifica`` while the successors kept
+    pointing at ``25078-02-qualifica``. Matching those verbatim silently
+    dropped the dependency from the model.
+    """
+
+    def setUp(self) -> None:
+        _seed_inventory()
+        Job.objects.create(commessa="T002", delivery_date="2026-12-31")
+
+    def test_case_different_reference_is_matched(self) -> None:
+        pred = _make_activity("T002", 1, "Qualifica")
+        succ = _make_activity("T002", 1, "SNA")
+        succ.predecessors = pred.activity_id.lower()
+        succ.save(update_fields=["predecessors"])
+        self.assertNotEqual(succ.predecessors, pred.activity_id)
+        self.assertEqual(
+            _parse_predecessor_ids(succ, {pred.activity_id}),
+            [pred.activity_id],
+            "The canonical id of the known activity must come back.",
+        )
+
+    def test_unknown_reference_is_still_dropped(self) -> None:
+        pred = _make_activity("T002", 1, "Qualifica")
+        succ = _make_activity("T002", 1, "SNA")
+        succ.predecessors = "T002-1-collaudo"
+        succ.save(update_fields=["predecessors"])
+        self.assertEqual(_parse_predecessor_ids(succ, {pred.activity_id}), [])
+
+    def test_started_predecessor_bounds_the_successor(self) -> None:
+        """A fixed predecessor pushes the successor past its locked window."""
+        pred = _make_activity("T002", 1, "Qualifica", di="2026-06-01", df="2026-06-10")
+        pred.actual_start = date(2026, 6, 1)
+        pred.save(update_fields=["actual_start"])
+        succ = _make_activity("T002", 1, "SNA", di="2026-06-11", df="2026-06-15")
+        succ.predecessors = pred.activity_id.lower()
+        succ.save(update_fields=["predecessors"])
+
+        problem = build_scheduling_problem([succ.job_id])
+        activity = problem.jobs[0].activities[0]
+        window = fixed_calendar_window(pred)
+        self.assertIsNotNone(window)
+        self.assertEqual(activity.earliest_start, window[1] + timedelta(days=1))
 
 
 class OptimizationWizardTest(TestCase):
