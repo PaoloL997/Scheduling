@@ -82,7 +82,27 @@ function; nothing re-implements it.
 something that already happened, so the save always succeeds. A resulting
 conflict becomes a `sovrapposizione` note on the activity that has not started
 yet, plus a reschedule proposal. Only a real change to the planned dates or to
-the assigned resources can be rejected with a 409.
+the assigned resources can be rejected with a 409 — plus the minimum-kit rule
+below, which is the one thing that can refuse a start.
+
+## Minimum resources to start
+
+An activity cannot be launched — `actual_start` cannot be recorded — before its
+minimum kit is booked: **one testa, one generatore** and, per testa model, the
+minimum of each accessory from `ConfigurazioneTesta` (every minimum defaults to
+`1` when the model has no configuration row).
+
+`ui/services/problem_detection.resource_shortfalls` is the single definition of
+"below the minimum": it raises the `acquisto` notes *and* blocks the start, so
+an activity can be started exactly when it carries no open shortfall.
+`update_attivita` guards only the transition to started, so editing an activity
+that was already running is never refused. The refusal is a 409 whose body
+carries `missing_resources` (category, label, `selezionati`, `richiesti`) on
+both `/api/tasks/update/` and the tablet bridge.
+
+Every activity payload also carries `min_requirements` and `can_start`, so
+Pianificazione warns on the **Inizio effett.** field and stops the save before
+the round-trip.
 
 An activity that was never started and is already past `data_fine` raises a
 `ritardo` note, shows a **NON INIZIATA · SCADUTA** badge, and gets a reschedule

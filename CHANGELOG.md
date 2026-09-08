@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-09-08
+
+### Added
+
+- **Un'attivita' non parte senza le risorse minime.** Registrare l'inizio
+  effettivo di un'attivita' che non ha ancora il kit minimo — una testa, un
+  generatore e, secondo la configurazione della testa, il numero minimo di
+  ciascun accessorio — viene rifiutato con un 409 che elenca cosa manca
+  («Testa 0/1; Generatore 0/1»). Vale per il pannello di Pianificazione e per
+  il bridge tablet, che condividono `update_attivita`. La regola e' la stessa
+  che genera le note `acquisto`: `resource_shortfalls` in
+  `ui/services/problem_detection.py` e' l'unica definizione di «sotto il
+  minimo», usata sia dalle note sia dal blocco dell'avvio. Solo il passaggio a
+  «avviata» e' controllato, quindi le modifiche su un'attivita' gia' partita
+  non vengono rifiutate. Il pannello mostra l'avviso «Avvio bloccato» sul campo
+  «Inizio effett.» e blocca il salvataggio prima di chiamare il server: ogni
+  riga porta i minimi in `data-min-requirements` e ogni attivita' espone
+  `min_requirements` / `can_start` nel payload JSON.
+
 ## 2026-09-07
 
 ### Added

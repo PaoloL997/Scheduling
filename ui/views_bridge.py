@@ -332,7 +332,11 @@ def api_bridge_attivita_update(request: HttpRequest, pk: int) -> JsonResponse:
     try:
         result = update_attivita(pk, parsed)
     except BridgeWriteError as exc:
-        extra = {"conflicts": exc.conflicts} if exc.conflicts is not None else {}
+        extra: dict = {}
+        if exc.conflicts is not None:
+            extra["conflicts"] = exc.conflicts
+        if exc.missing_resources is not None:
+            extra["missing_resources"] = exc.missing_resources
         return _err(exc.message, status=exc.status_code, **extra)
     return JsonResponse({"ok": True, **result})
 
