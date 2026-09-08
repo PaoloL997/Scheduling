@@ -127,8 +127,13 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
 
     * **spostamento** — a selected resource belongs to a plant other than the
       activity's ``stabilimento``.  The resource must be transferred.
-    * **acquisto** — no resource was selected for a given category.  One must
-      be sourced externally (purchase, rental, or loan).
+    * **acquisto** — fewer resources than the configured minimum were selected
+      for a given category.  The missing ones must be sourced externally
+      (purchase, rental, or loan).
+
+    Activities flagged ``tp60_custom`` (Sporgenza Tubo-Piastra) have no minimum
+    on the consumable categories, so leaving mandrini/tastatori/maschere
+    unselected raises no ``acquisto`` note.
 
     Open ``acquisto`` / ``spostamento`` notes are reconciled with the current
     selection: stale ones are auto-resolved, still-valid ones get an updated
@@ -154,7 +159,8 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
     from ui.services.activity_inventory import get_testa_min_requirements
 
     min_requirements = get_testa_min_requirements(
-        (attivita.modello_testa or "").strip() or None
+        (attivita.modello_testa or "").strip() or None,
+        bool(getattr(attivita, "tp60_custom", False)),
     )
     modello_testa = (attivita.modello_testa or "").strip()
 

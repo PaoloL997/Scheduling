@@ -366,6 +366,118 @@ class StrictRequirementsTest(TestCase):
         self.assertNotIn("M_BAD", mandrini_uids)
 
 
+class Tp60CustomRequirementsTest(TestCase):
+    """The TP60 Custom flag relaxes the consumable minimums returned by the API."""
+
+    def setUp(self) -> None:
+        self.factory = RequestFactory()
+        self.user = create_writer("tp60", password="pass")
+        ConfigurazioneTesta.objects.create(
+            modello_testa="TP60", min_mandrini=2, min_maschere=2
+        )
+        TestaItem.objects.create(uid="T_TP60", model="TP60", plant="Valbrembo")
+        MandrinoItem.objects.create(uid="M_TP60", diameter="25", plant="Valbrembo")
+
+    def _get(self, **params) -> dict:
+        request = self.factory.get(
+            "/api/attivita/risorse/",
+            {
+                "stabilimento": "Valbrembo",
+                "data_inizio": "2026-06-01",
+                "data_fine": "2026-06-05",
+                **params,
+            },
+        )
+        request.user = self.user
+        resp = api_get_risorse(request)
+        return json.loads(resp.content)
+
+    def test_min_requirements_are_zeroed_for_consumables(self) -> None:
+        data = self._get(modello_testa="TP60", tp60_custom="1")
+        self.assertTrue(data["ok"])
+        self.assertEqual(
+            data["min_requirements"],
+            {
+                "teste": 1,
+                "mandrini": 0,
+                "tastatori": 0,
+                "maschere": 0,
+                "generatori": 1,
+            },
+        )
+
+    def test_preselection_is_unchanged(self) -> None:
+        """Resources are still proposed exactly as for a normal activity."""
+        plain = self._get(modello_testa="TP60")
+        custom = self._get(modello_testa="TP60", tp60_custom="1")
+        self.assertEqual(custom["pre_testa"], plain["pre_testa"])
+        self.assertEqual(custom["pre_mandrini"], plain["pre_mandrini"])
+        self.assertEqual(custom["pre_mandrini"], ["M_TP60"])
+
+    def test_without_flag_minimums_are_kept(self) -> None:
+        data = self._get(modello_testa="TP60")
+        self.assertEqual(data["min_requirements"]["mandrini"], 2)
+        self.assertEqual(data["min_requirements"]["maschere"], 2)
+
+    def test_update_attivita_toggles_flag_and_clears_shortfalls(self) -> None:
+        from ui.models import ProblemaAttivita
+
+        att = Attivita.objects.create(
+            commessa="C701",
+            item=1,
+            activity="A1",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            stabilimento="Valbrembo",
+            modello_testa="TP60",
+        )
+        update_attivita(
+            att.pk,
+            {
+                "orm_id": att.pk,
+                "risorse": {
+                    "teste": ["T_TP60"],
+                    "mandrini": [],
+                    "tastatori": [],
+                    "maschere": [],
+                    "generatori": [],
+                },
+            },
+        )
+        self.assertTrue(
+            ProblemaAttivita.objects.filter(
+                attivita=att, tipo=ProblemaAttivita.TIPO_ACQUISTO, risolto=False
+            ).exists()
+        )
+
+        update_attivita(att.pk, {"orm_id": att.pk, "tp60_custom": True})
+
+        att.refresh_from_db()
+        self.assertTrue(att.tp60_custom)
+        open_types = set(
+            ProblemaAttivita.objects.filter(
+                attivita=att, tipo=ProblemaAttivita.TIPO_ACQUISTO, risolto=False
+            ).values_list("risorsa_tipo", flat=True)
+        )
+        self.assertEqual(open_types, {"generatore"})
+
+    def test_flag_defaults_from_the_edited_activity(self) -> None:
+        att = Attivita.objects.create(
+            commessa="C700",
+            item=1,
+            activity="A1",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            stabilimento="Valbrembo",
+            modello_testa="TP60",
+            tp60_custom=True,
+        )
+        data = self._get(exclude_activity_id=str(att.pk))
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["min_requirements"]["mandrini"], 0)
+        self.assertEqual(data["min_requirements"]["teste"], 1)
+
+
 class ApiTasksUpdateRisorseTest(TestCase):
     def setUp(self) -> None:
         self.factory = RequestFactory()

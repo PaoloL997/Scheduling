@@ -54,6 +54,11 @@ class Attivita(models.Model):
         max_digits=10, decimal_places=3, null=True, blank=True
     )
 
+    # TP60 Custom (Sporgenza Tubo-Piastra): resources are still selected the
+    # usual way, but deselecting consumables (mandrini, tastatori, maschere)
+    # must not raise an "acquisto" problem — such jobs may not need them.
+    tp60_custom = models.BooleanField(default=False)
+
     synced_to_mpp = models.BooleanField(default=False)
     imported_from_mpp = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

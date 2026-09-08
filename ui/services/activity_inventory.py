@@ -9,6 +9,10 @@ import math
 from collections.abc import Callable
 from datetime import date
 
+#: Consumable categories a TP60 Custom (Sporgenza Tubo-Piastra) activity may
+#: legitimately leave unselected without it counting as a problem.
+TP60_CUSTOM_OPTIONAL_CATS = ("mandrini", "tastatori", "maschere")
+
 
 def get_stabilimenti() -> list[str]:
     """Return sorted plant names from the Stabilimento ORM model.
@@ -231,11 +235,17 @@ def find_modello_testa_in_db(modello_testa: str) -> str | None:
     return partial
 
 
-def get_testa_min_requirements(modello_testa: str | None) -> dict[str, int]:
+def get_testa_min_requirements(
+    modello_testa: str | None, tp60_custom: bool = False
+) -> dict[str, int]:
     """Return minimum resource counts for a testa model configuration.
 
     Args:
         modello_testa: Testa model name used for configuration lookup.
+        tp60_custom: When ``True`` the activity is a TP60 Custom (Sporgenza
+            Tubo-Piastra) job: the consumable categories listed in
+            :data:`TP60_CUSTOM_OPTIONAL_CATS` become optional (minimum ``0``)
+            because such workings may not need them.
 
     Returns:
         dict[str, int]: Keys ``teste``, ``mandrini``, ``tastatori``,
@@ -245,13 +255,17 @@ def get_testa_min_requirements(modello_testa: str | None) -> dict[str, int]:
     min_mandrini, min_tastatori, min_maschere, min_generatori, _ = _get_testa_config(
         modello_testa
     )
-    return {
+    requirements = {
         "teste": 1,
         "mandrini": min_mandrini,
         "tastatori": min_tastatori,
         "maschere": min_maschere,
         "generatori": min_generatori,
     }
+    if tp60_custom:
+        for cat in TP60_CUSTOM_OPTIONAL_CATS:
+            requirements[cat] = 0
+    return requirements
 
 
 def _get_testa_config(modello_testa: str | None) -> tuple[int, int, int, int, set[str]]:
@@ -408,6 +422,7 @@ def get_available_resources(
     strict_requirements: bool = False,
     relax_requirements: bool = False,
     always_include: dict[str, list[str]] | None = None,
+    tp60_custom: bool = False,
 ) -> dict:
     """Build the full resource availability context for the wizard step 5.
 
@@ -459,6 +474,10 @@ def get_available_resources(
             result whatever the filters say — the resources currently assigned
             to the activity being edited.  Those rows are returned first and
             annotated with ``assigned_current`` and ``unavailable_reason``.
+        tp60_custom: When ``True``, the returned ``min_requirements`` mark the
+            consumable categories in :data:`TP60_CUSTOM_OPTIONAL_CATS` as
+            optional.  Pre-selection is unaffected: resources are still
+            proposed exactly as for a normal activity.
 
     Returns:
         dict: With keys ``teste``, ``mandrini``, ``tastatori``, ``maschere``,
@@ -711,7 +730,7 @@ def get_available_resources(
         "pre_tastatori": pre_tastatori,
         "pre_maschere": pre_maschere,
         "pre_generatori": pre_generatori,
-        "min_requirements": get_testa_min_requirements(modello_testa),
+        "min_requirements": get_testa_min_requirements(modello_testa, tp60_custom),
     }
 
 

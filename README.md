@@ -45,6 +45,10 @@ jobs.xlsx   ─┘                              │
 ### WPS integration
 Activities can have a WPS (Welding Procedure Specification) PDF attached. The app uses the **Gemini API** to extract bore dimensions and tube pitch from the PDF, pre-filling the resource selection step of the activity wizard.
 
+### TP60 Custom (Sporgenza Tubo-Piastra)
+
+Below the Gemini measurements the wizard shows a **TP60 Custom (Sporgenza Tubo-Piastra)** flag, saved on `Attivita.tp60_custom`. Resource pre-selection is unchanged, but such workings may not need every accessory: mandrini, tastatori and maschere become optional, so leaving them unselected raises no `acquisto` problem to resolve. Teste and generatori keep their minimums.
+
 ## Access layers
 
 Every account carries one of three permission layers, stored on `UserProfile.ruolo`:

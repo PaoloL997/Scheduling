@@ -204,6 +204,8 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
         a.stabilimento = data["plant"] or ""
     if "responsible" in data:
         a.responsabile = data["responsible"] or ""
+    if "tp60_custom" in data:
+        a.tp60_custom = bool(data["tp60_custom"])
     if "predecessors" in data:
         predecessor_ids = [
             str(v).strip() for v in data["predecessors"] if str(v).strip()
@@ -307,7 +309,7 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
         from ui.services.problem_detection import detect_and_save_problems
 
         detect_and_save_problems(a, risorse_data)
-    elif "plant" in data:
+    elif "plant" in data or "tp60_custom" in data:
         from ui.services.problem_detection import refresh_problems_for_attivita
 
         refresh_problems_for_attivita(a)
