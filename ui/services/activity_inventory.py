@@ -442,6 +442,10 @@ def get_available_resources(
       insufficient).
     * ``pre_tastatori`` — same ranking as mandrini for ``min_tastatori``.
     * ``pre_maschere`` — ``min_maschere`` idle items first, then list order.
+
+    Every count comes from ``min_requirements``, so a category whose minimum
+    is ``0`` — the consumables of a TP60 Custom activity — is pre-selected
+    empty.
     * ``pre_generatori`` — items whose ``model`` is in the compatible-generator
       set; the generator list itself is also filtered to those models.
       Idle items are preferred within that set.
@@ -474,10 +478,11 @@ def get_available_resources(
             result whatever the filters say — the resources currently assigned
             to the activity being edited.  Those rows are returned first and
             annotated with ``assigned_current`` and ``unavailable_reason``.
-        tp60_custom: When ``True``, the returned ``min_requirements`` mark the
-            consumable categories in :data:`TP60_CUSTOM_OPTIONAL_CATS` as
-            optional.  Pre-selection is unaffected: resources are still
-            proposed exactly as for a normal activity.
+        tp60_custom: When ``True``, the consumable categories in
+            :data:`TP60_CUSTOM_OPTIONAL_CATS` have a minimum of ``0``: they are
+            reported as optional in ``min_requirements`` and nothing is
+            pre-selected for them.  The lists themselves are unchanged, so the
+            planner can still tick a consumable by hand.
 
     Returns:
         dict: With keys ``teste``, ``mandrini``, ``tastatori``, ``maschere``,
@@ -497,9 +502,8 @@ def get_available_resources(
     if relax_requirements:
         strict_requirements = False
 
-    min_mandrini, min_tastatori, min_maschere, min_generatori, gen_models = (
-        _get_testa_config(modello_testa)
-    )
+    *_, gen_models = _get_testa_config(modello_testa)
+    min_requirements = get_testa_min_requirements(modello_testa, tp60_custom)
 
     def _predicate(tipo: str) -> Callable[[dict], bool]:
         """Return the shared compatibility rule bound to this activity's requirements.
@@ -690,16 +694,21 @@ def get_available_resources(
     busy_ma = _open_assignment_ids("maschera", exclude_activity_id)
     busy_g = _open_assignment_ids("generatore", exclude_activity_id)
 
-    pre_testa = _select_n(teste, 1, busy_testa)
-    pre_mandrini = _select_n(mandrini, min_mandrini, busy_m, bore_mid)
-    pre_tastatori = _select_n(tastatori, min_tastatori, busy_t, bore_mid)
-    pre_maschere = _select_n(maschere, min_maschere, busy_ma)
+    # Pre-selection follows the same minimums the wizard enforces, so a TP60
+    # Custom activity (consumable minimums at 0) starts with no mandrini,
+    # tastatori or maschere ticked.
+    pre_testa = _select_n(teste, min_requirements["teste"], busy_testa)
+    pre_mandrini = _select_n(mandrini, min_requirements["mandrini"], busy_m, bore_mid)
+    pre_tastatori = _select_n(
+        tastatori, min_requirements["tastatori"], busy_t, bore_mid
+    )
+    pre_maschere = _select_n(maschere, min_requirements["maschere"], busy_ma)
 
     if gen_models:
         compatible = [r for r in generatori if r.get("model") in gen_models]
-        pre_generatori = _select_n(compatible, min_generatori, busy_g)
+        pre_generatori = _select_n(compatible, min_requirements["generatori"], busy_g)
     else:
-        pre_generatori = _select_n(generatori, min_generatori, busy_g)
+        pre_generatori = _select_n(generatori, min_requirements["generatori"], busy_g)
 
     def _pre_first(lst: list, pre: set) -> list:
         """Place pre-selected items at the front of a list.
@@ -730,7 +739,7 @@ def get_available_resources(
         "pre_tastatori": pre_tastatori,
         "pre_maschere": pre_maschere,
         "pre_generatori": pre_generatori,
-        "min_requirements": get_testa_min_requirements(modello_testa, tp60_custom),
+        "min_requirements": min_requirements,
     }
 
 

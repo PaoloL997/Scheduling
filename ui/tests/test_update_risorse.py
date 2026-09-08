@@ -406,13 +406,21 @@ class Tp60CustomRequirementsTest(TestCase):
             },
         )
 
-    def test_preselection_is_unchanged(self) -> None:
-        """Resources are still proposed exactly as for a normal activity."""
+    def test_consumables_are_not_preselected(self) -> None:
+        """The head and generator are still proposed; consumables are not."""
         plain = self._get(modello_testa="TP60")
         custom = self._get(modello_testa="TP60", tp60_custom="1")
+        self.assertEqual(plain["pre_mandrini"], ["M_TP60"])
         self.assertEqual(custom["pre_testa"], plain["pre_testa"])
-        self.assertEqual(custom["pre_mandrini"], plain["pre_mandrini"])
-        self.assertEqual(custom["pre_mandrini"], ["M_TP60"])
+        self.assertEqual(custom["pre_generatori"], plain["pre_generatori"])
+        self.assertEqual(custom["pre_mandrini"], [])
+        self.assertEqual(custom["pre_tastatori"], [])
+        self.assertEqual(custom["pre_maschere"], [])
+
+    def test_consumable_lists_stay_available(self) -> None:
+        """Only the tick is dropped: the planner can still pick one by hand."""
+        custom = self._get(modello_testa="TP60", tp60_custom="1")
+        self.assertIn("M_TP60", [r["uid"] for r in custom["mandrini"]])
 
     def test_without_flag_minimums_are_kept(self) -> None:
         data = self._get(modello_testa="TP60")

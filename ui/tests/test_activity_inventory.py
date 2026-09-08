@@ -13,7 +13,17 @@ from datetime import date
 from django.contrib.auth.models import User
 from django.test import RequestFactory, TestCase
 
-from ui.models import Attivita, RisorsaAttivita, TestaItem
+from ui.models import (
+    Attivita,
+    ConfigurazioneTesta,
+    GeneratoreCompatibile,
+    GeneratoreItem,
+    MandrinoItem,
+    MascheraItem,
+    RisorsaAttivita,
+    TastatoreItem,
+    TestaItem,
+)
 from ui.services.activity_inventory import get_available_resources
 from ui.views_attivita import api_get_risorse
 
@@ -184,3 +194,72 @@ class ApiGetRisorseEditFlowTest(TestCase):
         payload = self._get()
         self.assertTrue(payload["teste"])
         self.assertIsNotNone(_lookup(payload["teste"], "H14"))
+
+
+class Tp60CustomPreselectionTest(TestCase):
+    """A TP60 Custom activity starts with no consumable ticked."""
+
+    def setUp(self) -> None:
+        cfg = ConfigurazioneTesta.objects.create(
+            modello_testa="TP60",
+            min_mandrini=2,
+            min_tastatori=1,
+            min_maschere=1,
+            min_generatori=1,
+        )
+        GeneratoreCompatibile.objects.create(
+            configurazione=cfg, modello_generatore="P6"
+        )
+        TestaItem.objects.create(uid="H1", model="TP60", plant="Valbrembo")
+        GeneratoreItem.objects.create(uid="G1", model="P6", plant="Valbrembo")
+        MandrinoItem.objects.create(uid="M1", diameter="13.0", plant="Valbrembo")
+        MandrinoItem.objects.create(uid="M2", diameter="13.5", plant="Valbrembo")
+        TastatoreItem.objects.create(uid="T1", diameter="13.0", plant="Valbrembo")
+        MascheraItem.objects.create(uid="MA1", pitch="25", plant="Valbrembo")
+
+    def _result(self, *, tp60_custom: bool) -> dict:
+        return get_available_resources(
+            stabilimento="Valbrembo",
+            data_inizio=START,
+            data_fine=FINISH,
+            bore_min=12.0,
+            bore_max=14.0,
+            bore_mid=13.0,
+            tube_pitch=25.0,
+            modello_testa="TP60",
+            tp60_custom=tp60_custom,
+        )
+
+    def test_consumables_are_preselected_without_the_flag(self) -> None:
+        result = self._result(tp60_custom=False)
+        self.assertEqual(result["pre_mandrini"], {"M1", "M2"})
+        self.assertEqual(result["pre_tastatori"], {"T1"})
+        self.assertEqual(result["pre_maschere"], {"MA1"})
+
+    def test_consumables_are_not_preselected_with_the_flag(self) -> None:
+        result = self._result(tp60_custom=True)
+        self.assertEqual(result["pre_mandrini"], set())
+        self.assertEqual(result["pre_tastatori"], set())
+        self.assertEqual(result["pre_maschere"], set())
+
+    def test_head_and_generator_are_still_preselected(self) -> None:
+        result = self._result(tp60_custom=True)
+        self.assertEqual(result["pre_testa"], {"H1"})
+        self.assertEqual(result["pre_generatori"], {"G1"})
+
+    def test_consumables_stay_selectable_by_hand(self) -> None:
+        """Only the tick is dropped: the lists still offer every item."""
+        result = self._result(tp60_custom=True)
+        self.assertEqual([r["uid"] for r in result["mandrini"]], ["M1", "M2"])
+        self.assertEqual([r["uid"] for r in result["tastatori"]], ["T1"])
+        self.assertEqual([r["uid"] for r in result["maschere"]], ["MA1"])
+        self.assertEqual(
+            result["min_requirements"],
+            {
+                "teste": 1,
+                "mandrini": 0,
+                "tastatori": 0,
+                "maschere": 0,
+                "generatori": 1,
+            },
+        )

@@ -44,7 +44,7 @@
 
 ### Added
 
-- **TP60 Custom (Sporgenza Tubo-Piastra)** flag in the add-activity wizard, under the *Misure Gemini* card. Resources are still pre-selected as usual, but consumables left unselected (mandrini, tastatori, maschere) no longer raise an `acquisto` problem. Stored on `Attivita.tp60_custom`.
+- **TP60 Custom (Sporgenza Tubo-Piastra)** flag in the add-activity wizard, under the *Misure Gemini* card. Only testa and generatore stay required: mandrini, tastatori and maschere are not pre-selected and, left unselected, no longer raise an `acquisto` problem. Their lists stay populated so one can still be ticked by hand. Stored on `Attivita.tp60_custom`.
 - **Lo sforamento della durata stimata si vede nel Gantt.** Un'attivita'
   iniziata e non ancora chiusa la cui fine stimata (inizio effettivo +
   durata da preventivo) e' gia' passata prosegue con una linea orizzontale
