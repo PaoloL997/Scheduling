@@ -98,6 +98,43 @@ When a late start makes two activities share a resource:
 
 Overlap warnings on the home Gantt open the same notes modal.
 
+## Tablet scan and compatible accessories
+
+The tablet starts an activity by scanning its components against
+`POST /api/bridge/attivita/<pk>/scan/` (write permission required):
+
+```json
+{"tipo": "mandrino", "codice": "MND-117", "atteso": "MND-102", "conferma": false}
+```
+
+- **Teste and generatori** must match the assigned UID exactly; anything else
+  is refused with `motivo: "non_corrispondente"`.
+- **Mandrini, tastatori and maschere** are checked by measure, with the same
+  rule as the planning picker (`ui/services/measures.py`): bore within
+  `bore_min`–`bore_max`, or mask pitch equal to `tube_pitch`. Out of
+  tolerance → 409 `non_compatibile` with the measures spelled out. The activity
+  must define the requirement (`requisiti`) and the item measure must be
+  readable (`misura`): an unreadable value is never treated as zero.
+- The scanned item is then classified in the activity's occupation window:
+  1. **Free** → allowed; a different piece needs `conferma: true` after the
+     operator sees `"Stai usando MND-117 al posto di MND-102, va bene?"`.
+  2. **Held by an activity in progress or closed** → 409 `occupata`, nothing
+     changes.
+  3. **Held only by planned activities** → same confirmation; on confirm the
+     started activity gets the scanned piece, each robbed activity is
+     re-equipped with a compatible free spare through the overlap engine
+     (`pick_free_spare`), and when none exists the piece is removed there so
+     the standard `acquisto` warning appears in planning. Every step leaves a
+     resolved `sostituzione` note on both sides.
+
+Without `conferma` nothing is written: the response carries
+`richiede_conferma`, `messaggio` and `attivita_sottratte`. `atteso` is inferred
+when the activity holds a single item of that category and required otherwise.
+
+Resource updates through `update_attivita` (web and bridge) replace the full
+assignment list, but a category **absent** from `risorse` keeps its current
+assignments; only an explicit empty list clears it.
+
 ## Demo seeds
 
 ```bash

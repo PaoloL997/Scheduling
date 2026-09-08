@@ -33,6 +33,7 @@ from ui.services.bridge_serializers import (
     serialize_stabilimenti,
 )
 from ui.services.bridge_write import BridgeWriteError, delete_attivita, update_attivita
+from ui.services.scan_substitution import scan_resource
 from ui.views_auth import user_stabilimento_name
 from ui.services.importer import ImportStatus, get_error_detail, get_status
 from ui import views
@@ -335,6 +336,43 @@ def api_bridge_attivita_update(request: HttpRequest, pk: int) -> JsonResponse:
         extra = {"conflicts": exc.conflicts} if exc.conflicts is not None else {}
         return _err(exc.message, status=exc.status_code, **extra)
     return JsonResponse({"ok": True, **result})
+
+
+@bridge_write_guard
+@require_http_methods(["POST"])
+def api_bridge_attivita_scan(request: HttpRequest, pk: int) -> JsonResponse:
+    """Validate a scanned component and, on confirmation, apply a substitution.
+
+    Body: ``{"tipo": "mandrino", "codice": "MND-117", "atteso": "MND-102",
+    "conferma": false}``.  Heads and generators require the exact assigned
+    UID; accessories may be replaced by a dimensionally compatible item that
+    is free, or held only by planned activities, in the activity window.
+
+    Without ``conferma`` nothing is written: the response says whether a
+    confirmation is needed and which message to show.  Refusals carry
+    ``motivo`` (``non_corrispondente``, ``non_compatibile``, ``occupata``,
+    ``requisiti``, ``misura``, ``atteso``, ``date``, ``non_trovato``).
+    """
+    parsed = _parse_json(request)
+    if isinstance(parsed, JsonResponse):
+        return parsed
+    try:
+        result = scan_resource(
+            pk,
+            tipo=str(parsed.get("tipo") or ""),
+            codice=str(parsed.get("codice") or ""),
+            atteso=parsed.get("atteso"),
+            conferma=bool(parsed.get("conferma", False)),
+        )
+    except BridgeWriteError as exc:
+        extra: dict = {}
+        motivo = getattr(exc, "motivo", "")
+        if motivo:
+            extra["motivo"] = motivo
+        if exc.conflicts is not None:
+            extra["conflicts"] = exc.conflicts
+        return _err(exc.message, status=exc.status_code, **extra)
+    return _ok(result)
 
 
 @bridge_write_guard

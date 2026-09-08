@@ -129,12 +129,9 @@ def _merge_resource_snapshot(res: dict) -> dict:
 
 
 def _float_or_none(val) -> float | None:
-    if val is None or val == "":
-        return None
-    try:
-        return float(val)
-    except (TypeError, ValueError):
-        return None
+    from ui.services.measures import parse_measure
+
+    return parse_measure(val)
 
 
 def _fmt_iso_day(value) -> str:
@@ -244,6 +241,45 @@ def _pick_alternative(
         "from_item": from_item,
         "to_item": to_item,
     }
+
+
+def pick_free_spare(tipo: str, from_uid: str, att) -> dict | None:
+    """Return the best compatible free replacement for *from_uid* on *att*.
+
+    Composes the planning availability lists (same requirements, same plant
+    preference, same occupancy) with :func:`_pick_alternative`, so every
+    automatic substitution -- delay overlap, maintenance, tablet scan -- uses
+    one rule.
+
+    Args:
+        tipo: Resource category of the item being replaced.
+        from_uid: UID that must be replaced (never returned as a pick).
+        att: Activity that needs the replacement; requires planned dates.
+
+    Returns:
+        dict | None: Pick dict (``to_uid``, ``to_item`` …) or ``None`` when
+            the activity has no planned window or nothing compatible is free.
+    """
+    from ui.services.activity_inventory import _open_assignment_ids
+
+    if not (att.data_inizio and att.data_fine):
+        return None
+
+    occupied = occupied_ids_with_delay(tipo, att.data_inizio, att.data_fine, att.pk)
+    busy = _open_assignment_ids(tipo, att.pk)
+    availability = _blocked_availability(att)
+    cat = _TIPO_TO_CAT.get(tipo)
+    candidates = (availability or {}).get(cat) if cat else None
+    if candidates is None:
+        return None
+    return _pick_alternative(
+        tipo=tipo,
+        from_uid=from_uid,
+        blocked=att,
+        occupied=occupied,
+        busy=busy,
+        candidates=candidates,
+    )
 
 
 def _paren_traits(item: dict | None) -> str:

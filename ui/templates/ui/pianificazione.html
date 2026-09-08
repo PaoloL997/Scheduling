@@ -3845,6 +3845,7 @@ const _NOTE_TIPO_LABEL = {
   sovrapposizione: 'Sovrapposizione risorse',
   manutenzione: 'Sostituzione per manutenzione',
   ritardo: 'Attività in ritardo',
+  sostituzione: 'Sostituzione da tablet',
 };
 
 function _fmtNoteDateTime(iso) {
@@ -4078,6 +4079,8 @@ function _renderNoteItem(p, withProposal) {
     description = p.descrizione || 'Sovrapposizione sulle risorse.';
   } else if (p.tipo === 'manutenzione') {
     description = p.descrizione || 'Sostituzione automatica per manutenzione.';
+  } else if (p.tipo === 'sostituzione') {
+    description = p.descrizione || 'Risorsa sostituita da una scansione sul tablet.';
   } else {
     description = p.descrizione || `Spostamento richiesto da ${from} a ${to}.`;
   }

@@ -509,6 +509,7 @@ class ProblemaAttivita(models.Model):
     TIPO_SOVRAPPOSIZIONE = "sovrapposizione"
     TIPO_MANUTENZIONE = "manutenzione"
     TIPO_RITARDO = "ritardo"
+    TIPO_SOSTITUZIONE = "sostituzione"
 
     TIPO_CHOICES = [
         (TIPO_SPOSTAMENTO, "Spostamento richiesto"),
@@ -516,6 +517,7 @@ class ProblemaAttivita(models.Model):
         (TIPO_SOVRAPPOSIZIONE, "Sovrapposizione risorse"),
         (TIPO_MANUTENZIONE, "Sostituzione per manutenzione"),
         (TIPO_RITARDO, "Attivita in ritardo"),
+        (TIPO_SOSTITUZIONE, "Sostituzione da tablet"),
     ]
 
     attivita = models.ForeignKey(

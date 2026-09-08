@@ -171,11 +171,7 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
     except ValueError:
         return JsonResponse({"ok": False, "error": "Date non valide."}, status=400)
 
-    def _float(val: str) -> float | None:
-        try:
-            return float(val) if val else None
-        except (ValueError, TypeError):
-            return None
+    from ui.services.measures import parse_measure as _float
 
     always_include: dict[str, list[str]] | None = None
     exclude_activity_id = None

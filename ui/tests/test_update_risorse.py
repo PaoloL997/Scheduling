@@ -15,6 +15,7 @@ from ui.models import (
     MandrinoItem,
     MascheraItem,
     MppSyncQueue,
+    ProblemaAttivita,
     RisorsaAttivita,
     TastatoreItem,
     TestaItem,
@@ -63,6 +64,47 @@ class UpdateAttivitaRisorseTest(TestCase):
         self.assertEqual(rows[0].risorsa_id, "T002")
         self.assertIn("resources_by_tipo", result)
         self.assertEqual(result["resources_by_tipo"]["testa"], ["T002"])
+
+    def test_partial_update_keeps_untouched_categories(self) -> None:
+        RisorsaAttivita.objects.create(
+            attivita=self.att, tipo="mandrino", risorsa_id="M1"
+        )
+        RisorsaAttivita.objects.create(
+            attivita=self.att, tipo="tastatore", risorsa_id="TA1"
+        )
+        result = update_attivita(self.att.pk, {"risorse": {"mandrini": ["M2"]}})
+        by_tipo = result["resources_by_tipo"]
+        self.assertEqual(by_tipo["testa"], ["T001"])
+        self.assertEqual(by_tipo["mandrino"], ["M2"])
+        self.assertEqual(by_tipo["tastatore"], ["TA1"])
+        rows = set(
+            RisorsaAttivita.objects.filter(attivita_id=self.att.pk).values_list(
+                "tipo", "risorsa_id"
+            )
+        )
+        self.assertEqual(
+            rows, {("testa", "T001"), ("mandrino", "M2"), ("tastatore", "TA1")}
+        )
+        entry = MppSyncQueue.objects.get(operation="update_task")
+        payload = json.loads(entry.payload_json)
+        self.assertEqual(sorted(payload["resources"]), ["M2", "T001", "TA1"])
+        self.assertFalse(
+            ProblemaAttivita.objects.filter(
+                attivita=self.att, tipo="acquisto", risorsa_tipo="testa"
+            ).exists()
+        )
+
+    def test_explicit_empty_category_still_clears_it(self) -> None:
+        RisorsaAttivita.objects.create(
+            attivita=self.att, tipo="mandrino", risorsa_id="M1"
+        )
+        update_attivita(self.att.pk, {"risorse": {"mandrini": []}})
+        rows = set(
+            RisorsaAttivita.objects.filter(attivita_id=self.att.pk).values_list(
+                "tipo", "risorsa_id"
+            )
+        )
+        self.assertEqual(rows, {("testa", "T001")})
 
     def test_update_risorse_enqueues_resources_for_mpp_writeback(self) -> None:
         update_attivita(

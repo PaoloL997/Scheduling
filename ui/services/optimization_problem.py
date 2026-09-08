@@ -34,6 +34,7 @@ from ui.models import (
     TestaItem,
 )
 from ui.services.identifiers import normalize_activity_id
+from ui.services.measures import parse_measure
 
 MINUTES_PER_WORKING_DAY = 8 * 60
 
@@ -123,17 +124,8 @@ def _job_ids_query(job_ids: list[str]) -> Any:
 
 
 def _parse_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, int | float):
-        return float(value)
-    text = str(value).strip().replace(",", ".")
-    if not text:
-        return None
-    try:
-        return float(text)
-    except ValueError:
-        return None
+    """Culture-invariant float parsing shared with the planning picker."""
+    return parse_measure(value)
 
 
 def _plant(value: str | None) -> str:

@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026-09-08
+
+### Added
+
+- **Sostituzione di accessori compatibili via scansione dal tablet.** Nuovo
+  endpoint `POST /api/bridge/attivita/<pk>/scan/` (`tipo`, `codice`,
+  `atteso`, `conferma`). Teste e generatori restano a corrispondenza esatta di
+  ID. Per mandrini, tastatori e maschere il codice scansionato puo' essere un
+  pezzo diverso da quello pianificato purche' compatibile per misura (bore
+  min–max, passo), con la stessa regola della pianificazione. Tre casi:
+  pezzo libero → consentito con conferma esplicita («Stai usando X al posto di
+  Y, va bene?») e pianificazione aggiornata; pezzo in uso su un'attivita' in
+  lavorazione → vietato con motivo `occupata`; pezzo assegnato a un'attivita'
+  pianificata sovrapposta → consentito con conferma, l'attivita' sottratta
+  viene ricoperta automaticamente con il motore di riassegnazione esistente
+  (`pick_free_spare`) e, se nessun pezzo compatibile e' libero, resta scoperta
+  con il problema «Risorsa da recuperare» visibile in Pianificazione senza
+  bloccare il tablet. Fuori tolleranza → vietato con misure esplicite. Nuovo
+  tipo di nota `sostituzione` («Sostituzione da tablet») su entrambe le
+  attivita' coinvolte.
+- Servizio condiviso `ui/services/scan_substitution.py`; il selettore del
+  sostituto usato dalla manutenzione e' promosso a
+  `overlap_reassign.pick_free_spare` e riusato dalla scansione.
+
+### Fixed
+
+- **Un aggiornamento risorse parziale non cancella piu' le altre categorie.**
+  `update_attivita` sostituiva tutte le assegnazioni con quelle passate: una
+  richiesta con la sola categoria toccata azzerava silenziosamente teste,
+  tastatori, maschere e generatori. Ora una categoria assente in `risorse`
+  conserva le assegnazioni correnti; solo una lista vuota esplicita la svuota.
+  Coperto da test.
+- **Le misure sono confrontate in modo indipendente dalla cultura.** Diametri e
+  passi sono testo in inventario: il `CAST` SQL leggeva «12,5» come 12 e un
+  valore non numerico come 0, falsando il filtro di compatibilita'. Nuovo
+  modulo `ui/services/measures.py` (`parse_measure`, `is_resource_compatible`)
+  usato dal selettore risorse, dalla preselezione, dall'ottimizzatore e dalla
+  scansione: virgola e punto sono equivalenti, i valori non convertibili sono
+  esclusi dal confronto e mai trattati come zero.
+
 ## 2026-09-07
 
 ### Added
