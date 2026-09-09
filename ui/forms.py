@@ -82,7 +82,7 @@ class WpsUploadForm(forms.Form):
 class AttivitaWpsConfermaForm(forms.Form):
     """Step 3 — confirm and optionally correct data extracted from the WPS.
 
-    Fields are pre-populated from the filename parser and Gemini analysis.
+    Fields are pre-populated from the filename parser and the AI analysis.
     The user can override any value before proceeding.
     """
 

@@ -19,9 +19,7 @@ class RuntimeConfig:
     heartbeat_timeout_seconds: int
     msp_dispatch_retry_interval_seconds: float
     msp_dispatch_retry_max_wait_seconds: float
-    gemini_model: str
-    gemini_thinking_level: str
-    gemini_thinking_budget: int
+    openai_wps_model: str
     auto_import_on_startup: bool
 
 
@@ -107,17 +105,6 @@ def load_runtime_config() -> RuntimeConfig:
         retry_interval, _env_float("MSP_DISPATCH_RETRY_MAX_WAIT_SECONDS", 5.0)
     )
 
-    thinking_level = _env_str("GEMINI_THINKING_LEVEL", "low").lower()
-    if thinking_level not in {"none", "low", "medium", "high"}:
-        thinking_level = "low"
-
-    model = _env_str("GEMINI_MODEL", "gemini-2.5-flash")
-    thinking_budget = _env_int("GEMINI_THINKING_BUDGET", 512)
-    if thinking_budget < 0:
-        thinking_budget = 0
-    if thinking_budget > 8192:
-        thinking_budget = 8192
-
     return RuntimeConfig(
         penale_max=penale_max,
         solver_time_limit=solver_time_limit,
@@ -135,12 +122,19 @@ def load_runtime_config() -> RuntimeConfig:
         heartbeat_timeout_seconds=heartbeat_timeout,
         msp_dispatch_retry_interval_seconds=retry_interval,
         msp_dispatch_retry_max_wait_seconds=retry_max_wait,
-        gemini_model=model,
-        gemini_thinking_level=thinking_level,
-        gemini_thinking_budget=thinking_budget,
+        openai_wps_model=_env_str("OPENAI_WPS_MODEL", "gpt-5.6-sol"),
         auto_import_on_startup=_env_bool("AUTO_IMPORT_ON_STARTUP", True),
     )
 
 
-def gemini_api_key() -> str:
-    return _env_str("GEMINI_API_KEY", "")
+def openai_api_key() -> str:
+    """Return the OpenAI API key.
+
+    Kept out of :class:`RuntimeConfig` on purpose: the config object is
+    serialized to the app-settings endpoints, and the key must never leave
+    the server.
+
+    Returns:
+        str: The configured key, or an empty string when unset.
+    """
+    return _env_str("OPENAI_API_KEY", "")

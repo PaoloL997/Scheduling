@@ -94,10 +94,10 @@ def compute_bore(diameter, s1) -> dict:
 
 
 def extract_tube_pitch(raw_tp) -> float | None:
-    """Parse a tube pitch value from a Gemini response field.
+    """Parse a tube pitch value from an AI extraction field.
 
     Args:
-        raw_tp: Raw value returned by Gemini (number, string, or None).
+        raw_tp: Raw value returned by the model (number, string, or None).
 
     Returns:
         float | None: Numeric tube pitch, or None if the value is missing

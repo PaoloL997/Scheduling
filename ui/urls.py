@@ -277,6 +277,7 @@ urlpatterns = [
         name="api_commesse_deadline",
     ),
     path("impostazioni/", views.impostazioni, name="impostazioni"),
+    path("api/log/", views.api_operation_log, name="api_operation_log"),
     path(
         "api/stabilimenti/",
         views.api_stabilimenti_create,

@@ -43,11 +43,11 @@ jobs.xlsx   ─┘                              │
 ```
 
 ### WPS integration
-Activities can have a WPS (Welding Procedure Specification) PDF attached. The app uses the **Gemini API** to extract bore dimensions and tube pitch from the PDF, pre-filling the resource selection step of the activity wizard.
+Activities can have a WPS (Welding Procedure Specification) PDF attached. The app sends it to the **OpenAI Responses API** (`gpt-5.6-sol` by default, set `OPENAI_WPS_MODEL` in `.env` to change it) to extract bore dimensions and tube pitch, pre-filling the resource selection step of the activity wizard. The answer is constrained by a strict JSON schema, and the extraction is best-effort: when it fails the wizard says why and the planner types the measurements by hand.
 
 ### TP60 Custom (Sporgenza Tubo-Piastra)
 
-Below the Gemini measurements the wizard shows a **TP60 Custom (Sporgenza Tubo-Piastra)** flag, saved on `Attivita.tp60_custom`. Such workings may not need every accessory: mandrini, tastatori and maschere become optional, so nothing is pre-selected for them and leaving them unselected raises no `acquisto` problem to resolve. Their lists stay populated, so the planner can still tick one by hand. Teste and generatori keep their minimums and their pre-selection.
+Below the WPS measurements the wizard shows a **TP60 Custom (Sporgenza Tubo-Piastra)** flag, saved on `Attivita.tp60_custom`. Such workings may not need every accessory: mandrini, tastatori and maschere become optional, so nothing is pre-selected for them and leaving them unselected raises no `acquisto` problem to resolve. Their lists stay populated, so the planner can still tick one by hand. Teste and generatori keep their minimums and their pre-selection.
 
 ## Access layers
 
@@ -197,7 +197,7 @@ python manage.py seed_optimization_demo --clear
 
 ```bash
 poetry install
-cp .env.example .env   # add GEMINI_API_KEY
+cp .env.example .env   # add OPENAI_API_KEY
 python manage.py migrate
 python manage.py runserver
 ```

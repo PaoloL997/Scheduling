@@ -311,7 +311,7 @@
 
   <!-- ── STEP 1: Carica WPS ────────────────────────────────────────────── -->
   <div id="wiz-step-1">
-    <p class="wiz-subtitle">Carica il file WPS (PDF) per auto-compilare i dati tramite analisi Gemini.</p>
+    <p class="wiz-subtitle">Carica il file WPS (PDF) per auto-compilare i dati tramite analisi AI.</p>
 
     <div id="s1-drop-zone">
       <label id="s1-wps-label" for="s1-file-input" class="drop-zone"
@@ -332,7 +332,7 @@
 
     <div id="s1-spinner" style="display:none;" class="wiz-spinner-wrap">
       <div class="spinner"></div>
-      <p class="wiz-subtitle" style="margin:.75rem 0 0;">Analisi Gemini in corso…</p>
+      <p class="wiz-subtitle" style="margin:.75rem 0 0;">Analisi WPS in corso…</p>
     </div>
 
     <!-- Data panel — shown after WPS analysis or manual entry -->
@@ -378,7 +378,7 @@
         <div class="wiz-meas-header">
           <div class="wiz-meas-title">
             <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            Misure Gemini (mm)
+            Misure WPS (mm)
           </div>
           <span class="wiz-meas-hint">Calcolate dal WPS · modificabili</span>
         </div>
@@ -784,7 +784,7 @@ const PIAN_TIPO_ATTIVITA_OPTIONS = {{ tipi_attivita_json|safe }};
 const WIZ = {
   stabilimento:'', responsabile:'',
   tmpPath:'', wpsName:'',
-  parsed:{}, gemini:{}, bore:{},
+  parsed:{}, misure:{}, bore:{},
   modello_testa:'', commessa:'', item:'1', attivita:'',
   dataInizio:'', dataFine:'',
   newJob: null,
@@ -1273,7 +1273,7 @@ function openAddModal(opts) {
   _pianLockedJob = opts && opts.commessa ? opts.commessa : null;
   Object.assign(WIZ, {
     stabilimento:'', responsabile:'',
-    tmpPath:'', wpsName:'', parsed:{}, gemini:{}, bore:{},
+    tmpPath:'', wpsName:'', parsed:{}, misure:{}, bore:{},
     modello_testa:'', commessa:'', item:'1', attivita:'',
     dataInizio:'', dataFine:'',
     newJob: null,
@@ -1382,7 +1382,7 @@ async function _s1Upload(file) {
       WIZ.tmpPath = data.tmp_path || '';
       WIZ.wpsName = data.wps_name || file.name;
       WIZ.parsed  = data.parsed  || {};
-      WIZ.gemini  = data.gemini  || {};
+      WIZ.misure  = data.misure  || {};
       WIZ.bore    = data.bore    || {};
       _s1ShowDataPanel(true);
       await _s1CheckCommessa(WIZ.parsed.commessa || '', WIZ.parsed.item || 1);
@@ -1668,7 +1668,7 @@ function _s1ShowError(msg) {
 }
 
 function step1Skip() {
-  WIZ.tmpPath = ''; WIZ.wpsName = ''; WIZ.parsed = {}; WIZ.gemini = {}; WIZ.bore = {};
+  WIZ.tmpPath = ''; WIZ.wpsName = ''; WIZ.parsed = {}; WIZ.misure = {}; WIZ.bore = {};
   WIZ.newJob = null;
   WIZ.predecessors    = [];
   WIZ.predecessorItems = [];
@@ -1759,7 +1759,7 @@ function _s1ShowDataPanel(autofill) {
   if (autofill) {
     const p = WIZ.parsed;
     const b = WIZ.bore || {};
-    const g = WIZ.gemini || {};
+    const g = WIZ.misure || {};
     const setF = (id, val, highlight) => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -1779,15 +1779,15 @@ function _s1ShowDataPanel(autofill) {
       v => v != null && v !== ''
     );
     if (g.error) {
-      notice.textContent = `Gemini non ha estratto le misure: ${g.error}. Inseriscile manualmente.`;
+      notice.textContent = `L'analisi WPS non ha estratto le misure: ${g.error}. Inseriscile manualmente.`;
       notice.className = 's1-autofill-notice is-warn';
       notice.style.display = '';
     } else if (!hasBore) {
-      notice.textContent = 'Gemini non ha trovato diameter/S1 nel WPS. Inserisci le misure manualmente.';
+      notice.textContent = "L'analisi WPS non ha trovato diametro/S1 nel documento. Inserisci le misure manualmente.";
       notice.className = 's1-autofill-notice is-warn';
       notice.style.display = '';
     } else {
-      notice.textContent = 'Misure calcolate da Gemini. Puoi correggerle se necessario.';
+      notice.textContent = 'Misure calcolate dal WPS. Puoi correggerle se necessario.';
       notice.className = 's1-autofill-notice is-ok';
       notice.style.display = '';
     }

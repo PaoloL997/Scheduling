@@ -339,6 +339,18 @@ def api_bridge_attivita_update(request: HttpRequest, pk: int) -> JsonResponse:
         if exc.missing_resources is not None:
             extra["missing_resources"] = exc.missing_resources
         return _err(exc.message, status=exc.status_code, **extra)
+
+    from ui.services.operation_log import describe_attivita_update, record_operation
+
+    record_operation(
+        request,
+        azione="attivita_modifica",
+        descrizione=(
+            f"Attività {result['activity_id']}: {describe_attivita_update(parsed)}"
+        ),
+        riferimento=result["activity_id"],
+    )
+
     return JsonResponse({"ok": True, **result})
 
 
@@ -376,16 +388,54 @@ def api_bridge_attivita_scan(request: HttpRequest, pk: int) -> JsonResponse:
         if exc.conflicts is not None:
             extra["conflicts"] = exc.conflicts
         return _err(exc.message, status=exc.status_code, **extra)
+
+    if result.get("applicata"):
+        from ui.models import Attivita
+        from ui.services.operation_log import record_operation
+
+        activity_id = (
+            Attivita.objects.filter(pk=pk).values_list("activity_id", flat=True).first()
+        )
+        descrizione = (
+            f"Sostituzione {result['tipo']} {result.get('atteso') or '—'} → "
+            f"{result['codice']} su scansione tablet"
+        )
+        n_riassegnazioni = len(result.get("riassegnazioni") or [])
+        if n_riassegnazioni:
+            descrizione += f"; {n_riassegnazioni} attività ricoperte automaticamente"
+        record_operation(
+            request,
+            azione="attivita_sostituzione_tablet",
+            descrizione=descrizione,
+            riferimento=activity_id or "",
+        )
+
     return _ok(result)
 
 
 @bridge_write_guard
 @require_http_methods(["DELETE"])
 def api_bridge_attivita_delete(request: HttpRequest, pk: int) -> JsonResponse:
+    from ui.models import Attivita
+
+    activity_id = (
+        Attivita.objects.filter(pk=pk).values_list("activity_id", flat=True).first()
+    )
+
     try:
         delete_attivita(pk)
     except BridgeWriteError as exc:
         return _err(exc.message, status=exc.status_code)
+
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="attivita_elimina",
+        descrizione=f"Eliminata attività {activity_id or pk}",
+        riferimento=activity_id or "",
+    )
+
     return _ok()
 
 

@@ -32,7 +32,7 @@ class AppSettingsApiTest(TestCase):
         PENALE_MAX="5",
         SOLVER_TIME_LIMIT="10",
         HEARTBEAT_INTERVAL_SECONDS="30",
-        GEMINI_MODEL="gemini-2.5-flash",
+        OPENAI_WPS_MODEL="gpt-5.6-sol",
     )
     def test_get_returns_defaults(self) -> None:
         resp = self.client.get(reverse("api_app_settings"))
@@ -42,7 +42,7 @@ class AppSettingsApiTest(TestCase):
         self.assertEqual(data["penale_max"], 5.0)
         self.assertEqual(data["solver_time_limit"], 10.0)
         self.assertEqual(data["heartbeat_interval_seconds"], 30)
-        self.assertEqual(data["gemini_model"], "gemini-2.5-flash")
+        self.assertEqual(data["openai_wps_model"], "gpt-5.6-sol")
 
     def test_put_is_disabled_for_env_backed_settings(self) -> None:
         resp = self.client.put(

@@ -370,6 +370,15 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
             problema.save(
                 update_fields=["risolto", "note_risoluzione", "data_risoluzione"]
             )
+
+            from ui.services.operation_log import record_operation
+
+            record_operation(
+                source="sistema",
+                azione="sistema_problema_risolto",
+                descrizione=f"Problema risolto automaticamente: {problema.descrizione}",
+                riferimento=f"{attivita.commessa}/{attivita.item}/{attivita.activity}",
+            )
             continue
 
         desired = current_by_sig[sig]
@@ -640,6 +649,19 @@ def sync_overdue_problems(
             problema.save(
                 update_fields=["risolto", "note_risoluzione", "data_risoluzione"]
             )
+
+            from ui.services.operation_log import record_operation
+
+            resolved_att = problema.attivita
+            record_operation(
+                source="sistema",
+                azione="sistema_problema_risolto",
+                descrizione=f"Ritardo risolto: {problema.descrizione}",
+                riferimento=(
+                    f"{resolved_att.commessa}/{resolved_att.item}/"
+                    f"{resolved_att.activity}"
+                ),
+            )
             continue
         seen.add(problema.attivita_id)
         descrizione = _overdue_description(att)
@@ -662,6 +684,7 @@ def sync_overdue_problems(
     ]
     if to_create:
         ProblemaAttivita.objects.bulk_create(to_create)
+
     return len(to_create)
 
 

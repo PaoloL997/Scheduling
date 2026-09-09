@@ -210,6 +210,51 @@
         </div>
         </div>
     </section>
+
+    {% if can_write %}
+    <section class="settings-accordion" id="section-log">
+        <div class="settings-accordion-header">
+            <button type="button" class="settings-accordion-toggle" aria-expanded="false" aria-controls="panel-log" onclick="toggleSettingsAccordion(this)">
+                <svg class="settings-accordion-chevron" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <polyline points="2,4 7,10 12,4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="settings-accordion-label">Log operazioni</span>
+                <span class="settings-accordion-count">{{ log_total_count }}</span>
+            </button>
+        </div>
+        <div class="settings-accordion-panel" id="panel-log" hidden>
+        <div class="settings-accordion-panel-inner">
+        <table class="settings-table" id="table-log">
+            <thead>
+                <tr>
+                    <th>Quando</th>
+                    <th>Origine</th>
+                    <th>Utente</th>
+                    <th>Operazione</th>
+                </tr>
+            </thead>
+            <tbody id="tbody-log">
+                {% for entry in log_entries %}
+                <tr data-id="{{ entry.id }}">
+                    <td>{{ entry.timestamp_display }}</td>
+                    <td><span class="log-badge log-badge--{{ entry.source }}">{{ entry.source_label }}</span></td>
+                    <td>{{ entry.username }}</td>
+                    <td>{{ entry.descrizione }}{% if entry.riferimento %} <span class="log-riferimento">({{ entry.riferimento }})</span>{% endif %}</td>
+                </tr>
+                {% empty %}
+                <tr class="empty-row" id="empty-log">
+                    <td colspan="4">Nessuna operazione registrata.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div class="log-load-more-wrap" id="log-load-more-wrap" {% if not log_next_before_id %}hidden{% endif %}>
+            <button type="button" class="btn btn-ghost" id="log-load-more-btn" onclick="loadMoreLogEntries()">Carica altri</button>
+        </div>
+        </div>
+        </div>
+    </section>
+    {% endif %}
 </div>
 
 <!-- ------------------------------------------------------------------ -->
@@ -338,6 +383,51 @@ function toggleSettingsAccordion(btn) {
     accordion.classList.toggle('is-open', isOpen);
     btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
     if (panel) panel.hidden = !isOpen;
+}
+
+let logNextBeforeId = {{ log_next_before_id|default:"null" }};
+
+function _escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function _appendLogRow(entry) {
+    const tbody = document.getElementById('tbody-log');
+    if (!tbody) return;
+    const emptyRow = document.getElementById('empty-log');
+    if (emptyRow) emptyRow.remove();
+    const tr = document.createElement('tr');
+    tr.dataset.id = entry.id;
+    const rif = entry.riferimento
+        ? ' <span class="log-riferimento">(' + _escapeHtml(entry.riferimento) + ')</span>'
+        : '';
+    tr.innerHTML =
+        '<td>' + _escapeHtml(entry.timestamp_display) + '</td>' +
+        '<td><span class="log-badge log-badge--' + entry.source + '">' + _escapeHtml(entry.source_label) + '</span></td>' +
+        '<td>' + _escapeHtml(entry.username) + '</td>' +
+        '<td>' + _escapeHtml(entry.descrizione) + rif + '</td>';
+    tbody.appendChild(tr);
+}
+
+function loadMoreLogEntries() {
+    const btn = document.getElementById('log-load-more-btn');
+    const wrap = document.getElementById('log-load-more-wrap');
+    if (!logNextBeforeId) {
+        if (wrap) wrap.hidden = true;
+        return;
+    }
+    btn.disabled = true;
+    fetch('/api/log/?before_id=' + logNextBeforeId + '&limit=50')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data.ok) return;
+            data.items.forEach(_appendLogRow);
+            logNextBeforeId = data.next_before_id;
+            if (wrap) wrap.hidden = !logNextBeforeId;
+        })
+        .finally(function () { btn.disabled = false; });
 }
 
 (function () {

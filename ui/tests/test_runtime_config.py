@@ -12,8 +12,6 @@ class RuntimeConfigTest(TestCase):
         HEARTBEAT_TIMEOUT_SECONDS="2",
         MSP_DISPATCH_RETRY_INTERVAL_SECONDS="0.01",
         MSP_DISPATCH_RETRY_MAX_WAIT_SECONDS="0.02",
-        GEMINI_THINKING_LEVEL="invalid",
-        GEMINI_THINKING_BUDGET="999999",
     )
     def test_load_runtime_config_applies_safety_bounds(self) -> None:
         cfg = load_runtime_config()
@@ -21,5 +19,7 @@ class RuntimeConfigTest(TestCase):
         self.assertEqual(cfg.heartbeat_timeout_seconds, 10)
         self.assertEqual(cfg.msp_dispatch_retry_interval_seconds, 0.1)
         self.assertEqual(cfg.msp_dispatch_retry_max_wait_seconds, 0.1)
-        self.assertEqual(cfg.gemini_thinking_level, "low")
-        self.assertEqual(cfg.gemini_thinking_budget, 8192)
+
+    @override_settings(OPENAI_WPS_MODEL="")
+    def test_empty_wps_model_falls_back_to_default(self) -> None:
+        self.assertEqual(load_runtime_config().openai_wps_model, "gpt-5.6-sol")

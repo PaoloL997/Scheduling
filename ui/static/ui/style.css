@@ -1948,7 +1948,7 @@ a .nav-warn-badge {
 .wiz-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
 .wiz-grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; }
 
-/* Measurements section in step 1 — Gemini results card */
+/* Measurements section in step 1 — WPS results card */
 .wiz-meas-section {
   margin-top: 1rem;
   padding: 1rem 1.125rem 0.875rem;
@@ -2531,6 +2531,22 @@ a .nav-warn-badge {
 .settings-form-row label { font-size: 0.9rem; color: var(--text-muted); white-space: nowrap; }
 .settings-input { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 0.4rem 0.6rem; font-size: 0.9rem; width: 7rem; }
 
+/* ---- Log operazioni badges ------------------------------------------- */
+.log-badge {
+  display: inline-block;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+}
+.log-badge--web    { background: hsl(215 80% 60% / 0.12); color: var(--accent); }
+.log-badge--tablet { background: hsl(142 70% 45% / 0.12); color: var(--green); }
+.log-badge--sistema{ background: hsl(38 90% 50% / 0.12); color: var(--amber); }
+.log-riferimento { color: var(--text-muted); font-size: 0.8125rem; }
+.log-load-more-wrap { display: flex; justify-content: center; padding: 0.75rem; }
+
 .color-swatch {
   display: inline-block; width: 1.125rem; height: 1.125rem;
   border-radius: 0.25rem; border: 1px solid var(--border);
@@ -2650,7 +2666,7 @@ a .nav-warn-badge {
 }
 .pill-label { color: var(--text-subtle); }
 
-/* Gemini data card */
+/* WPS data card */
 .data-cell { padding: 0.625rem 0.875rem; background: var(--surface-2); border-radius: 0.375rem; }
 .data-cell-label { font-size: 0.7rem; color: var(--text-subtle); margin-bottom: 0.125rem; }
 .data-cell-value { font-size: 1rem; font-weight: 600; color: var(--text); }
@@ -3780,17 +3796,24 @@ body.is-readonly .btn-delete {
   position: fixed;
   z-index: 10050;
   min-width: 10rem;
-  max-width: 20rem;
-  padding: 0.5rem 0.625rem;
+  max-width: 26rem;
+  padding: 0.625rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
-  box-shadow: 0 8px 28px hsl(220 16% 4% / 0.38);
+  box-shadow: 0 8px 28px hsl(220 16% 4% / 0.38), inset 3px 0 0 var(--inv-avail-accent, transparent);
   color: var(--text);
   font-size: 0.75rem;
-  line-height: 1.45;
+  line-height: 1.5;
   white-space: pre-line;
   pointer-events: none;
+  animation: inv-avail-pop-in 0.12s ease-out;
+}
+#inv-avail-popover[data-state="libera"] { --inv-avail-accent: var(--green); }
+#inv-avail-popover[data-state="occupata"] { --inv-avail-accent: var(--red); }
+@keyframes inv-avail-pop-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 @media (max-width: 720px) {
   .inv-head-row {

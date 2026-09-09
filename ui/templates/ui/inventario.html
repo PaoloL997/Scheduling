@@ -503,6 +503,7 @@
     if (!pop) return;
     pop.hidden = true;
     pop.textContent = '';
+    pop.removeAttribute('data-state');
     _availAnchor = null;
   }
 
@@ -511,6 +512,7 @@
     var pop = document.getElementById('inv-avail-popover');
     if (!tip || !pop) return;
     pop.textContent = tip;
+    pop.dataset.state = el.classList.contains('inv-avail--occupata') ? 'occupata' : 'libera';
     pop.hidden = false;
     _availAnchor = el;
     var margin = 8;

@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-09-10
+
+### Changed
+
+- **La lettura del WPS passa da Gemini a OpenAI.** L'estrazione di diametro, S1
+  e passo tubi dal PDF usa ora la Responses API di OpenAI, con modello
+  predefinito `gpt-5.6-sol` configurabile da `.env` con `OPENAI_WPS_MODEL`. Il
+  PDF viene inviato in base64 e la risposta e' vincolata da uno schema
+  strutturato: non serve piu' ripulire il JSON dal markdown ne' cercarlo con
+  espressioni regolari. La chiamata ha ora un timeout di 90 secondi e un solo
+  tentativo di rinvio — prima non aveva alcun timeout e il browser poteva
+  restare in attesa a tempo indefinito. Chiave assente o non valida, credito
+  esaurito, limite di richieste, timeout, rete e modello inesistente hanno
+  ciascuno un messaggio in italiano che dice cosa controllare. Nuovo servizio
+  `ui/services/wps_ai.py` al posto di `ui/services/gemini.py`.
+- La card «Misure Gemini» del wizard si chiama ora **«Misure WPS»** e la
+  risposta di `/api/attivita/analizza/` espone la chiave `misure` al posto di
+  `gemini`.
+
+### Removed
+
+- Variabili `.env` `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_THINKING_LEVEL` e
+  `GEMINI_THINKING_BUDGET`, sostituite da `OPENAI_API_KEY` e
+  `OPENAI_WPS_MODEL`. Di conseguenza `/api/app-settings/` e
+  `/api/bridge/app-settings/` espongono `openai_wps_model` al posto dei tre
+  campi Gemini. Le due impostazioni «thinking» erano peraltro gia' inerti: il
+  budget era fissato a zero nel codice e il livello non veniva mai letto.
+- Dipendenza `google-genai`, sostituita da `openai` (finora presente solo come
+  dipendenza indiretta di `langchain-openai`).
+- Template del vecchio wizard WPS a piu' pagine (`attivita_wps.html` e
+  `attivita_wps_conferma.html`): non erano raggiungibili da nessuna URL e
+  contenevano gli ultimi riferimenti a Gemini.
+
 ## 2026-09-09
 
 ### Added

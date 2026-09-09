@@ -12,7 +12,7 @@ from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from ui.permissions import deny_if_read_only, write_required
+from ui.permissions import deny_if_read_only, has_write_access, write_required
 from ui.services.bridge_write import (
     BridgeWriteError,
     delete_attivita,
@@ -808,6 +808,15 @@ def api_inventario_add(request: HttpRequest, table: str) -> JsonResponse:
     except RuntimeError as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=503)
 
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="inventario_crea",
+        descrizione=f"Creata risorsa {table} {uid}",
+        riferimento=f"{table}:{uid}",
+    )
+
     return JsonResponse({"ok": True, "uid": uid}, status=201)
 
 
@@ -857,6 +866,16 @@ def api_inventario_detail(request: HttpRequest, table: str, uid: str) -> JsonRes
             return JsonResponse({"ok": False, "error": str(exc)}, status=404)
         except RuntimeError as exc:
             return JsonResponse({"ok": False, "error": str(exc)}, status=503)
+
+        from ui.services.operation_log import record_operation
+
+        record_operation(
+            request,
+            azione="inventario_elimina",
+            descrizione=f"Eliminata risorsa {table} {uid}",
+            riferimento=f"{table}:{uid}",
+        )
+
         return JsonResponse({"ok": True})
 
     try:
@@ -882,6 +901,15 @@ def api_inventario_detail(request: HttpRequest, table: str, uid: str) -> JsonRes
         except RuntimeError as exc:
             return JsonResponse({"ok": False, "error": str(exc)}, status=503)
 
+        from ui.services.operation_log import record_operation
+
+        record_operation(
+            request,
+            azione="inventario_modifica",
+            descrizione=f"Aggiornata risorsa {table} {uid} → {new_uid}",
+            riferimento=f"{table}:{new_uid}",
+        )
+
         return JsonResponse({"ok": True, "uid": new_uid})
 
     # PUT
@@ -898,6 +926,15 @@ def api_inventario_detail(request: HttpRequest, table: str, uid: str) -> JsonRes
         return JsonResponse({"ok": False, "error": str(exc)}, status=status_code)
     except RuntimeError as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=503)
+
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="inventario_modifica",
+        descrizione=f"Aggiornata risorsa {table} {uid} → {new_uid}",
+        riferimento=f"{table}:{new_uid}",
+    )
 
     return JsonResponse({"ok": True, "uid": new_uid})
 
@@ -942,6 +979,17 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
     except Exception as exc:
         logger.error("Errore aggiornamento Attivita pk=%s: %s", orm_id, exc)
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+
+    from ui.services.operation_log import describe_attivita_update, record_operation
+
+    record_operation(
+        request,
+        azione="attivita_modifica",
+        descrizione=(
+            f"Attività {result['activity_id']}: {describe_attivita_update(data)}"
+        ),
+        riferimento=result["activity_id"],
+    )
 
     return JsonResponse({"ok": True, **result})
 
@@ -1016,6 +1064,15 @@ def api_jobs_create(request: HttpRequest) -> JsonResponse:
     except Exception as exc:
         logger.error("Errore creazione Job: %s", exc)
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="commessa_crea",
+        descrizione=f"Creata commessa {job.commessa}",
+        riferimento=job.commessa,
+    )
 
     return JsonResponse(
         {
@@ -1116,6 +1173,15 @@ def api_jobs_update(request: HttpRequest) -> JsonResponse:
         logger.error("Errore aggiornamento Job: %s", exc)
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
 
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="commessa_modifica",
+        descrizione=f"Aggiornata commessa {commessa or job_id}",
+        riferimento=commessa or job_id,
+    )
+
     return JsonResponse({"ok": True})
 
 
@@ -1193,9 +1259,7 @@ def api_app_settings(request: HttpRequest) -> JsonResponse:
             "heartbeat_timeout_seconds": runtime.heartbeat_timeout_seconds,
             "msp_dispatch_retry_interval_seconds": runtime.msp_dispatch_retry_interval_seconds,
             "msp_dispatch_retry_max_wait_seconds": runtime.msp_dispatch_retry_max_wait_seconds,
-            "gemini_model": runtime.gemini_model,
-            "gemini_thinking_level": runtime.gemini_thinking_level,
-            "gemini_thinking_budget": runtime.gemini_thinking_budget,
+            "openai_wps_model": runtime.openai_wps_model,
             "auto_import_on_startup": runtime.auto_import_on_startup,
         }
     )
@@ -1238,6 +1302,12 @@ def api_attivita_delete(request: HttpRequest) -> JsonResponse:
     if not orm_id:
         return JsonResponse({"ok": False, "error": "orm_id mancante."}, status=400)
 
+    activity_id = (
+        Attivita.objects.filter(pk=int(orm_id))
+        .values_list("activity_id", flat=True)
+        .first()
+    )
+
     try:
         delete_attivita(int(orm_id))
     except BridgeWriteError as exc:
@@ -1245,6 +1315,15 @@ def api_attivita_delete(request: HttpRequest) -> JsonResponse:
     except Exception as exc:
         logger.error("Errore eliminazione Attivita pk=%s: %s", orm_id, exc)
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="attivita_elimina",
+        descrizione=f"Eliminata attività {activity_id or orm_id}",
+        riferimento=activity_id or "",
+    )
 
     return JsonResponse({"ok": True})
 
@@ -1316,6 +1395,15 @@ def api_jobs_delete(request: HttpRequest) -> JsonResponse:
             "Errore eliminazione Job commessa=%s job_id=%s: %s", commessa, job_id, exc
         )
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
+
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="commessa_elimina",
+        descrizione=f"Eliminata commessa {commessa or job_id}",
+        riferimento=commessa or job_id,
+    )
 
     return JsonResponse({"ok": True})
 
@@ -1507,6 +1595,18 @@ def impostazioni(request: HttpRequest):
             }
         )
 
+    log_entries: list[dict] = []
+    log_total_count = 0
+    log_next_before_id = None
+    if has_write_access(request.user):
+        from ui.models import OperationLog
+
+        log_total_count = OperationLog.objects.count()
+        log_rows = list(OperationLog.objects.all()[:50])
+        log_entries = [_serialize_log_entry(e) for e in log_rows]
+        if len(log_rows) == 50:
+            log_next_before_id = log_rows[-1].pk
+
     return render(
         request,
         "ui/impostazioni.html",
@@ -1517,8 +1617,68 @@ def impostazioni(request: HttpRequest):
             "configurazioni_teste": configurazioni_teste,
             "all_testa_models_json": json.dumps(all_testa_models),
             "all_gen_models_json": json.dumps(all_gen_models),
+            "log_entries": log_entries,
+            "log_total_count": log_total_count,
+            "log_next_before_id": log_next_before_id,
         },
     )
+
+
+def _serialize_log_entry(entry) -> dict:
+    """Serialize one OperationLog row for the JSON log endpoint/template.
+
+    Args:
+        entry: An :class:`~ui.models.OperationLog` instance.
+
+    Returns:
+        dict: Display-ready fields for the Impostazioni Log table.
+    """
+    return {
+        "id": entry.pk,
+        "timestamp_display": entry.timestamp.strftime("%d/%m/%Y %H:%M"),
+        "source": entry.source,
+        "source_label": dict(entry.SOURCE_CHOICES).get(entry.source, entry.source),
+        "username": entry.username or "Sistema",
+        "descrizione": entry.descrizione,
+        "riferimento": entry.riferimento,
+    }
+
+
+@write_required
+@require_http_methods(["GET"])
+def api_operation_log(request: HttpRequest) -> JsonResponse:
+    """Return a page of operation-log entries, newest first.
+
+    Args:
+        request: GET request with optional ``before_id`` (return entries
+            strictly older than this pk) and ``limit`` (default 50, capped
+            at 200).
+
+    Returns:
+        JsonResponse: ``{"ok": true, "items": [...], "next_before_id": int|None}``.
+    """
+    from ui.models import OperationLog
+
+    try:
+        limit = min(int(request.GET.get("limit", 50)), 200)
+    except ValueError:
+        limit = 50
+    before_id = request.GET.get("before_id")
+
+    qs = OperationLog.objects.all()
+    if before_id:
+        try:
+            qs = qs.filter(pk__lt=int(before_id))
+        except ValueError:
+            pass
+
+    rows = list(qs[: limit + 1])
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    items = [_serialize_log_entry(r) for r in rows]
+    next_before_id = rows[-1].pk if (has_more and rows) else None
+    return JsonResponse({"ok": True, "items": items, "next_before_id": next_before_id})
 
 
 @write_required
@@ -1553,6 +1713,16 @@ def api_stabilimenti_create(request: HttpRequest) -> JsonResponse:
         )
 
     obj = Stabilimento.objects.create(nome=nome, colore=colore)
+
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="anagrafica_crea",
+        descrizione=f"Creato stabilimento {obj.nome}",
+        riferimento=f"stabilimento:{obj.pk}",
+    )
+
     return JsonResponse(
         {"ok": True, "id": obj.pk, "nome": obj.nome, "colore": obj.colore}, status=201
     )
@@ -1578,8 +1748,17 @@ def api_stabilimenti_detail(request: HttpRequest, pk: int) -> JsonResponse:
             {"ok": False, "error": "Stabilimento non trovato."}, status=404
         )
 
+    from ui.services.operation_log import record_operation
+
     if request.method == "DELETE":
+        nome = obj.nome
         obj.delete()
+        record_operation(
+            request,
+            azione="anagrafica_elimina",
+            descrizione=f"Eliminato stabilimento {nome}",
+            riferimento=f"stabilimento:{pk}",
+        )
         return JsonResponse({"ok": True})
 
     # PUT
@@ -1604,6 +1783,12 @@ def api_stabilimenti_detail(request: HttpRequest, pk: int) -> JsonResponse:
     obj.nome = nome
     obj.colore = colore
     obj.save()
+    record_operation(
+        request,
+        azione="anagrafica_modifica",
+        descrizione=f"Aggiornato stabilimento {obj.nome}",
+        riferimento=f"stabilimento:{obj.pk}",
+    )
     return JsonResponse(
         {"ok": True, "id": obj.pk, "nome": obj.nome, "colore": obj.colore}
     )
@@ -1638,6 +1823,16 @@ def api_responsabili_create(request: HttpRequest) -> JsonResponse:
         )
 
     obj = Responsabile.objects.create(nome=nome)
+
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="anagrafica_crea",
+        descrizione=f"Creato responsabile {obj.nome}",
+        riferimento=f"responsabile:{obj.pk}",
+    )
+
     return JsonResponse({"ok": True, "id": obj.pk, "nome": obj.nome}, status=201)
 
 
@@ -1661,8 +1856,17 @@ def api_responsabili_detail(request: HttpRequest, pk: int) -> JsonResponse:
             {"ok": False, "error": "Responsabile non trovato."}, status=404
         )
 
+    from ui.services.operation_log import record_operation
+
     if request.method == "DELETE":
+        nome = obj.nome
         obj.delete()
+        record_operation(
+            request,
+            azione="anagrafica_elimina",
+            descrizione=f"Eliminato responsabile {nome}",
+            riferimento=f"responsabile:{pk}",
+        )
         return JsonResponse({"ok": True})
 
     # PUT
@@ -1684,6 +1888,12 @@ def api_responsabili_detail(request: HttpRequest, pk: int) -> JsonResponse:
 
     obj.nome = nome
     obj.save()
+    record_operation(
+        request,
+        azione="anagrafica_modifica",
+        descrizione=f"Aggiornato responsabile {obj.nome}",
+        riferimento=f"responsabile:{obj.pk}",
+    )
     return JsonResponse({"ok": True, "id": obj.pk, "nome": obj.nome})
 
 
@@ -1716,6 +1926,16 @@ def api_tipi_attivita_create(request: HttpRequest) -> JsonResponse:
         )
 
     obj = TipoAttivita.objects.create(nome=nome)
+
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="anagrafica_crea",
+        descrizione=f"Creato tipo attività {obj.nome}",
+        riferimento=f"tipo_attivita:{obj.pk}",
+    )
+
     return JsonResponse({"ok": True, "id": obj.pk, "nome": obj.nome}, status=201)
 
 
@@ -1739,8 +1959,17 @@ def api_tipi_attivita_detail(request: HttpRequest, pk: int) -> JsonResponse:
             {"ok": False, "error": "Tipo attività non trovato."}, status=404
         )
 
+    from ui.services.operation_log import record_operation
+
     if request.method == "DELETE":
+        nome = obj.nome
         obj.delete()
+        record_operation(
+            request,
+            azione="anagrafica_elimina",
+            descrizione=f"Eliminato tipo attività {nome}",
+            riferimento=f"tipo_attivita:{pk}",
+        )
         return JsonResponse({"ok": True})
 
     try:
@@ -1761,6 +1990,12 @@ def api_tipi_attivita_detail(request: HttpRequest, pk: int) -> JsonResponse:
 
     obj.nome = nome
     obj.save()
+    record_operation(
+        request,
+        azione="anagrafica_modifica",
+        descrizione=f"Aggiornato tipo attività {obj.nome}",
+        riferimento=f"tipo_attivita:{obj.pk}",
+    )
     return JsonResponse({"ok": True, "id": obj.pk, "nome": obj.nome})
 
 
@@ -1812,6 +2047,16 @@ def api_config_testa_create(request: HttpRequest) -> JsonResponse:
         min_maschere=_pos_int(data.get("min_maschere"), 1),
         min_generatori=_pos_int(data.get("min_generatori"), 1),
     )
+
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="anagrafica_crea",
+        descrizione=f"Creata configurazione testa {obj.modello_testa}",
+        riferimento=f"config_testa:{obj.pk}",
+    )
+
     return JsonResponse(
         {
             "ok": True,
@@ -1842,8 +2087,17 @@ def api_config_testa_detail(request: HttpRequest, pk: int) -> JsonResponse:
             {"ok": False, "error": "Configurazione non trovata."}, status=404
         )
 
+    from ui.services.operation_log import record_operation
+
     if request.method == "DELETE":
+        modello_testa = obj.modello_testa
         obj.delete()
+        record_operation(
+            request,
+            azione="anagrafica_elimina",
+            descrizione=f"Eliminata configurazione testa {modello_testa}",
+            riferimento=f"config_testa:{pk}",
+        )
         return JsonResponse({"ok": True})
 
     # PUT
@@ -1864,6 +2118,12 @@ def api_config_testa_detail(request: HttpRequest, pk: int) -> JsonResponse:
     obj.min_maschere = _pos_int(data.get("min_maschere"), obj.min_maschere)
     obj.min_generatori = _pos_int(data.get("min_generatori"), obj.min_generatori)
     obj.save()
+    record_operation(
+        request,
+        azione="anagrafica_modifica",
+        descrizione=f"Aggiornata configurazione testa {obj.modello_testa}",
+        riferimento=f"config_testa:{obj.pk}",
+    )
     return JsonResponse(
         {
             "ok": True,
@@ -1919,6 +2179,19 @@ def api_gen_compatibile_create(request: HttpRequest, config_pk: int) -> JsonResp
     gen = GeneratoreCompatibile.objects.create(
         configurazione=cfg, modello_generatore=modello_gen
     )
+
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="anagrafica_modifica",
+        descrizione=(
+            f"Aggiunto generatore compatibile {gen.modello_generatore} "
+            f"a {cfg.modello_testa}"
+        ),
+        riferimento=f"config_testa:{cfg.pk}",
+    )
+
     return JsonResponse(
         {"ok": True, "id": gen.pk, "modello_generatore": gen.modello_generatore},
         status=201,
@@ -1941,7 +2214,22 @@ def api_gen_compatibile_detail(request: HttpRequest, pk: int) -> JsonResponse:
             {"ok": False, "error": "Generatore non trovato."}, status=404
         )
 
+    modello_generatore = gen.modello_generatore
+    modello_testa = gen.configurazione.modello_testa
+    config_pk = gen.configurazione_id
     gen.delete()
+
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="anagrafica_modifica",
+        descrizione=(
+            f"Rimosso generatore compatibile {modello_generatore} da {modello_testa}"
+        ),
+        riferimento=f"config_testa:{config_pk}",
+    )
+
     return JsonResponse({"ok": True})
 
 
@@ -2060,6 +2348,18 @@ def api_overlap_reschedule_accept(request: HttpRequest, pk: int) -> JsonResponse
     except OverlapReassignError as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=exc.status_code)
 
+    from ui.services.operation_log import record_operation
+
+    activity_id = (
+        Attivita.objects.filter(pk=pk).values_list("activity_id", flat=True).first()
+    )
+    record_operation(
+        request,
+        azione="attivita_riprogramma_accetta",
+        descrizione=(f"Proposta di riprogrammazione accettata per {activity_id or pk}"),
+        riferimento=activity_id or "",
+    )
+
     return JsonResponse({"ok": True, **result})
 
 
@@ -2069,6 +2369,18 @@ def api_overlap_reschedule_accept(request: HttpRequest, pk: int) -> JsonResponse
 def api_overlap_reschedule_reject(request: HttpRequest, pk: int) -> JsonResponse:
     """Reject (dismiss) the stored reschedule proposal for an overlap."""
     from ui.services.overlap_reassign import reject_reschedule
+    from ui.services.operation_log import record_operation
 
     result = reject_reschedule(pk)
+
+    activity_id = (
+        Attivita.objects.filter(pk=pk).values_list("activity_id", flat=True).first()
+    )
+    record_operation(
+        request,
+        azione="attivita_riprogramma_rifiuta",
+        descrizione=(f"Proposta di riprogrammazione rifiutata per {activity_id or pk}"),
+        riferimento=activity_id or "",
+    )
+
     return JsonResponse({"ok": True, **result})

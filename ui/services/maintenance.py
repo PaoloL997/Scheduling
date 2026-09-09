@@ -155,6 +155,15 @@ def _persist_maintenance_swap_note(att, tipo: str, from_uid: str, picked: dict) 
         data_risoluzione=timezone.now(),
     )
 
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        source="sistema",
+        azione="sistema_sostituzione",
+        descrizione=descr,
+        riferimento=f"{att.commessa}/{att.item}/{att.activity}",
+    )
+
 
 def _pick_maintenance_spare(tipo: str, from_uid: str, att) -> dict | None:
     """Return the overlap-style pick dict for a compatible free UID, or ``None``."""

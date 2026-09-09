@@ -618,6 +618,15 @@ def _persist_swap_notes(blocked, replacements: list[dict], overlap_item: dict) -
             data_risoluzione=now,
         )
 
+        from ui.services.operation_log import record_operation
+
+        record_operation(
+            source="sistema",
+            azione="sistema_sostituzione",
+            descrizione=descr,
+            riferimento=f"{blocked.commessa}/{blocked.item}/{blocked.activity}",
+        )
+
 
 def _overlap_problem_sig(attivita_id: int, tipo: str, uid: str, peer_id: str) -> tuple:
     return (attivita_id, tipo, uid, peer_id or "")
@@ -681,6 +690,21 @@ def _sync_open_overlap_problems(
             problema.data_risoluzione = now
             problema.save(
                 update_fields=["risolto", "note_risoluzione", "data_risoluzione"]
+            )
+
+            from ui.services.operation_log import record_operation
+
+            resolved_att = problema.attivita
+            record_operation(
+                source="sistema",
+                azione="sistema_problema_risolto",
+                descrizione=(
+                    f"Sovrapposizione risolta automaticamente: {problema.descrizione}"
+                ),
+                riferimento=(
+                    f"{resolved_att.commessa}/{resolved_att.item}/"
+                    f"{resolved_att.activity}"
+                ),
             )
             continue
         seen.add(sig)

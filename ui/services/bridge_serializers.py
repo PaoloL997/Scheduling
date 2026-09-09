@@ -146,9 +146,7 @@ def serialize_app_settings() -> dict:
         "heartbeat_timeout_seconds": cfg.heartbeat_timeout_seconds,
         "msp_dispatch_retry_interval_seconds": cfg.msp_dispatch_retry_interval_seconds,
         "msp_dispatch_retry_max_wait_seconds": cfg.msp_dispatch_retry_max_wait_seconds,
-        "gemini_model": cfg.gemini_model,
-        "gemini_thinking_level": cfg.gemini_thinking_level,
-        "gemini_thinking_budget": cfg.gemini_thinking_budget,
+        "openai_wps_model": cfg.openai_wps_model,
         "auto_import_on_startup": cfg.auto_import_on_startup,
     }
 

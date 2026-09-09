@@ -569,3 +569,13 @@ def _persist_robbed_note(
         note_risoluzione=note,
         data_risoluzione=timezone.now(),
     )
+
+    if picked:
+        from ui.services.operation_log import record_operation
+
+        record_operation(
+            source="sistema",
+            azione="sistema_sostituzione",
+            descrizione=descr,
+            riferimento=f"{robbed.commessa}/{robbed.item}/{robbed.activity}",
+        )

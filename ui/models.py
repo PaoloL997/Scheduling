@@ -605,3 +605,51 @@ class RisoluzioneProblema(models.Model):
             str: Activity identity + problem type.
         """
         return f"{self.commessa}/{self.item}/{self.activity} [{self.tipo}] {self.risorsa_tipo}"
+
+
+class OperationLog(models.Model):
+    """Immutable audit trail entry for a write operation or a system event.
+
+    Populated by :func:`ui.services.operation_log.record_operation` from
+    every human-facing mutating endpoint (web and tablet) and from the
+    automatic problem-detection / auto-resolution / auto-reassignment
+    services.  Never carries a foreign key to :class:`Attivita` or any
+    inventory row: those tables are periodically wiped and reimported, and
+    the log must survive that cycle, so identity is stored as plain text
+    in ``riferimento`` (commessa/item/activity or resource uid), exactly
+    like :class:`RisoluzioneProblema`.
+    """
+
+    SOURCE_WEB = "web"
+    SOURCE_TABLET = "tablet"
+    SOURCE_SISTEMA = "sistema"
+
+    SOURCE_CHOICES = [
+        (SOURCE_WEB, "Web"),
+        (SOURCE_TABLET, "Tablet"),
+        (SOURCE_SISTEMA, "Sistema"),
+    ]
+
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    user = models.ForeignKey(
+        "auth.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="operation_logs",
+    )
+    username = models.CharField(max_length=150, blank=True, default="")
+    source = models.CharField(max_length=10, choices=SOURCE_CHOICES)
+    azione = models.CharField(max_length=50)
+    descrizione = models.TextField()
+    riferimento = models.CharField(max_length=300, blank=True, default="")
+
+    class Meta:
+        """Table metadata for OperationLog."""
+
+        db_table = "operation_log"
+        ordering = ["-timestamp", "-id"]
+
+    def __str__(self) -> str:
+        """Return a short summary of this log entry."""
+        return f"[{self.source}] {self.azione} — {self.username or 'Sistema'}"

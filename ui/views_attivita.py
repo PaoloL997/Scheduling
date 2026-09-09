@@ -27,8 +27,8 @@ from ui.services.activity_inventory import (
     lookup_resources,
     parse_resource_lookup_param,
 )
-from ui.services.gemini import ReadWPS
 from ui.services.identifiers import build_job_id
+from ui.services.wps_ai import ReadWPS
 from ui.services.wps_parser import compute_bore, extract_tube_pitch, parse_wps_name
 
 logger = logging.getLogger(__name__)
@@ -41,11 +41,11 @@ logger = logging.getLogger(__name__)
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_analizza_wps(request: HttpRequest) -> JsonResponse:
-    """Upload a WPS PDF, parse its filename, and run Gemini analysis.
+    """Upload a WPS PDF, parse its filename, and run the AI analysis.
 
     Saves the file to ``MEDIA_ROOT/wps/`` under a temporary name.  Even if
-    Gemini fails, the endpoint returns success with the filename-parsed fields
-    and an empty ``bore`` dict so the wizard can continue.
+    the analysis fails, the endpoint returns success with the filename-parsed
+    fields and an empty ``bore`` dict so the wizard can continue.
 
     The ``modello_testa`` in ``parsed`` is normalised to the canonical value
     stored in :class:`~ui.models.ConfigurazioneTesta` when a match is found
@@ -57,7 +57,7 @@ def api_analizza_wps(request: HttpRequest) -> JsonResponse:
 
     Returns:
         JsonResponse with ``ok=True`` and keys ``tmp_path``, ``wps_name``,
-        ``parsed``, ``gemini``, ``bore`` on success, or ``ok=False`` on
+        ``parsed``, ``misure``, ``bore`` on success, or ``ok=False`` on
         validation error.  ``parsed`` includes ``testa_db_match`` (bool).
     """
     pdf = request.FILES.get("wps_file")
@@ -95,16 +95,16 @@ def api_analizza_wps(request: HttpRequest) -> JsonResponse:
         getattr(request.user, "username", "?"),
     )
 
-    gemini_data = ReadWPS().invoke(abs_path)
-    bore = compute_bore(gemini_data.get("diameter"), gemini_data.get("s1"))
+    misure = ReadWPS().invoke(abs_path)
+    bore = compute_bore(misure.get("diameter"), misure.get("s1"))
     if not isinstance(bore, dict):
         bore = {}
-    bore["tube_pitch"] = extract_tube_pitch(gemini_data.get("tube_pitch"))
+    bore["tube_pitch"] = extract_tube_pitch(misure.get("tube_pitch"))
 
     logger.info(
-        "WPS analizza result: file=%s gemini=%s bore=%s",
+        "WPS analizza result: file=%s misure=%s bore=%s",
         pdf.name,
-        gemini_data,
+        misure,
         bore,
     )
 
@@ -114,7 +114,7 @@ def api_analizza_wps(request: HttpRequest) -> JsonResponse:
             "tmp_path": tmp_path,
             "wps_name": pdf.name,
             "parsed": parsed,
-            "gemini": gemini_data,
+            "misure": misure,
             "bore": bore,
         }
     )
@@ -549,6 +549,15 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
         logging.getLogger(__name__).error(
             "Impossibile aggiungere alla MppSyncQueue: %s", exc
         )
+
+    from ui.services.operation_log import record_operation
+
+    record_operation(
+        request,
+        azione="attivita_crea",
+        descrizione=f"Creata attività {att.commessa}/{att.item}/{att.activity}",
+        riferimento=att.activity_id,
+    )
 
     return JsonResponse({"ok": True, "id": att.pk, "warning_count": warning_count})
 

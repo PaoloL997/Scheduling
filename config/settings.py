@@ -154,9 +154,7 @@ MSP_DISPATCH_RETRY_INTERVAL_SECONDS = os.getenv(
 MSP_DISPATCH_RETRY_MAX_WAIT_SECONDS = os.getenv(
     "MSP_DISPATCH_RETRY_MAX_WAIT_SECONDS", "5.0"
 )
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "low")
-GEMINI_THINKING_BUDGET = os.getenv("GEMINI_THINKING_BUDGET", "512")
+OPENAI_WPS_MODEL = os.getenv("OPENAI_WPS_MODEL", "gpt-5.6-sol")
 AUTO_IMPORT_ON_STARTUP = os.getenv("AUTO_IMPORT_ON_STARTUP", "true")
 
 # ---------------------------------------------------------------------------
@@ -167,10 +165,10 @@ MEDIA_ROOT = BASE_DIR / "media"
 MEDIA_URL = "/media/"
 
 # ---------------------------------------------------------------------------
-# Gemini
+# OpenAI
 # ---------------------------------------------------------------------------
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # Authentication
