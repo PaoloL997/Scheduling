@@ -18,18 +18,54 @@
   «Inizio effett.» e blocca il salvataggio prima di chiamare il server: ogni
   riga porta i minimi in `data-min-requirements` e ogni attivita' espone
   `min_requirements` / `can_start` nel payload JSON.
+- **Sostituzione di accessori compatibili via scansione dal tablet.** Nuovo
+  endpoint `POST /api/bridge/attivita/<pk>/scan/` (`tipo`, `codice`,
+  `atteso`, `conferma`). Teste e generatori restano a corrispondenza esatta di
+  ID. Per mandrini, tastatori e maschere il codice scansionato puo' essere un
+  pezzo diverso da quello pianificato purche' compatibile per misura (bore
+  min–max, passo), con la stessa regola della pianificazione. Tre casi:
+  pezzo libero → consentito con conferma esplicita («Stai usando X al posto di
+  Y, va bene?») e pianificazione aggiornata; pezzo in uso su un'attivita' in
+  lavorazione → vietato con motivo `occupata`; pezzo assegnato a un'attivita'
+  pianificata sovrapposta → consentito con conferma, l'attivita' sottratta
+  viene ricoperta automaticamente con il motore di riassegnazione esistente
+  (`pick_free_spare`) e, se nessun pezzo compatibile e' libero, resta scoperta
+  con il problema «Risorsa da recuperare» visibile in Pianificazione senza
+  bloccare il tablet. Fuori tolleranza → vietato con misure esplicite. Nuovo
+  tipo di nota `sostituzione` («Sostituzione da tablet») su entrambe le
+  attivita' coinvolte.
+- Servizio condiviso `ui/services/scan_substitution.py`; il selettore del
+  sostituto usato dalla manutenzione e' promosso a
+  `overlap_reassign.pick_free_spare` e riusato dalla scansione.
+
+### Fixed
+
+- **Un aggiornamento risorse parziale non cancella piu' le altre categorie.**
+  `update_attivita` sostituiva tutte le assegnazioni con quelle passate: una
+  richiesta con la sola categoria toccata azzerava silenziosamente teste,
+  tastatori, maschere e generatori. Ora una categoria assente in `risorse`
+  conserva le assegnazioni correnti; solo una lista vuota esplicita la svuota.
+  Coperto da test.
+- **Le misure sono confrontate in modo indipendente dalla cultura.** Diametri e
+  passi sono testo in inventario: il `CAST` SQL leggeva «12,5» come 12 e un
+  valore non numerico come 0, falsando il filtro di compatibilita'. Nuovo
+  modulo `ui/services/measures.py` (`parse_measure`, `is_resource_compatible`)
+  usato dal selettore risorse, dalla preselezione, dall'ottimizzatore e dalla
+  scansione: virgola e punto sono equivalenti, i valori non convertibili sono
+  esclusi dal confronto e mai trattati come zero.
 
 ## 2026-09-07
 
 ### Added
 
+- **TP60 Custom (Sporgenza Tubo-Piastra)** flag in the add-activity wizard, under the *Misure Gemini* card. Only testa and generatore stay required: mandrini, tastatori and maschere are not pre-selected and, left unselected, no longer raise an `acquisto` problem. Their lists stay populated so one can still be ticked by hand. Stored on `Attivita.tp60_custom`.
 - **Lo sforamento della durata stimata si vede nel Gantt.** Un'attivita'
   iniziata e non ancora chiusa la cui fine stimata (inizio effettivo +
   durata da preventivo) e' gia' passata prosegue con una linea orizzontale
-  tratteggiata fino a oggi, chiusa da una barretta verticale come le altre
-  estremita' della finestra effettiva. I badge di stato si spostano dopo lo
-  sforamento. Nuova voce in leggenda: «Sforamento della durata stimata (fino
-  a oggi)».
+  tratteggiata fino a oggi. Finche' sfora, l'unica barretta verticale di
+  fine e' quella su oggi: sulla fine stimata comincia il tratteggio, non
+  c'e' una seconda fine. I badge di stato si spostano dopo lo sforamento.
+  Nuova voce in leggenda: «Sforamento della durata stimata (fino a oggi)».
 
 ### Fixed
 
@@ -57,6 +93,11 @@
   volta sulla prima riga aperta che la porta, qualunque sia il tipo.
 - **Nel modal problemi/note le voci aperte stanno in cima**, quelle risolte
   sotto; dentro ogni gruppo resta l'ordine di creazione.
+- Il gantt della proposta di ripianificazione elenca le attivita' nello
+  stesso ordine del gantt principale: la chiave di ordinamento e' ora
+  `(job_id, data_inizio, activity_id)`, la stessa di `_fetch_tasks`, al
+  posto di `(inizio, etichetta)`. Le due coincidevano finche' tutte le
+  attivita' avevano una data di inizio pianificata.
 - La nota di tipo `ritardo` mostrava la chiave grezza «ritardo» al posto
   dell'etichetta: ora e' «Attivita' in ritardo».
 - **I riferimenti fra attivita' si confrontano senza distinzione di

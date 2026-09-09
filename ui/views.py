@@ -578,7 +578,9 @@ def _attivita_to_task_dict(a) -> dict:
         today=localdate(),
     )
 
-    min_requirements = get_testa_min_requirements(a.modello_testa or None)
+    min_requirements = get_testa_min_requirements(
+        a.modello_testa or None, bool(getattr(a, "tp60_custom", False))
+    )
     missing_minimum = missing_minimum_resources(
         a, [(r.tipo, r.risorsa_id) for r in risorse_all]
     )

@@ -243,6 +243,75 @@ class AddActivityFlowTests(TestCase):
         payload = json.loads(entry.payload_json)
         self.assertEqual(payload["predecessors"], prev.activity_id)
 
+    def test_tp60_custom_flag_is_saved(self) -> None:
+        """The wizard flag is persisted on the created activity."""
+        Job.objects.create(commessa="C004")
+
+        resp = self._post_activity(
+            {
+                "commessa": "C004",
+                "item": 1,
+                "attivita": "Qualifica",
+                "modello_testa": "TP60",
+                "stabilimento": "Valbrembo",
+                "data_inizio": "2026-06-10",
+                "data_fine": "2026-06-12",
+                "tp60_custom": True,
+                "risorse": {"teste": ["T1"], "generatori": ["G1"]},
+            }
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        att = Attivita.objects.get(commessa="C004", item="1", activity="Qualifica")
+        self.assertTrue(att.tp60_custom)
+
+    def test_tp60_custom_skips_consumable_warnings(self) -> None:
+        """Deselected consumables raise no problem when the flag is set."""
+        Job.objects.create(commessa="C005")
+        ConfigurazioneTesta.objects.create(
+            modello_testa="TP60", min_mandrini=2, min_maschere=2
+        )
+        payload = {
+            "commessa": "C005",
+            "item": 1,
+            "attivita": "Qualifica",
+            "modello_testa": "TP60",
+            "stabilimento": "Valbrembo",
+            "data_inizio": "2026-06-10",
+            "data_fine": "2026-06-12",
+            "risorse": {"teste": ["T1"], "generatori": ["G1"]},
+        }
+
+        resp = self._post_activity({**payload, "tp60_custom": True})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["warning_count"], 0)
+
+    def test_without_tp60_custom_consumables_are_flagged(self) -> None:
+        """The same selection without the flag still reports the shortfalls."""
+        Job.objects.create(commessa="C006")
+        ConfigurazioneTesta.objects.create(
+            modello_testa="TP60", min_mandrini=2, min_maschere=2
+        )
+
+        resp = self._post_activity(
+            {
+                "commessa": "C006",
+                "item": 1,
+                "attivita": "Qualifica",
+                "modello_testa": "TP60",
+                "stabilimento": "Valbrembo",
+                "data_inizio": "2026-06-10",
+                "data_fine": "2026-06-12",
+                "risorse": {"teste": ["T1"], "generatori": ["G1"]},
+            }
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["warning_count"], 3)
+        att = Attivita.objects.get(commessa="C006", item="1", activity="Qualifica")
+        self.assertFalse(att.tp60_custom)
+
     def test_predecessor_from_other_item_same_commessa_is_accepted(self) -> None:
         Job.objects.create(commessa="C003")
         prev = Attivita.objects.create(

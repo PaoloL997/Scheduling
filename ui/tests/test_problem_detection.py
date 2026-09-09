@@ -49,6 +49,26 @@ class GetTestaMinRequirementsTest(TestCase):
             },
         )
 
+    def test_tp60_custom_drops_consumable_minimums(self) -> None:
+        """TP60 Custom keeps testa/generatore minimums and frees consumables."""
+        ConfigurazioneTesta.objects.create(
+            modello_testa="IRIS",
+            min_mandrini=2,
+            min_tastatori=1,
+            min_maschere=3,
+            min_generatori=2,
+        )
+        self.assertEqual(
+            get_testa_min_requirements("IRIS", tp60_custom=True),
+            {
+                "teste": 1,
+                "mandrini": 0,
+                "tastatori": 0,
+                "maschere": 0,
+                "generatori": 2,
+            },
+        )
+
 
 class DetectShortfallProblemsTest(TestCase):
     """detect_and_save_problems flags under-selected resource categories."""
@@ -218,6 +238,139 @@ class DetectShortfallProblemsTest(TestCase):
             ).count(),
             1,
         )
+
+
+class DetectTp60CustomShortfallTest(TestCase):
+    """TP60 Custom activities may skip consumables without raising problems."""
+
+    def setUp(self) -> None:
+        from ui.models import TestaItem
+
+        ConfigurazioneTesta.objects.create(
+            modello_testa="TP60",
+            min_mandrini=2,
+            min_maschere=2,
+        )
+        TestaItem.objects.create(uid="T1", model="TP60", plant="Valbrembo")
+        TestaItem.objects.create(uid="T2", model="TP60", plant="Osio")
+        self.att = Attivita.objects.create(
+            commessa="C900",
+            item=1,
+            activity="Saldatura",
+            modello_testa="TP60",
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 10),
+            tp60_custom=True,
+        )
+
+    def test_deselected_consumables_create_no_problem(self) -> None:
+        count = detect_and_save_problems(
+            self.att,
+            {
+                "teste": ["T1"],
+                "mandrini": [],
+                "tastatori": [],
+                "maschere": [],
+                "generatori": ["G1"],
+            },
+        )
+        self.assertEqual(count, 0)
+        self.assertFalse(
+            ProblemaAttivita.objects.filter(
+                attivita=self.att, tipo=ProblemaAttivita.TIPO_ACQUISTO
+            ).exists()
+        )
+
+    def test_missing_testa_and_generatore_are_still_flagged(self) -> None:
+        detect_and_save_problems(
+            self.att,
+            {
+                "teste": [],
+                "mandrini": [],
+                "tastatori": [],
+                "maschere": [],
+                "generatori": [],
+            },
+        )
+        flagged = set(
+            ProblemaAttivita.objects.filter(
+                attivita=self.att, tipo=ProblemaAttivita.TIPO_ACQUISTO
+            ).values_list("risorsa_tipo", flat=True)
+        )
+        self.assertEqual(flagged, {"testa", "generatore"})
+
+    def test_spostamento_still_detected_for_selected_resources(self) -> None:
+        detect_and_save_problems(
+            self.att,
+            {
+                "teste": ["T2"],
+                "mandrini": [],
+                "tastatori": [],
+                "maschere": [],
+                "generatori": ["G1"],
+            },
+        )
+        problema = ProblemaAttivita.objects.get(
+            attivita=self.att, tipo=ProblemaAttivita.TIPO_SPOSTAMENTO
+        )
+        self.assertEqual(problema.risorsa_uid, "T2")
+
+    def test_enabling_flag_auto_resolves_existing_shortfall(self) -> None:
+        """A shortfall opened before the flag is closed once it is set."""
+        self.att.tp60_custom = False
+        self.att.save(update_fields=["tp60_custom"])
+        empty = {
+            "teste": ["T1"],
+            "mandrini": [],
+            "tastatori": [],
+            "maschere": [],
+            "generatori": ["G1"],
+        }
+        detect_and_save_problems(self.att, empty)
+        self.assertEqual(
+            ProblemaAttivita.objects.filter(
+                attivita=self.att,
+                tipo=ProblemaAttivita.TIPO_ACQUISTO,
+                risolto=False,
+            ).count(),
+            3,
+        )
+
+        self.att.tp60_custom = True
+        self.att.save(update_fields=["tp60_custom"])
+        created = detect_and_save_problems(self.att, empty)
+
+        self.assertEqual(created, 0)
+        self.assertFalse(
+            ProblemaAttivita.objects.filter(
+                attivita=self.att,
+                tipo=ProblemaAttivita.TIPO_ACQUISTO,
+                risolto=False,
+            ).exists()
+        )
+
+    def test_normal_activity_still_flags_missing_consumables(self) -> None:
+        att = Attivita.objects.create(
+            commessa="C901",
+            item=1,
+            activity="Saldatura",
+            modello_testa="TP60",
+            stabilimento="Valbrembo",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 10),
+        )
+        count = detect_and_save_problems(
+            att,
+            {
+                "teste": ["T1"],
+                "mandrini": [],
+                "tastatori": [],
+                "maschere": [],
+                "generatori": ["G1"],
+            },
+        )
+        self.assertEqual(count, 3)
 
 
 class DetectSpostamentoProblemsTest(TestCase):

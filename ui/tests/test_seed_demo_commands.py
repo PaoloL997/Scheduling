@@ -166,6 +166,16 @@ class SeedOverlapDemoTest(TestCase):
         self.assertEqual(proposta.get("status"), "proposed")
         self.assertGreaterEqual(proposta.get("moved_count"), 2)
         gantt_acts = {a["activity_id"]: a for a in proposta["gantt"]["activities"]}
+        # The proposal chart lists the activities exactly like the main
+        # Gantt, which reads them through _fetch_tasks.
+        self.assertEqual(
+            [a["activity_id"] for a in proposta["gantt"]["activities"]],
+            list(
+                Attivita.objects.filter(commessa="R305")
+                .order_by("job_id", "data_inizio", "activity_id")
+                .values_list("activity_id", flat=True)
+            ),
+        )
         self.assertIn(blocked.activity_id, gantt_acts)
         self.assertIn(collaudo.activity_id, gantt_acts)
         self.assertIn(imballo.activity_id, gantt_acts)

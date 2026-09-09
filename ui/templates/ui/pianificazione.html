@@ -400,6 +400,19 @@
             <input id="s1-passo" type="number" step="0.001" placeholder="—">
           </div>
         </div>
+
+        <!-- TP60 Custom: consumabili facoltativi per questa lavorazione -->
+        <label class="wiz-flag-check" for="s1-tp60-custom">
+          <input id="s1-tp60-custom" type="checkbox">
+          <span class="wiz-flag-check-text">
+            <span class="wiz-flag-check-title">TP60 Custom (Sporgenza Tubo-Piastra)</span>
+            <span class="wiz-flag-check-hint">
+              Restano obbligatori solo testa e generatore: i consumabili
+              (tastatore, mandrino, maschera) non vengono preselezionati e, se
+              lasciati vuoti, non vengono segnalati come problema.
+            </span>
+          </span>
+        </label>
       </div>
 
     </div>
@@ -779,6 +792,7 @@ const WIZ = {
   predecessorItems: [],
   risorse:{ teste:[], mandrini:[], tastatori:[], maschere:[], generatori:[] },
   minRequirements: null,
+  tp60Custom: false,
 };
 
 const _WIZ_TITLES = ['Nuova commessa','WPS','Predecessore','Info attività','Pianificazione','Risorse','Riepilogo'];
@@ -1265,7 +1279,8 @@ function openAddModal(opts) {
     newJob: null,
     predecessors: [],
     predecessorItems: [],
-    risorse:{ teste:[], mandrini:[], tastatori:[], maschere:[], generatori:[] }
+    risorse:{ teste:[], mandrini:[], tastatori:[], maschere:[], generatori:[] },
+    tp60Custom: false
   });
   document.getElementById('add-modal-overlay').style.display = 'flex';
   document.getElementById('add-modal').style.display = 'flex';
@@ -1281,6 +1296,8 @@ function openAddModal(opts) {
   document.getElementById('s1-file-input').value = '';
   document.getElementById('s1-error').style.display = 'none';
   document.getElementById('s1-next-btn').style.display = 'none';
+  const tp60El = document.getElementById('s1-tp60-custom');
+  if (tp60El) tp60El.checked = false;
   ['s1-testa','s1-commessa','s1-item','s1-attivita','s1-bore-min','s1-bore-mid','s1-bore-max','s1-passo'].forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.value = id === 's1-item' ? '1' : ''; el.style.background = ''; el.style.borderColor = ''; }
@@ -1675,6 +1692,7 @@ function _s1ContinueToPredecessor() {
   WIZ.commessa      = commessa;
   WIZ.item          = _normalizeItem(document.getElementById('s1-item').value);
   WIZ.attivita      = document.getElementById('s1-attivita').value.trim();
+  WIZ.tp60Custom    = !!document.getElementById('s1-tp60-custom')?.checked;
   const _n = v => { const f = parseFloat(v); return isNaN(f) ? null : f; };
   WIZ.bore = Object.assign(WIZ.bore || {}, {
     min:        _n(document.getElementById('s1-bore-min').value),
@@ -2174,6 +2192,9 @@ async function _loadRisorse(prefix, opts) {
   if (opts.strict_requirements) {
     params.set('strict_requirements', '1');
   }
+  if (opts.tp60_custom != null) {
+    params.set('tp60_custom', opts.tp60_custom ? '1' : '0');
+  }
 
   try {
     const resp = await fetch(`/api/attivita/risorse/?${params}`);
@@ -2260,6 +2281,7 @@ async function _s5LoadRisorse() {
     modello_testa: WIZ.modello_testa,
     risorseTarget: WIZ.risorse,
     useServerPreselect: true,
+    tp60_custom: !!WIZ.tp60Custom,
     strict_requirements: Boolean(
       WIZ.modello_testa && b.min != null && b.min !== '' && b.max != null && b.max !== ''
     ),
@@ -2704,9 +2726,9 @@ function _s6BuildRiepilogo() {
   const stab = r.stabilimento;
   const inventoryMap = window._S5_INVENTORY_MAP || {};
   const invStore = _RISORSE_DATA_STORES.s5 || {};
-  const mins = r.minRequirements || {
-    teste: 1, mandrini: 1, tastatori: 1, maschere: 1, generatori: 1,
-  };
+  const mins = r.minRequirements || (r.tp60Custom
+    ? { teste: 1, mandrini: 0, tastatori: 0, maschere: 0, generatori: 1 }
+    : { teste: 1, mandrini: 1, tastatori: 1, maschere: 1, generatori: 1 });
   const catLabels = {
     teste: 'Teste', mandrini: 'Mandrini', tastatori: 'Tastatori',
     maschere: 'Maschere', generatori: 'Generatori',
@@ -2788,6 +2810,11 @@ function _s6BuildRiepilogo() {
         <span class="s6-recap-label">Modello testa</span>
         <span class="s6-recap-value">${fmt(r.modello_testa)}</span>
       </div>
+      ${r.tp60Custom ? `
+      <div class="s6-recap-item full-width">
+        <span class="s6-recap-label">TP60 Custom</span>
+        <span class="s6-recap-value">Sporgenza Tubo-Piastra — consumabili facoltativi</span>
+      </div>` : ''}
     </div>
     <div class="s6-recap-right">
       ${resourcesHtml ? `
@@ -2819,6 +2846,7 @@ async function step6Save() {
     data_inizio:   WIZ.dataInizio,
     data_fine:     WIZ.dataFine,
     bore:          WIZ.bore,
+    tp60_custom:   !!WIZ.tp60Custom,
     risorse:       WIZ.risorse,
     new_job:       WIZ.newJob,
     predecessors:  WIZ.predecessors,
@@ -3905,6 +3933,7 @@ const _NOTE_TIPO_LABEL = {
   sovrapposizione: 'Sovrapposizione risorse',
   manutenzione: 'Sostituzione per manutenzione',
   ritardo: 'Attività in ritardo',
+  sostituzione: 'Sostituzione da tablet',
 };
 
 function _fmtNoteDateTime(iso) {
@@ -4138,6 +4167,8 @@ function _renderNoteItem(p, withProposal) {
     description = p.descrizione || 'Sovrapposizione sulle risorse.';
   } else if (p.tipo === 'manutenzione') {
     description = p.descrizione || 'Sostituzione automatica per manutenzione.';
+  } else if (p.tipo === 'sostituzione') {
+    description = p.descrizione || 'Risorsa sostituita da una scansione sul tablet.';
   } else {
     description = p.descrizione || `Spostamento richiesto da ${from} a ${to}.`;
   }

@@ -11,11 +11,7 @@ from __future__ import annotations
 
 import logging
 
-from ui.services.problem_detection import (
-    _TIPO_TO_CAT,
-    _resource_pairs,
-    refresh_problems_for_attivita,
-)
+from ui.services.problem_detection import refresh_problems_for_attivita
 
 logger = logging.getLogger(__name__)
 
@@ -162,31 +158,6 @@ def _persist_maintenance_swap_note(att, tipo: str, from_uid: str, picked: dict) 
 
 def _pick_maintenance_spare(tipo: str, from_uid: str, att) -> dict | None:
     """Return the overlap-style pick dict for a compatible free UID, or ``None``."""
-    from ui.models import Attivita
-    from ui.services.activity_inventory import _open_assignment_ids
-    from ui.services.overlap_reassign import (
-        _blocked_availability,
-        _pick_alternative,
-        occupied_ids_with_delay,
-    )
+    from ui.services.overlap_reassign import pick_free_spare
 
-    if not (att.data_inizio and att.data_fine):
-        return None
-
-    activities = list(Attivita.objects.prefetch_related("risorse"))
-    pairs = {a.pk: _resource_pairs(a) for a in activities}
-    occupied = occupied_ids_with_delay(
-        tipo, att.data_inizio, att.data_fine, att.pk, activities, pairs
-    )
-    busy = _open_assignment_ids(tipo, att.pk)
-    availability = _blocked_availability(att)
-    cat = _TIPO_TO_CAT.get(tipo)
-    candidates = (availability or {}).get(cat) if cat else None
-    return _pick_alternative(
-        tipo=tipo,
-        from_uid=from_uid,
-        blocked=att,
-        occupied=occupied,
-        busy=busy,
-        candidates=candidates,
-    )
+    return pick_free_spare(tipo, from_uid, att)

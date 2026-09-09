@@ -1435,10 +1435,14 @@
             };
             if (tx2 > tx1) drawActualPart(tx1, midY - TAIL_H / 2, tx2 - tx1, TAIL_H, '0.90');
             if (actX1raw + TICK_W >= clipL && actX1raw <= clipR) drawTickAt(actX1raw);
-            if (actX2raw >= clipL && actX2raw - TICK_W <= clipR) drawTickAt(actX2raw);
+            // While overrunning, the end tick sits on today alone: the
+            // estimated end is where the dashes start, not a second end.
+            if (!overrunEnd && actX2raw >= clipL && actX2raw - TICK_W <= clipR) {
+              drawTickAt(actX2raw);
+            }
             if (overrunEnd) {
-              // Dashed tail from the estimated end up to today, closed by a
-              // tick, so the overrun reads apart from the estimated window.
+              // Dashed tail from the estimated end up to today, closed by the
+              // only end tick, so the overrun reads apart from the estimate.
               const ovX2raw = dateToX(overrunEnd);
               const ox1 = Math.max(actX2raw, clipL);
               const ox2 = Math.min(ovX2raw, clipR);

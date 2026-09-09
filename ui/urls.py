@@ -109,6 +109,11 @@ urlpatterns = [
         name="api_bridge_attivita_update",
     ),
     path(
+        "api/bridge/attivita/<int:pk>/scan/",
+        views_bridge.api_bridge_attivita_scan,
+        name="api_bridge_attivita_scan",
+    ),
+    path(
         "api/bridge/attivita/<int:pk>/delete/",
         views_bridge.api_bridge_attivita_delete,
         name="api_bridge_attivita_delete",

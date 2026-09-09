@@ -15,6 +15,7 @@ from ui.models import (
     MandrinoItem,
     MascheraItem,
     MppSyncQueue,
+    ProblemaAttivita,
     RisorsaAttivita,
     TastatoreItem,
     TestaItem,
@@ -63,6 +64,47 @@ class UpdateAttivitaRisorseTest(TestCase):
         self.assertEqual(rows[0].risorsa_id, "T002")
         self.assertIn("resources_by_tipo", result)
         self.assertEqual(result["resources_by_tipo"]["testa"], ["T002"])
+
+    def test_partial_update_keeps_untouched_categories(self) -> None:
+        RisorsaAttivita.objects.create(
+            attivita=self.att, tipo="mandrino", risorsa_id="M1"
+        )
+        RisorsaAttivita.objects.create(
+            attivita=self.att, tipo="tastatore", risorsa_id="TA1"
+        )
+        result = update_attivita(self.att.pk, {"risorse": {"mandrini": ["M2"]}})
+        by_tipo = result["resources_by_tipo"]
+        self.assertEqual(by_tipo["testa"], ["T001"])
+        self.assertEqual(by_tipo["mandrino"], ["M2"])
+        self.assertEqual(by_tipo["tastatore"], ["TA1"])
+        rows = set(
+            RisorsaAttivita.objects.filter(attivita_id=self.att.pk).values_list(
+                "tipo", "risorsa_id"
+            )
+        )
+        self.assertEqual(
+            rows, {("testa", "T001"), ("mandrino", "M2"), ("tastatore", "TA1")}
+        )
+        entry = MppSyncQueue.objects.get(operation="update_task")
+        payload = json.loads(entry.payload_json)
+        self.assertEqual(sorted(payload["resources"]), ["M2", "T001", "TA1"])
+        self.assertFalse(
+            ProblemaAttivita.objects.filter(
+                attivita=self.att, tipo="acquisto", risorsa_tipo="testa"
+            ).exists()
+        )
+
+    def test_explicit_empty_category_still_clears_it(self) -> None:
+        RisorsaAttivita.objects.create(
+            attivita=self.att, tipo="mandrino", risorsa_id="M1"
+        )
+        update_attivita(self.att.pk, {"risorse": {"mandrini": []}})
+        rows = set(
+            RisorsaAttivita.objects.filter(attivita_id=self.att.pk).values_list(
+                "tipo", "risorsa_id"
+            )
+        )
+        self.assertEqual(rows, {("testa", "T001")})
 
     def test_update_risorse_enqueues_resources_for_mpp_writeback(self) -> None:
         update_attivita(
@@ -322,6 +364,126 @@ class StrictRequirementsTest(TestCase):
         mandrini_uids = {r["uid"] for r in data["mandrini"]}
         self.assertIn("M_OK", mandrini_uids)
         self.assertNotIn("M_BAD", mandrini_uids)
+
+
+class Tp60CustomRequirementsTest(TestCase):
+    """The TP60 Custom flag relaxes the consumable minimums returned by the API."""
+
+    def setUp(self) -> None:
+        self.factory = RequestFactory()
+        self.user = create_writer("tp60", password="pass")
+        ConfigurazioneTesta.objects.create(
+            modello_testa="TP60", min_mandrini=2, min_maschere=2
+        )
+        TestaItem.objects.create(uid="T_TP60", model="TP60", plant="Valbrembo")
+        MandrinoItem.objects.create(uid="M_TP60", diameter="25", plant="Valbrembo")
+
+    def _get(self, **params) -> dict:
+        request = self.factory.get(
+            "/api/attivita/risorse/",
+            {
+                "stabilimento": "Valbrembo",
+                "data_inizio": "2026-06-01",
+                "data_fine": "2026-06-05",
+                **params,
+            },
+        )
+        request.user = self.user
+        resp = api_get_risorse(request)
+        return json.loads(resp.content)
+
+    def test_min_requirements_are_zeroed_for_consumables(self) -> None:
+        data = self._get(modello_testa="TP60", tp60_custom="1")
+        self.assertTrue(data["ok"])
+        self.assertEqual(
+            data["min_requirements"],
+            {
+                "teste": 1,
+                "mandrini": 0,
+                "tastatori": 0,
+                "maschere": 0,
+                "generatori": 1,
+            },
+        )
+
+    def test_consumables_are_not_preselected(self) -> None:
+        """The head and generator are still proposed; consumables are not."""
+        plain = self._get(modello_testa="TP60")
+        custom = self._get(modello_testa="TP60", tp60_custom="1")
+        self.assertEqual(plain["pre_mandrini"], ["M_TP60"])
+        self.assertEqual(custom["pre_testa"], plain["pre_testa"])
+        self.assertEqual(custom["pre_generatori"], plain["pre_generatori"])
+        self.assertEqual(custom["pre_mandrini"], [])
+        self.assertEqual(custom["pre_tastatori"], [])
+        self.assertEqual(custom["pre_maschere"], [])
+
+    def test_consumable_lists_stay_available(self) -> None:
+        """Only the tick is dropped: the planner can still pick one by hand."""
+        custom = self._get(modello_testa="TP60", tp60_custom="1")
+        self.assertIn("M_TP60", [r["uid"] for r in custom["mandrini"]])
+
+    def test_without_flag_minimums_are_kept(self) -> None:
+        data = self._get(modello_testa="TP60")
+        self.assertEqual(data["min_requirements"]["mandrini"], 2)
+        self.assertEqual(data["min_requirements"]["maschere"], 2)
+
+    def test_update_attivita_toggles_flag_and_clears_shortfalls(self) -> None:
+        from ui.models import ProblemaAttivita
+
+        att = Attivita.objects.create(
+            commessa="C701",
+            item=1,
+            activity="A1",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            stabilimento="Valbrembo",
+            modello_testa="TP60",
+        )
+        update_attivita(
+            att.pk,
+            {
+                "orm_id": att.pk,
+                "risorse": {
+                    "teste": ["T_TP60"],
+                    "mandrini": [],
+                    "tastatori": [],
+                    "maschere": [],
+                    "generatori": [],
+                },
+            },
+        )
+        self.assertTrue(
+            ProblemaAttivita.objects.filter(
+                attivita=att, tipo=ProblemaAttivita.TIPO_ACQUISTO, risolto=False
+            ).exists()
+        )
+
+        update_attivita(att.pk, {"orm_id": att.pk, "tp60_custom": True})
+
+        att.refresh_from_db()
+        self.assertTrue(att.tp60_custom)
+        open_types = set(
+            ProblemaAttivita.objects.filter(
+                attivita=att, tipo=ProblemaAttivita.TIPO_ACQUISTO, risolto=False
+            ).values_list("risorsa_tipo", flat=True)
+        )
+        self.assertEqual(open_types, {"generatore"})
+
+    def test_flag_defaults_from_the_edited_activity(self) -> None:
+        att = Attivita.objects.create(
+            commessa="C700",
+            item=1,
+            activity="A1",
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 5),
+            stabilimento="Valbrembo",
+            modello_testa="TP60",
+            tp60_custom=True,
+        )
+        data = self._get(exclude_activity_id=str(att.pk))
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["min_requirements"]["mandrini"], 0)
+        self.assertEqual(data["min_requirements"]["teste"], 1)
 
 
 class ApiTasksUpdateRisorseTest(TestCase):

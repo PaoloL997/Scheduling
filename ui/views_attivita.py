@@ -155,7 +155,10 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
 
     Query parameters: ``stabilimento``, ``data_inizio``, ``data_fine``,
     ``bore_min``, ``bore_max``, ``bore_mid``, ``tube_pitch``,
-    ``modello_testa``.
+    ``modello_testa``, ``tp60_custom``.
+
+    When ``exclude_activity_id`` is given, ``tp60_custom`` defaults to the
+    flag stored on that activity.
 
     Args:
         request: GET request with filter parameters.
@@ -171,11 +174,7 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
     except ValueError:
         return JsonResponse({"ok": False, "error": "Date non valide."}, status=400)
 
-    def _float(val: str) -> float | None:
-        try:
-            return float(val) if val else None
-        except (ValueError, TypeError):
-            return None
+    from ui.services.measures import parse_measure as _float
 
     always_include: dict[str, list[str]] | None = None
     exclude_activity_id = None
@@ -205,6 +204,8 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
         "true",
         "yes",
     )
+    raw_tp60_custom = request.GET.get("tp60_custom", "").strip().lower()
+    tp60_custom = raw_tp60_custom in ("1", "true", "yes")
 
     if exclude_activity_id:
         try:
@@ -226,6 +227,8 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
             tube_pitch = float(att.tube_pitch)
         if not stabilimento and att.stabilimento:
             stabilimento = att.stabilimento
+        if not raw_tp60_custom:
+            tp60_custom = bool(att.tp60_custom)
         # Strict filtering empties a category when its requirement is unset,
         # which would leave the edit picker with nothing to choose from.
         if not relax_requirements and modello_testa:
@@ -245,6 +248,7 @@ def api_get_risorse(request: HttpRequest) -> JsonResponse:
         strict_requirements=strict_requirements,
         relax_requirements=relax_requirements,
         always_include=always_include,
+        tp60_custom=tp60_custom,
     )
 
     lookup_pairs = parse_resource_lookup_param(request.GET.get("lookup", ""))
@@ -470,6 +474,7 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
             bore_max=_dec(bore.get("max")),
             bore_mid=_dec(bore.get("mid")),
             tube_pitch=_dec(bore.get("tube_pitch")),
+            tp60_custom=bool(data.get("tp60_custom")),
             predecessors=", ".join(predecessor_ids),
         )
 

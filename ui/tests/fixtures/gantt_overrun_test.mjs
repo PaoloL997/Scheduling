@@ -89,8 +89,10 @@ const over = render({
 if (over.dashes.length !== 1) {
   throw new Error(`expected one dashed overrun tail, got ${over.dashes.length}`);
 }
-if (over.ticks.length !== 3) {
-  throw new Error(`expected start/estimate/today ticks, got ${over.ticks.length}`);
+// Two ticks only: the actual start and today. The estimated end is where
+// the dashes begin, and drawing a bar there too read as a second end.
+if (over.ticks.length !== 2) {
+  throw new Error(`expected start and today ticks only, got ${over.ticks.length}`);
 }
 const dash = over.dashes[0];
 const dashRight = Number(dash.getAttribute('x2'));
@@ -109,6 +111,8 @@ if (firstBadgeX < dashRight) {
   throw new Error(`badge before overrun end (badge=${firstBadgeX}, dash=${dashRight})`);
 }
 
+// The estimated-end tick is only dropped while overrunning: an activity
+// inside its window still closes on its estimate.
 // Still inside the estimated window: no dashed tail at all.
 const within = render({
   ...base,
@@ -119,6 +123,9 @@ const within = render({
 });
 if (within.dashes.length !== 0) {
   throw new Error('unexpected overrun tail for an activity inside its estimate');
+}
+if (within.ticks.length !== 2) {
+  throw new Error(`expected start and estimated-end ticks, got ${within.ticks.length}`);
 }
 if (within.badgeTexts.includes('IN RITARDO')) {
   throw new Error('activity inside its estimate must not be flagged late');
@@ -138,6 +145,7 @@ if (closed.dashes.length !== 0) {
 
 console.log('ok', {
   overrunTicks: over.ticks.length,
+  withinTicks: within.ticks.length,
   dashRight,
   firstBadgeX,
 });

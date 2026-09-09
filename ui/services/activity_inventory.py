@@ -5,7 +5,13 @@ stabilimento/responsabile selectors and to list available resources (with
 date-overlap exclusion) during the resource-selection step of the wizard.
 """
 
+import math
+from collections.abc import Callable
 from datetime import date
+
+#: Consumable categories a TP60 Custom (Sporgenza Tubo-Piastra) activity may
+#: legitimately leave unselected without it counting as a problem.
+TP60_CUSTOM_OPTIONAL_CATS = ("mandrini", "tastatori", "maschere")
 
 
 def get_stabilimenti() -> list[str]:
@@ -174,13 +180,20 @@ def _select_n(
     if not items or n <= 0:
         return set()
 
+    from ui.services.measures import parse_measure
+
+    def _distance(pair: tuple[int, dict]) -> float | int:
+        """Distance from *mid*; unreadable diameters sort last, never as zero."""
+        if mid is None:
+            return pair[0]
+        diameter = parse_measure(pair[1].get("diameter"))
+        return math.inf if diameter is None else abs(diameter - mid)
+
     ranked = sorted(
         enumerate(items),
         key=lambda pair: (
             pair[1]["uid"] in busy,
-            abs(float(pair[1].get("diameter") or 0) - mid)
-            if mid is not None
-            else pair[0],
+            _distance(pair),
             pair[1]["uid"],
         ),
     )
@@ -222,11 +235,17 @@ def find_modello_testa_in_db(modello_testa: str) -> str | None:
     return partial
 
 
-def get_testa_min_requirements(modello_testa: str | None) -> dict[str, int]:
+def get_testa_min_requirements(
+    modello_testa: str | None, tp60_custom: bool = False
+) -> dict[str, int]:
     """Return minimum resource counts for a testa model configuration.
 
     Args:
         modello_testa: Testa model name used for configuration lookup.
+        tp60_custom: When ``True`` the activity is a TP60 Custom (Sporgenza
+            Tubo-Piastra) job: the consumable categories listed in
+            :data:`TP60_CUSTOM_OPTIONAL_CATS` become optional (minimum ``0``)
+            because such workings may not need them.
 
     Returns:
         dict[str, int]: Keys ``teste``, ``mandrini``, ``tastatori``,
@@ -236,13 +255,17 @@ def get_testa_min_requirements(modello_testa: str | None) -> dict[str, int]:
     min_mandrini, min_tastatori, min_maschere, min_generatori, _ = _get_testa_config(
         modello_testa
     )
-    return {
+    requirements = {
         "teste": 1,
         "mandrini": min_mandrini,
         "tastatori": min_tastatori,
         "maschere": min_maschere,
         "generatori": min_generatori,
     }
+    if tp60_custom:
+        for cat in TP60_CUSTOM_OPTIONAL_CATS:
+            requirements[cat] = 0
+    return requirements
 
 
 def _get_testa_config(modello_testa: str | None) -> tuple[int, int, int, int, set[str]]:
@@ -399,6 +422,7 @@ def get_available_resources(
     strict_requirements: bool = False,
     relax_requirements: bool = False,
     always_include: dict[str, list[str]] | None = None,
+    tp60_custom: bool = False,
 ) -> dict:
     """Build the full resource availability context for the wizard step 5.
 
@@ -418,6 +442,10 @@ def get_available_resources(
       insufficient).
     * ``pre_tastatori`` — same ranking as mandrini for ``min_tastatori``.
     * ``pre_maschere`` — ``min_maschere`` idle items first, then list order.
+
+    Every count comes from ``min_requirements``, so a category whose minimum
+    is ``0`` — the consumables of a TP60 Custom activity — is pre-selected
+    empty.
     * ``pre_generatori`` — items whose ``model`` is in the compatible-generator
       set; the generator list itself is also filtered to those models.
       Idle items are preferred within that set.
@@ -450,6 +478,11 @@ def get_available_resources(
             result whatever the filters say — the resources currently assigned
             to the activity being edited.  Those rows are returned first and
             annotated with ``assigned_current`` and ``unavailable_reason``.
+        tp60_custom: When ``True``, the consumable categories in
+            :data:`TP60_CUSTOM_OPTIONAL_CATS` have a minimum of ``0``: they are
+            reported as optional in ``min_requirements`` and nothing is
+            pre-selected for them.  The lists themselves are unchanged, so the
+            planner can still tick a consumable by hand.
 
     Returns:
         dict: With keys ``teste``, ``mandrini``, ``tastatori``, ``maschere``,
@@ -457,8 +490,6 @@ def get_available_resources(
             ``pre_mandrini``, ``pre_tastatori``, ``pre_maschere``,
             ``pre_generatori`` (each a set of pre-selected UIDs).
     """
-    from django.db.models import FloatField
-    from django.db.models.functions import Cast
     from ui.models import (
         GeneratoreItem,
         MandrinoItem,
@@ -466,13 +497,42 @@ def get_available_resources(
         TastatoreItem,
         TestaItem,
     )
+    from ui.services.measures import is_resource_compatible
 
     if relax_requirements:
         strict_requirements = False
 
-    min_mandrini, min_tastatori, min_maschere, min_generatori, gen_models = (
-        _get_testa_config(modello_testa)
-    )
+    *_, gen_models = _get_testa_config(modello_testa)
+    min_requirements = get_testa_min_requirements(modello_testa, tp60_custom)
+
+    def _predicate(tipo: str) -> Callable[[dict], bool]:
+        """Return the shared compatibility rule bound to this activity's requirements.
+
+        Measures are compared in Python through
+        :func:`ui.services.measures.is_resource_compatible` so that a
+        comma-decimal or unreadable ``diameter``/``pitch`` string is handled
+        the same way everywhere, rather than through a SQL cast that would
+        silently truncate or zero it.
+
+        Args:
+            tipo: Resource category the predicate applies to.
+
+        Returns:
+            Callable[[dict], bool]: Row predicate.
+        """
+
+        def _pred(row: dict) -> bool:
+            return is_resource_compatible(
+                tipo,
+                row,
+                bore_min=bore_min,
+                bore_max=bore_max,
+                tube_pitch=tube_pitch,
+                modello_testa=modello_testa,
+                gen_models=gen_models,
+            )
+
+        return _pred
 
     occ_testa = _occupied_ids("testa", data_inizio, data_fine, exclude_activity_id)
     occ_m = _occupied_ids("mandrino", data_inizio, data_fine, exclude_activity_id)
@@ -480,34 +540,43 @@ def get_available_resources(
     occ_ma = _occupied_ids("maschera", data_inizio, data_fine, exclude_activity_id)
     occ_g = _occupied_ids("generatore", data_inizio, data_fine, exclude_activity_id)
 
-    def _query_with_fallback(base_qs, extra_filter_fn, occ: set) -> list[dict]:
+    def _query_with_fallback(
+        base_qs, predicate: Callable[[dict], bool], occ: set
+    ) -> list[dict]:
         """Return same-plant resources, falling back to other plants only when empty.
 
-        Applies ``extra_filter_fn`` and excludes occupied UIDs, then returns the
-        same-plant subset.  When no same-plant rows match, the other-plant rows
-        are returned instead, annotated with ``stab_esterno`` so the UI can
-        display a distinguishing badge.
+        Excludes occupied UIDs in SQL, applies the compatibility ``predicate``
+        to the fetched rows, then returns the same-plant subset.  When no
+        same-plant rows match, the other-plant rows are returned instead,
+        annotated with ``stab_esterno`` so the UI can display a distinguishing
+        badge.
 
         Args:
             base_qs: Base QuerySet for the inventory model.
-            extra_filter_fn: Callable that applies bore/pitch/model filters.
+            predicate: Row predicate applying bore/pitch/model filters.
             occ: Occupied UIDs to exclude.
 
         Returns:
             list[dict]: Same-plant rows when available; other-plant rows
                 (with ``stab_esterno`` set) otherwise.
         """
-        qs = extra_filter_fn(base_qs)
+        qs = base_qs
         if occ:
             qs = qs.exclude(uid__in=occ)
 
-        primary = list(qs.filter(plant=stabilimento).order_by("uid").values())
+        primary = [
+            r
+            for r in qs.filter(plant=stabilimento).order_by("uid").values()
+            if predicate(r)
+        ]
         if primary:
             return primary
 
-        fallback = list(
-            qs.exclude(plant=stabilimento).order_by("plant", "uid").values()
-        )
+        fallback = [
+            r
+            for r in qs.exclude(plant=stabilimento).order_by("plant", "uid").values()
+            if predicate(r)
+        ]
         for r in fallback:
             r["stab_esterno"] = r.get("plant") or "—"
         return fallback
@@ -527,63 +596,10 @@ def get_available_resources(
             r["stab_esterno"] = r.get("plant") or "—"
         return primary + others
 
-    def _bore_filter(qs):
-        """Filter queryset by bore diameter range when both bounds are set.
-
-        Args:
-            qs: QuerySet with a ``diameter`` CharField.
-
-        Returns:
-            QuerySet: Filtered or unmodified queryset.
-        """
-        if bore_min is not None and bore_max is not None:
-            return qs.annotate(_d=Cast("diameter", FloatField())).filter(
-                _d__gte=bore_min, _d__lte=bore_max
-            )
-        return qs
-
-    def _pitch_filter(qs):
-        """Filter queryset to rows matching the required tube pitch.
-
-        Args:
-            qs: QuerySet with a ``pitch`` CharField.
-
-        Returns:
-            QuerySet: Filtered or unmodified queryset.
-        """
-        if tube_pitch is not None:
-            return qs.annotate(_p=Cast("pitch", FloatField())).filter(_p=tube_pitch)
-        return qs
-
-    def _model_filter(qs):
-        """Filter queryset to rows matching the testa model.
-
-        Args:
-            qs: QuerySet with a ``model`` CharField.
-
-        Returns:
-            QuerySet: Filtered or unmodified queryset.
-        """
-        if modello_testa:
-            return qs.filter(model__iexact=modello_testa.strip())
-        return qs
-
-    def _gen_model_filter(qs):
-        """Filter generatori to compatible models when configuration exists.
-
-        When ``gen_models`` is non-empty (i.e. a :class:`ConfigurazioneTesta`
-        with compatible generators was found), only those generator items whose
-        ``model`` appears in the compatible set are returned.
-
-        Args:
-            qs: QuerySet for :class:`~ui.models.GeneratoreItem`.
-
-        Returns:
-            QuerySet: Filtered or unmodified queryset.
-        """
-        if gen_models:
-            return qs.filter(model__in=gen_models)
-        return qs
+    _bore_filter = _predicate("mandrino")
+    _pitch_filter = _predicate("maschera")
+    _model_filter = _predicate("testa")
+    _gen_model_filter = _predicate("generatore")
 
     def _teste_available() -> list[dict]:
         base = TestaItem.objects.filter(in_manutenzione=False)
@@ -633,11 +649,11 @@ def get_available_resources(
 
     if always_include:
 
-        def _compatible(model_cls, filter_fn, active: bool) -> set[str] | None:
+        def _compatible(model_cls, predicate, active: bool) -> set[str] | None:
             """UIDs passing the model/bore/pitch filter, or None when unfiltered."""
             if not active:
                 return None
-            return set(filter_fn(model_cls.objects.all()).values_list("uid", flat=True))
+            return {r["uid"] for r in model_cls.objects.values() if predicate(r)}
 
         has_bore = bore_min is not None and bore_max is not None
         specs = (
@@ -678,16 +694,21 @@ def get_available_resources(
     busy_ma = _open_assignment_ids("maschera", exclude_activity_id)
     busy_g = _open_assignment_ids("generatore", exclude_activity_id)
 
-    pre_testa = _select_n(teste, 1, busy_testa)
-    pre_mandrini = _select_n(mandrini, min_mandrini, busy_m, bore_mid)
-    pre_tastatori = _select_n(tastatori, min_tastatori, busy_t, bore_mid)
-    pre_maschere = _select_n(maschere, min_maschere, busy_ma)
+    # Pre-selection follows the same minimums the wizard enforces, so a TP60
+    # Custom activity (consumable minimums at 0) starts with no mandrini,
+    # tastatori or maschere ticked.
+    pre_testa = _select_n(teste, min_requirements["teste"], busy_testa)
+    pre_mandrini = _select_n(mandrini, min_requirements["mandrini"], busy_m, bore_mid)
+    pre_tastatori = _select_n(
+        tastatori, min_requirements["tastatori"], busy_t, bore_mid
+    )
+    pre_maschere = _select_n(maschere, min_requirements["maschere"], busy_ma)
 
     if gen_models:
         compatible = [r for r in generatori if r.get("model") in gen_models]
-        pre_generatori = _select_n(compatible, min_generatori, busy_g)
+        pre_generatori = _select_n(compatible, min_requirements["generatori"], busy_g)
     else:
-        pre_generatori = _select_n(generatori, min_generatori, busy_g)
+        pre_generatori = _select_n(generatori, min_requirements["generatori"], busy_g)
 
     def _pre_first(lst: list, pre: set) -> list:
         """Place pre-selected items at the front of a list.
@@ -718,7 +739,7 @@ def get_available_resources(
         "pre_tastatori": pre_tastatori,
         "pre_maschere": pre_maschere,
         "pre_generatori": pre_generatori,
-        "min_requirements": get_testa_min_requirements(modello_testa),
+        "min_requirements": min_requirements,
     }
 
 

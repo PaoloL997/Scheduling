@@ -73,7 +73,9 @@ def _shortfall_description(
 
 
 def resource_shortfalls(
-    modello_testa: str | None, counts: dict[str, int]
+    modello_testa: str | None,
+    counts: dict[str, int],
+    tp60_custom: bool = False,
 ) -> list[dict]:
     """Return one descriptor per category selected below its required minimum.
 
@@ -88,6 +90,9 @@ def resource_shortfalls(
         counts: Number of selected resources keyed by wizard category
             (``teste``, ``mandrini``, ``tastatori``, ``maschere``,
             ``generatori``).  Missing keys count as zero.
+        tp60_custom: When ``True`` the consumable categories (mandrini,
+            tastatori, maschere) have no minimum, per
+            :func:`~ui.services.activity_inventory.get_testa_min_requirements`.
 
     Returns:
         list[dict]: One dict per under-selected category, in
@@ -98,7 +103,7 @@ def resource_shortfalls(
     from ui.services.activity_inventory import get_testa_min_requirements
 
     modello = (modello_testa or "").strip()
-    minimi = get_testa_min_requirements(modello or None)
+    minimi = get_testa_min_requirements(modello or None, tp60_custom)
 
     shortfalls: list[dict] = []
     for key in _CAT_KEYS:
@@ -159,7 +164,11 @@ def missing_minimum_resources(attivita, pairs=None) -> list[dict]:
     """
     if pairs is None:
         pairs = [(r.tipo, r.risorsa_id) for r in attivita.risorse.all()]
-    return resource_shortfalls(attivita.modello_testa, _counts_by_categoria(pairs))
+    return resource_shortfalls(
+        attivita.modello_testa,
+        _counts_by_categoria(pairs),
+        tp60_custom=bool(getattr(attivita, "tp60_custom", False)),
+    )
 
 
 def format_missing_minimum_message(
@@ -251,8 +260,13 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
 
     * **spostamento** — a selected resource belongs to a plant other than the
       activity's ``stabilimento``.  The resource must be transferred.
-    * **acquisto** — no resource was selected for a given category.  One must
-      be sourced externally (purchase, rental, or loan).
+    * **acquisto** — fewer resources than the configured minimum were selected
+      for a given category.  The missing ones must be sourced externally
+      (purchase, rental, or loan).
+
+    Activities flagged ``tp60_custom`` (Sporgenza Tubo-Piastra) have no minimum
+    on the consumable categories, so leaving mandrini/tastatori/maschere
+    unselected raises no ``acquisto`` note.
 
     Open ``acquisto`` / ``spostamento`` notes are reconciled with the current
     selection: stale ones are auto-resolved, still-valid ones get an updated
@@ -281,6 +295,7 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
         for s in resource_shortfalls(
             attivita.modello_testa,
             {key: len(risorse_dict.get(key) or []) for key in _CAT_KEYS},
+            tp60_custom=bool(getattr(attivita, "tp60_custom", False)),
         )
     }
 
@@ -705,6 +720,7 @@ def restore_resolved_notes() -> int:
         ProblemaAttivita.TIPO_ACQUISTO,
         ProblemaAttivita.TIPO_MANUTENZIONE,
         ProblemaAttivita.TIPO_RITARDO,
+        ProblemaAttivita.TIPO_SOSTITUZIONE,
     }
     for r in resoluzioni:
         if r.tipo in skipped_types:

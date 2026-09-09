@@ -24,20 +24,58 @@ from ui.services.resource_display import (
 logger = logging.getLogger(__name__)
 
 
+_TIPO_KEYS: tuple[tuple[str, str], ...] = (
+    ("testa", "teste"),
+    ("mandrino", "mandrini"),
+    ("tastatore", "tastatori"),
+    ("maschera", "maschere"),
+    ("generatore", "generatori"),
+)
+
+
 def _risorse_to_pairs(risorse_data: dict) -> list[tuple[str, str]]:
     """Convert wizard-style risorse dict to (tipo, risorsa_id) pairs."""
     pairs: list[tuple[str, str]] = []
-    for tipo, key in [
-        ("testa", "teste"),
-        ("mandrino", "mandrini"),
-        ("tastatore", "tastatori"),
-        ("maschera", "maschere"),
-        ("generatore", "generatori"),
-    ]:
+    for tipo, key in _TIPO_KEYS:
         for rid in risorse_data.get(key, []) or []:
             if rid:
                 pairs.append((tipo, str(rid)))
     return pairs
+
+
+def _merge_risorse_with_existing(attivita_id: int, risorse_data: dict) -> dict:
+    """Return a full five-category risorse dict for a (possibly partial) update.
+
+    The resource update replaces every assignment of the activity, so a
+    request that names only the categories it touched would otherwise wipe
+    the others without any error.  A category **absent** from the request
+    keeps its current assignments; a category present with an empty list is
+    an explicit clear.
+
+    Args:
+        attivita_id: Primary key of the activity being updated.
+        risorse_data: Category name to list of UIDs, possibly partial.
+
+    Returns:
+        dict: Every category key present, merged with the stored assignments.
+    """
+    existing: dict[str, list[str]] = {key: [] for _, key in _TIPO_KEYS}
+    key_by_tipo = dict(_TIPO_KEYS)
+    rows = RisorsaAttivita.objects.filter(attivita_id=attivita_id).values_list(
+        "tipo", "risorsa_id"
+    )
+    for tipo, rid in rows:
+        key = key_by_tipo.get(tipo)
+        if key and rid:
+            existing[key].append(rid)
+
+    merged: dict[str, list[str]] = {}
+    for _, key in _TIPO_KEYS:
+        if key in risorse_data:
+            merged[key] = [str(r) for r in (risorse_data.get(key) or []) if r]
+        else:
+            merged[key] = existing[key]
+    return merged
 
 
 class BridgeWriteError(Exception):
@@ -169,6 +207,8 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
         a.stabilimento = data["plant"] or ""
     if "responsible" in data:
         a.responsabile = data["responsible"] or ""
+    if "tp60_custom" in data:
+        a.tp60_custom = bool(data["tp60_custom"])
     if "predecessors" in data:
         predecessor_ids = [
             str(v).strip() for v in data["predecessors"] if str(v).strip()
@@ -192,6 +232,7 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
     if risorse_data is not None:
         if not isinstance(risorse_data, dict):
             raise BridgeWriteError("Formato risorse non valido.", status_code=400)
+        risorse_data = _merge_risorse_with_existing(a.pk, risorse_data)
         new_risorse_pairs = _risorse_to_pairs(risorse_data)
         window = occupation_window(a)
         if window is not None:
@@ -292,7 +333,7 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
         from ui.services.problem_detection import detect_and_save_problems
 
         detect_and_save_problems(a, risorse_data)
-    elif "plant" in data:
+    elif "plant" in data or "tp60_custom" in data:
         from ui.services.problem_detection import refresh_problems_for_attivita
 
         refresh_problems_for_attivita(a)

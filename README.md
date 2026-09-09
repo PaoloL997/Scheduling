@@ -45,6 +45,10 @@ jobs.xlsx   ─┘                              │
 ### WPS integration
 Activities can have a WPS (Welding Procedure Specification) PDF attached. The app uses the **Gemini API** to extract bore dimensions and tube pitch from the PDF, pre-filling the resource selection step of the activity wizard.
 
+### TP60 Custom (Sporgenza Tubo-Piastra)
+
+Below the Gemini measurements the wizard shows a **TP60 Custom (Sporgenza Tubo-Piastra)** flag, saved on `Attivita.tp60_custom`. Such workings may not need every accessory: mandrini, tastatori and maschere become optional, so nothing is pre-selected for them and leaving them unselected raises no `acquisto` problem to resolve. Their lists stay populated, so the planner can still tick one by hand. Teste and generatori keep their minimums and their pre-selection.
+
 ## Access layers
 
 Every account carries one of three permission layers, stored on `UserProfile.ruolo`:
@@ -117,6 +121,43 @@ When a late start makes two activities share a resource:
 2. **Reschedule proposal** — if no substitute exists, the CP-SAT model is run on that activity plus its precedence-connected chain. Every other activity's resource bookings are treated as fixed reservations. Planning shows the proposal (dates, assigned resources, mini-Gantt, deadline badge) with **Accept** / **Reject**.
 
 Overlap warnings on the home Gantt open the same notes modal.
+
+## Tablet scan and compatible accessories
+
+The tablet starts an activity by scanning its components against
+`POST /api/bridge/attivita/<pk>/scan/` (write permission required):
+
+```json
+{"tipo": "mandrino", "codice": "MND-117", "atteso": "MND-102", "conferma": false}
+```
+
+- **Teste and generatori** must match the assigned UID exactly; anything else
+  is refused with `motivo: "non_corrispondente"`.
+- **Mandrini, tastatori and maschere** are checked by measure, with the same
+  rule as the planning picker (`ui/services/measures.py`): bore within
+  `bore_min`–`bore_max`, or mask pitch equal to `tube_pitch`. Out of
+  tolerance → 409 `non_compatibile` with the measures spelled out. The activity
+  must define the requirement (`requisiti`) and the item measure must be
+  readable (`misura`): an unreadable value is never treated as zero.
+- The scanned item is then classified in the activity's occupation window:
+  1. **Free** → allowed; a different piece needs `conferma: true` after the
+     operator sees `"Stai usando MND-117 al posto di MND-102, va bene?"`.
+  2. **Held by an activity in progress or closed** → 409 `occupata`, nothing
+     changes.
+  3. **Held only by planned activities** → same confirmation; on confirm the
+     started activity gets the scanned piece, each robbed activity is
+     re-equipped with a compatible free spare through the overlap engine
+     (`pick_free_spare`), and when none exists the piece is removed there so
+     the standard `acquisto` warning appears in planning. Every step leaves a
+     resolved `sostituzione` note on both sides.
+
+Without `conferma` nothing is written: the response carries
+`richiede_conferma`, `messaggio` and `attivita_sottratte`. `atteso` is inferred
+when the activity holds a single item of that category and required otherwise.
+
+Resource updates through `update_attivita` (web and bridge) replace the full
+assignment list, but a category **absent** from `risorse` keeps its current
+assignments; only an explicit empty list clears it.
 
 ## Demo seeds
 
