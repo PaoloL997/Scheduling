@@ -3747,6 +3747,51 @@ body.is-readonly .btn-delete {
 .inv-maint-switch.is-on .inv-maint-knob {
   transform: translateX(12px);
 }
+.inv-avail-cell { text-align: center; width: 5.5rem; }
+.inv-avail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 50%;
+  cursor: help;
+  vertical-align: middle;
+}
+.inv-avail:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.inv-avail-dot {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.inv-avail--libera .inv-avail-dot {
+  background: var(--green);
+  box-shadow: 0 0 0 3px hsl(142 70% 45% / 0.18);
+}
+.inv-avail--occupata .inv-avail-dot {
+  background: var(--red);
+  box-shadow: 0 0 0 3px hsl(0 72% 51% / 0.18);
+}
+#inv-avail-popover {
+  position: fixed;
+  z-index: 10050;
+  min-width: 10rem;
+  max-width: 20rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 8px 28px hsl(220 16% 4% / 0.38);
+  color: var(--text);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  white-space: pre-line;
+  pointer-events: none;
+}
 @media (max-width: 720px) {
   .inv-head-row {
     gap: 0.625rem;

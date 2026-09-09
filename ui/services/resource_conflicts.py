@@ -16,6 +16,7 @@ Overlap semantics are inclusive on both ends: an activity that ends on day
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date
 
@@ -359,3 +360,30 @@ def occupied_resource_ids(
             Q(tipo=tipo), data_inizio, data_fine, exclude_activity_id
         )
     }
+
+
+def bookings_not_ended(
+    tipo: str,
+    risorsa_ids: Iterable[str],
+    since: date,
+) -> Iterator[tuple]:
+    """Yield current and future bookings of the given resources.
+
+    A booking is returned when its occupancy window (see
+    :func:`occupation_window`) has not ended before *since* — that is, the
+    resource is either held on that day or will be held later on.  Used by the
+    inventory availability column.
+
+    Args:
+        tipo: Resource category.
+        risorsa_ids: Resource identifiers to look up.
+        since: Reference day, usually today.
+
+    Yields:
+        tuple: ``(RisorsaAttivita, occupancy start, occupancy end)`` for every
+            booking whose occupancy ends on or after *since*.
+    """
+    ids = [rid for rid in risorsa_ids if rid]
+    if not ids:
+        return
+    yield from _overlapping_bookings(Q(tipo=tipo, risorsa_id__in=ids), since, date.max)

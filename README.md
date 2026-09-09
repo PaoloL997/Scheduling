@@ -113,6 +113,19 @@ An activity that was never started and is already past `data_fine` raises a
 proposal. It keeps its bookings until the proposal is accepted, so no one else
 can quietly take the resource.
 
+### Availability column
+
+Every inventory table carries a **Disponibilità** dot: green when no occupancy
+window contains today, red when one does. Hovering it opens the detail — a red
+dot names the activities holding the item and the day it comes free, a green one
+how many days it stays free and which activities take it next. Back-to-back
+bookings are followed, so the release day is the first genuinely idle one.
+
+`ui/services/resource_availability.py` builds both states from the same
+`occupation_window`, through
+`resource_conflicts.bookings_not_ended`. Maintenance is unrelated and keeps its
+own column.
+
 ## Resource overlaps
 
 When a late start makes two activities share a resource:

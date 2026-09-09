@@ -177,12 +177,19 @@ def inventario(request: HttpRequest):
     Maschera, Tastatore, Testa) and passes them to the template as
     separate context keys.  The active table is toggled client-side.
 
+    Each row is annotated with its availability today (see
+    :func:`ui.services.resource_availability.annotate_inventory_rows`); the
+    same descriptors are handed to the page as JSON so rows added or edited
+    without a reload keep the column filled.
+
     Args:
         request: The incoming HTTP request.
 
     Returns:
         HttpResponse: The rendered inventario template.
     """
+    from ui.services.resource_availability import annotate_inventory_rows
+
     tables = {
         "Generatore": "generatori",
         "Mandrino": "mandrini",
@@ -190,7 +197,17 @@ def inventario(request: HttpRequest):
         "Tastatore": "tastatori",
         "Testa": "teste",
     }
-    context = {ctx_key: _fetch_inventory_table(tbl) for tbl, ctx_key in tables.items()}
+    today = date.today()
+    context = {
+        ctx_key: annotate_inventory_rows(tbl, _fetch_inventory_table(tbl), today)
+        for tbl, ctx_key in tables.items()
+    }
+    context["disponibilita_json"] = json.dumps(
+        {
+            tbl: {row["uid"]: row["disponibilita"] for row in context[ctx_key]}
+            for tbl, ctx_key in tables.items()
+        }
+    )
     stab_objs = list(Stabilimento.objects.order_by("nome").values("nome", "colore"))
     context["stabilimenti"] = [s["nome"] for s in stab_objs]
     context["stabilimenti_json"] = json.dumps(context["stabilimenti"])

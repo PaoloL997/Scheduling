@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-09
+
+### Added
+
+- **Colonna «Disponibilità» in Inventario.** Ogni tabella dell'inventario
+  (generatori, mandrini, maschere, tastatori, teste) mostra un pallino verde se
+  la risorsa oggi e' libera, rosso se e' occupata. Al passaggio del mouse (o da
+  tastiera, con il focus sul pallino) si apre un riquadro con il dettaglio: sul
+  rosso l'attivita' che la sta impegnando, il suo periodo e il giorno in cui si
+  libera; sul verde fra quanti giorni e da quali attivita' verra' impegnata,
+  oppure «Nessun impegno pianificato». Gli impegni consecutivi vengono
+  concatenati, quindi la data di rilascio e' il primo giorno realmente libero.
+- Nuovo servizio `ui/services/resource_availability.py`: l'occupazione non e'
+  reimplementata, arriva da `resource_conflicts.occupation_window` tramite la
+  nuova `resource_conflicts.bookings_not_ended`, cosi' un inizio effettivo in
+  ritardo o una chiusura tardiva contano come per le sovrapposizioni.
+
 ## 2026-09-08
 
 ### Added
