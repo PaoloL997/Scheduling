@@ -132,6 +132,7 @@
                    data-responsible="{{ task.responsible|default:'' }}"
                    data-resources="{{ task.resources|default:'' }}"
                    data-resources-typed="{{ task.resources_by_tipo_json }}"
+                   data-min-requirements="{{ task.min_requirements_json }}"
                    data-modello-testa="{{ task.modello_testa|default:'' }}"
                    data-bore-min="{{ task.bore_min|default:'' }}"
                    data-bore-max="{{ task.bore_max|default:'' }}"
@@ -2090,6 +2091,39 @@ function _formatMinRequirements(mins) {
     .join(' · ');
 }
 
+const _MIN_REQ_TIPO_LABELS = {
+  teste: 'Testa', mandrini: 'Mandrino', tastatori: 'Tastatore',
+  maschere: 'Maschera', generatori: 'Generatore',
+};
+
+// Mirrors ui.services.problem_detection.missing_minimum_resources: an activity
+// cannot be started before its minimum kit is booked.  The server enforces the
+// rule; this only spares the round-trip and names what is missing right away.
+function _missingMinimumResources(minRequirements, risorse) {
+  let mins = minRequirements;
+  if (typeof mins === 'string') {
+    try { mins = JSON.parse(mins || '{}'); } catch (_) { mins = {}; }
+  }
+  mins = mins || {};
+  return _RISORSE_CAT_KEYS
+    .map(cat => ({
+      cat,
+      label: _MIN_REQ_TIPO_LABELS[cat],
+      selezionati: ((risorse || {})[cat] || []).length,
+      richiesti: mins[cat] ?? 1,
+    }))
+    .filter(s => s.selezionati < s.richiesti);
+}
+
+function _missingMinimumMessage(shortfalls) {
+  const detail = shortfalls
+    .map(s => `${s.label} ${s.selezionati}/${s.richiesti}`)
+    .join('; ');
+  return `Impossibile avviare l'attività: mancano le risorse minime (${detail}). `
+       + 'Assegna le risorse mancanti con «Modifica risorse» prima di registrare '
+       + "l'inizio effettivo.";
+}
+
 function _shortfallNoteHtml(catKey, selected, min, available) {
   const mancanti = min - selected;
   if (mancanti <= 0) return '';
@@ -2972,6 +3006,7 @@ function _wizAppendRow(ormId, warningCount, noteCount) {
   div.dataset.responsible  = r.responsabile;
   div.dataset.resources      = allRes;
   div.dataset.resourcesTyped = JSON.stringify(resByTipo);
+  div.dataset.minRequirements = JSON.stringify(WIZ.minRequirements || {});
   div.dataset.predecessors   = r.predecessors && r.predecessors.length ? r.predecessors.join(', ') : '';
   div.setAttribute('onclick', 'openDetailModal(this, \'task\')');
 
@@ -3383,6 +3418,7 @@ function openDetailModal(tr, entityType) {
       responsible:  ds.responsible  || '',
       resources:    ds.resources    || '',
       resourcesTyped: ds.resourcesTyped || '',
+      minRequirements: ds.minRequirements || '',
       modelloTesta: ds.modelloTesta || '',
       boreMin:      ds.boreMin      || '',
       boreMax:      ds.boreMax      || '',
@@ -3537,9 +3573,21 @@ async function enterEditMode() {
     const inputType = f.isDate ? 'date' : (f.isNumber ? 'number' : 'text');
     const inputAttrs = f.isNumber ? 'min="1" step="1"' : '';
     const editVal = f.isNumber ? (parseInt(v, 10) || v) : v;
+    let hint = '';
+    if (isOrm && f.key === 'actualStart' && !originalData.actualStart) {
+      const missing = _missingMinimumResources(
+        originalData.minRequirements,
+        _typedToRisorse(originalData.resourcesTyped)
+      );
+      if (missing.length) {
+        const detail = missing.map(s => `${s.label} ${s.selezionati}/${s.richiesti}`).join(' · ');
+        hint = `<span class="s6-shortfall-hint">Avvio bloccato: risorse minime mancanti (${esc(detail)})</span>`;
+      }
+    }
     return `<div class="det-field">
               <span class="det-label">${esc(f.label)}</span>
               <input class="det-input" type="${inputType}" name="${f.key}" value="${editVal}" ${inputAttrs}>
+              ${hint}
             </div>`;
   }).join('');
   document.getElementById('det-view-btns').style.display = 'none';
@@ -3614,6 +3662,18 @@ async function saveEdit() {
       saveBtn.disabled = false;
       saveBtn.textContent = 'Salva';
       return;
+    }
+    if (!originalData.actualStart && newData.actualStart) {
+      const risorse = (_detState.risorseDirty && _detState.editRisorse)
+        ? _detState.editRisorse
+        : _typedToRisorse(originalData.resourcesTyped);
+      const missing = _missingMinimumResources(originalData.minRequirements, risorse);
+      if (missing.length) {
+        _showPianDetError(_missingMinimumMessage(missing));
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Salva';
+        return;
+      }
     }
     url = '/api/tasks/update/';
     payload = {

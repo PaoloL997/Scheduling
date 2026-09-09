@@ -552,11 +552,16 @@ def _attivita_to_task_dict(a) -> dict:
 
     Returns:
         dict: A dict with keys matching the pianificazione table columns,
-            including ``warning_count`` (count of unresolved problems) and
+            including ``warning_count`` (count of unresolved problems),
             ``status_pills`` — an ordered list of status badge dicts for the
-            status column.
+            status column — and ``min_requirements`` / ``can_start``, the
+            minimum resource kit required to launch the activity and whether
+            the current assignments satisfy it.
     """
     from django.utils.timezone import localdate
+
+    from ui.services.activity_inventory import get_testa_min_requirements
+    from ui.services.problem_detection import missing_minimum_resources
 
     risorse_all = list(a.risorse.all())
     res_fmt = format_activity_resources(risorse_all)
@@ -571,6 +576,13 @@ def _attivita_to_task_dict(a) -> dict:
         actual_start=a.actual_start,
         actual_finish=a.actual_finish,
         today=localdate(),
+    )
+
+    min_requirements = get_testa_min_requirements(
+        a.modello_testa or None, bool(getattr(a, "tp60_custom", False))
+    )
+    missing_minimum = missing_minimum_resources(
+        a, [(r.tipo, r.risorsa_id) for r in risorse_all]
     )
 
     return {
@@ -605,6 +617,10 @@ def _attivita_to_task_dict(a) -> dict:
         "warning_count": warning_count,
         "note_count": note_count,
         "status_pills": status_pills,
+        "min_requirements": min_requirements,
+        "min_requirements_json": json.dumps(min_requirements),
+        "missing_minimum": missing_minimum,
+        "can_start": not missing_minimum,
     }
 
 
@@ -903,6 +919,8 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
         payload = {"ok": False, "error": exc.message}
         if exc.conflicts is not None:
             payload["conflicts"] = exc.conflicts
+        if exc.missing_resources is not None:
+            payload["missing_resources"] = exc.missing_resources
         return JsonResponse(payload, status=exc.status_code)
     except Exception as exc:
         logger.error("Errore aggiornamento Attivita pk=%s: %s", orm_id, exc)

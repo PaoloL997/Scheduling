@@ -14,6 +14,10 @@ cycle so that resolution history is never lost.
 Resource overlaps caused by a late start are detected by
 :func:`find_resource_overlaps` and auto-resolved when a compatible
 substitute exists; otherwise they are stored as open problems.
+
+:func:`resource_shortfalls` is the single definition of "below the required
+minimum": it feeds both the ``acquisto`` notes and the guard that refuses to
+record the actual start of an under-equipped activity.
 """
 
 from __future__ import annotations
@@ -66,6 +70,135 @@ def _shortfall_description(
         return f"{base} — da recuperare, acquistare o affittare."
     mancanti = required - selected
     return f"{base} — manca/no ancora {mancanti}."
+
+
+def resource_shortfalls(
+    modello_testa: str | None,
+    counts: dict[str, int],
+    tp60_custom: bool = False,
+) -> list[dict]:
+    """Return one descriptor per category selected below its required minimum.
+
+    The minimums come from
+    :func:`~ui.services.activity_inventory.get_testa_min_requirements`: one
+    testa and ``min_generatori`` generators, plus the per-testa-model minimum
+    of each accessory (all default to ``1`` when the model has no
+    :class:`~ui.models.ConfigurazioneTesta` row).
+
+    Args:
+        modello_testa: Testa model of the activity, used for the config lookup.
+        counts: Number of selected resources keyed by wizard category
+            (``teste``, ``mandrini``, ``tastatori``, ``maschere``,
+            ``generatori``).  Missing keys count as zero.
+        tp60_custom: When ``True`` the consumable categories (mandrini,
+            tastatori, maschere) have no minimum, per
+            :func:`~ui.services.activity_inventory.get_testa_min_requirements`.
+
+    Returns:
+        list[dict]: One dict per under-selected category, in
+            :data:`_CAT_KEYS` order, with keys ``categoria`` (wizard key),
+            ``tipo`` (resource category), ``label``, ``selezionati``,
+            ``richiesti`` and ``descrizione``.
+    """
+    from ui.services.activity_inventory import get_testa_min_requirements
+
+    modello = (modello_testa or "").strip()
+    minimi = get_testa_min_requirements(modello or None, tp60_custom)
+
+    shortfalls: list[dict] = []
+    for key in _CAT_KEYS:
+        categoria = _CAT_TO_TIPO[key]
+        required = minimi.get(key, 1)
+        selected = counts.get(key, 0)
+        if selected >= required:
+            continue
+        label = _TIPO_LABELS.get(categoria, categoria.capitalize())
+        shortfalls.append(
+            {
+                "categoria": key,
+                "tipo": categoria,
+                "label": label,
+                "selezionati": selected,
+                "richiesti": required,
+                "descrizione": _shortfall_description(
+                    label, selected, required, modello
+                ),
+            }
+        )
+    return shortfalls
+
+
+def _counts_by_categoria(pairs) -> dict[str, int]:
+    """Count distinct resource UIDs per wizard category.
+
+    Args:
+        pairs: Iterable of ``(tipo, risorsa_id)`` assignments.
+
+    Returns:
+        dict[str, int]: One entry per key of :data:`_CAT_KEYS`.
+    """
+    seen: dict[str, set[str]] = {key: set() for key in _CAT_KEYS}
+    for tipo, uid in pairs:
+        cat = _TIPO_TO_CAT.get(tipo)
+        if cat and uid:
+            seen[cat].add(uid)
+    return {key: len(uids) for key, uids in seen.items()}
+
+
+def missing_minimum_resources(attivita, pairs=None) -> list[dict]:
+    """Return the shortfalls that forbid starting *attivita*.
+
+    An activity may not be started — that is, ``actual_start`` may not be
+    recorded — until the minimum set of resources is booked.  The rule is the
+    same one that raises the ``acquisto`` notes, so an activity can be started
+    exactly when it has no open shortfall.
+
+    Args:
+        attivita: The :class:`~ui.models.Attivita` being started.
+        pairs: ``(tipo, risorsa_id)`` assignments to evaluate; defaults to the
+            rows currently booked for the activity.
+
+    Returns:
+        list[dict]: Shortfall descriptors from :func:`resource_shortfalls`;
+            empty when the activity may be started.
+    """
+    if pairs is None:
+        pairs = [(r.tipo, r.risorsa_id) for r in attivita.risorse.all()]
+    return resource_shortfalls(
+        attivita.modello_testa,
+        _counts_by_categoria(pairs),
+        tp60_custom=bool(getattr(attivita, "tp60_custom", False)),
+    )
+
+
+def format_missing_minimum_message(
+    shortfalls: list[dict],
+    *,
+    action_hint: str | None = None,
+) -> str:
+    """Build the Italian message refusing the start of an under-equipped activity.
+
+    Args:
+        shortfalls: Descriptors as returned by :func:`missing_minimum_resources`.
+        action_hint: Optional closing sentence guiding the user.
+
+    Returns:
+        str: A descriptive error message; falls back to a generic sentence
+            when *shortfalls* is empty.
+    """
+    if not shortfalls:
+        return "Risorse minime non soddisfatte."
+
+    hint = action_hint or (
+        "Assegna le risorse mancanti con «Modifica risorse» prima di "
+        "registrare l'inizio effettivo."
+    )
+    detail = "; ".join(
+        f"{s['label']} {s['selezionati']}/{s['richiesti']}" for s in shortfalls
+    )
+    return (
+        f"Impossibile avviare l'attività: mancano le risorse minime ({detail}). {hint}"
+    )
 
 
 _RESOURCE_MODELS: dict[str, type] = {}
@@ -156,13 +289,15 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
     """
     from django.utils import timezone
     from ui.models import ProblemaAttivita
-    from ui.services.activity_inventory import get_testa_min_requirements
 
-    min_requirements = get_testa_min_requirements(
-        (attivita.modello_testa or "").strip() or None,
-        bool(getattr(attivita, "tp60_custom", False)),
-    )
-    modello_testa = (attivita.modello_testa or "").strip()
+    shortfalls = {
+        s["categoria"]: s
+        for s in resource_shortfalls(
+            attivita.modello_testa,
+            {key: len(risorse_dict.get(key) or []) for key in _CAT_KEYS},
+            tp60_custom=bool(getattr(attivita, "tp60_custom", False)),
+        )
+    }
 
     stabilimento_attivita = (attivita.stabilimento or "").strip()
     problems: list[ProblemaAttivita] = []
@@ -171,19 +306,16 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
         categoria = _CAT_TO_TIPO[key]
         uids: list[str] = risorse_dict.get(key) or []
         label = _TIPO_LABELS.get(categoria, categoria.capitalize())
-        required = min_requirements.get(key, 1)
-        selected = len(uids)
 
-        if selected < required:
+        shortfall = shortfalls.get(key)
+        if shortfall is not None:
             problems.append(
                 ProblemaAttivita(
                     attivita=attivita,
                     tipo=ProblemaAttivita.TIPO_ACQUISTO,
                     risorsa_tipo=categoria,
                     risorsa_uid="",
-                    descrizione=_shortfall_description(
-                        label, selected, required, modello_testa
-                    ),
+                    descrizione=shortfall["descrizione"],
                 )
             )
 

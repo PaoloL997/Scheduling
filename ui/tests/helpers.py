@@ -1,10 +1,40 @@
-"""Shared helpers for building test users with a given permission layer."""
+"""Shared helpers for test users and for equipping activities with resources."""
 
 from __future__ import annotations
 
 from django.contrib.auth.models import User
 
-from ui.models import UserProfile
+from ui.models import RisorsaAttivita, UserProfile
+
+#: One resource per category: the default minimum kit an activity needs before
+#: it can be started (see
+#: :func:`ui.services.problem_detection.missing_minimum_resources`).
+MINIMUM_KIT = (
+    ("testa", "T-MIN"),
+    ("mandrino", "M-MIN"),
+    ("tastatore", "TA-MIN"),
+    ("maschera", "MA-MIN"),
+    ("generatore", "G-MIN"),
+)
+
+
+def assign_minimum_kit(attivita, suffix: str = "") -> list[RisorsaAttivita]:
+    """Book one resource of every category so *attivita* may be started.
+
+    Args:
+        attivita: The :class:`~ui.models.Attivita` to equip.
+        suffix: Appended to every UID so two overlapping activities can hold
+            distinct kits instead of conflicting on the same resources.
+
+    Returns:
+        list[RisorsaAttivita]: The created assignment rows.
+    """
+    return [
+        RisorsaAttivita.objects.create(
+            attivita=attivita, tipo=tipo, risorsa_id=f"{uid}{suffix}"
+        )
+        for tipo, uid in MINIMUM_KIT
+    ]
 
 
 def set_ruolo(user: User, ruolo: str) -> User:
