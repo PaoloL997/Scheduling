@@ -202,6 +202,10 @@ def apply_optimization_result(result_payload: dict[str, Any]) -> int:
                         else None,
                         "plant": att.stabilimento or None,
                         "responsible": att.responsabile or None,
+                        # Always sent, empty list included: the assignments
+                        # above were just rewritten, and the write-back only
+                        # touches the .mpp resources when the key is present.
+                        "resources": [rid for _, rid in pairs],
                     }
                 ),
             )

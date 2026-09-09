@@ -2,6 +2,19 @@
 
 ## 2026-09-10
 
+### Fixed
+
+- **Accettando una proposta le risorse ora arrivano anche nel file .mpp.**
+  `apply_optimization_result` riscriveva le assegnazioni sul database ma
+  accodava per il write-back un payload senza la chiave `resources`, e
+  `_apply_update_task` tocca le risorse del task solo quando quella chiave
+  c'e': nel .mpp restavano quelle vecchie mentre a video ne comparivano di
+  nuove. Riguardava sia «Accetta» sulla proposta di ripianificazione della
+  singola attivita' sia l'accettazione del risultato dell'ottimizzazione, dove
+  la riassegnazione delle risorse e' il senso stesso dell'operazione. La chiave
+  viene ora inviata sempre, lista vuota compresa, cosi' che una proposta che
+  lascia l'attivita' senza risorse le azzeri anche nel .mpp.
+
 ### Changed
 
 - **La lettura del WPS passa da Gemini a OpenAI.** L'estrazione di diametro, S1

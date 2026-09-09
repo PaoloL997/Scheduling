@@ -1,5 +1,6 @@
 """Tests for overlap auto-reassignment and persisted notes/problems."""
 
+import json
 from datetime import date, timedelta
 
 from django.test import Client, TestCase
@@ -8,7 +9,10 @@ from django.utils.timezone import localdate
 from ui.models import (
     Attivita,
     ConfigurazioneTesta,
+    GeneratoreItem,
     Job,
+    MandrinoItem,
+    MppSyncQueue,
     ProblemaAttivita,
     RisorsaAttivita,
     TestaItem,
@@ -407,3 +411,68 @@ class OverdueRescheduleProposalTest(TestCase):
             risolto=False,
         )
         self.assertEqual(row.proposta_json.get("status"), "proposed")
+
+
+class RescheduleWriteBackTest(TestCase):
+    """Accepting a reschedule must reach the .mpp with the resources too."""
+
+    def setUp(self) -> None:
+        ConfigurazioneTesta.objects.create(
+            modello_testa="TP60",
+            min_mandrini=0,
+            min_tastatori=0,
+            min_maschere=0,
+            min_generatori=0,
+        )
+        # A single TP60 head: no swap is possible, so the only way out is to
+        # move the blocked activity, which is the flow under test.
+        TestaItem.objects.create(uid="OV-T1", model="TP60", plant="Valbrembo")
+        MandrinoItem.objects.create(uid="M1", diameter="20", plant="Valbrembo")
+        GeneratoreItem.objects.create(uid="G1", model="GEN", plant="Valbrembo")
+        Job.objects.create(commessa="C205", delivery_date=date(2026, 9, 30))
+
+        self.late = Attivita.objects.create(
+            commessa="C101",
+            item=1,
+            activity="Saldatura",
+            stabilimento="Valbrembo",
+            modello_testa="TP60",
+            data_inizio=date(2026, 8, 10),
+            data_fine=date(2026, 8, 19),
+            actual_start=date(2026, 8, 17),
+        )
+        self.blocked = Attivita.objects.create(
+            commessa="C205",
+            item=2,
+            activity="Montaggio",
+            stabilimento="Valbrembo",
+            modello_testa="TP60",
+            data_inizio=date(2026, 8, 20),
+            data_fine=date(2026, 8, 29),
+        )
+        RisorsaAttivita.objects.create(
+            attivita=self.late, tipo="testa", risorsa_id="OV-T1"
+        )
+        for tipo, uid in (("testa", "OV-T1"), ("mandrino", "M1"), ("generatore", "G1")):
+            RisorsaAttivita.objects.create(
+                attivita=self.blocked, tipo=tipo, risorsa_id=uid
+            )
+
+    def test_accepting_queues_the_resources_for_the_mpp(self) -> None:
+        auto_resolve_resource_overlaps()
+        self.assertEqual(
+            compute_reschedule_proposal(self.blocked.pk).get("status"), "proposed"
+        )
+
+        apply_reschedule(self.blocked.pk)
+
+        payloads = [
+            json.loads(e.payload_json)
+            for e in MppSyncQueue.objects.filter(operation="update_task")
+        ]
+        mine = [p for p in payloads if p.get("attivita_id") == self.blocked.pk]
+        self.assertTrue(mine, "nessuna voce di coda per l'attivita' ripianificata")
+        # Absent key = the write-back skips set_task_resources and the .mpp
+        # keeps the previous assignment while the database has the new one.
+        self.assertIn("resources", mine[0])
+        self.assertEqual(sorted(mine[0]["resources"]), ["G1", "M1", "OV-T1"])

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from django.test import Client, TestCase
@@ -122,6 +123,54 @@ class ApplyOptimizationResultTest(TestCase):
         self.assertEqual(
             MppSyncQueue.objects.filter(operation="update_task").count(), 1
         )
+
+    def _queued_payload(self) -> dict:
+        entry = MppSyncQueue.objects.get(operation="update_task")
+        return json.loads(entry.payload_json)
+
+    def test_mpp_payload_carries_the_reassigned_resources(self) -> None:
+        """Without the key the write-back leaves the .mpp resources untouched,
+        so accepting a proposal would desync the file from the database."""
+        apply_optimization_result(
+            {
+                "job_ids": [self.att.job_id],
+                "tasks_after": [
+                    {
+                        "orm_id": self.att.pk,
+                        "activity_id": self.att.activity_id,
+                        "start": "2026-07-01",
+                        "finish": "2026-07-05",
+                        "assigned_resource_ids": ["mandrino:M12", "tastatore:T9"],
+                    }
+                ],
+            }
+        )
+
+        payload = self._queued_payload()
+        self.assertIn("resources", payload)
+        self.assertEqual(sorted(payload["resources"]), ["M12", "T9"])
+
+    def test_mpp_payload_clears_resources_when_proposal_assigns_none(self) -> None:
+        """An empty list is still sent: the rows were deleted in the database
+        and the .mpp has to follow, which an absent key would not do."""
+        apply_optimization_result(
+            {
+                "job_ids": [self.att.job_id],
+                "tasks_after": [
+                    {
+                        "orm_id": self.att.pk,
+                        "activity_id": self.att.activity_id,
+                        "start": "2026-07-01",
+                        "finish": "2026-07-05",
+                    }
+                ],
+            }
+        )
+
+        self.assertFalse(RisorsaAttivita.objects.filter(attivita=self.att).exists())
+        payload = self._queued_payload()
+        self.assertIn("resources", payload)
+        self.assertEqual(payload["resources"], [])
 
     def test_empty_tasks_raises(self) -> None:
         with self.assertRaises(OptimizationApplyError):
