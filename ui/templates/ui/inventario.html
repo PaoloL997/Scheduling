@@ -44,6 +44,7 @@
               <th>Modello</th>
               <th>Stabilimento</th>
               <th>Note</th>
+              <th style="width:5.5rem;">Disponibilità</th>
               <th style="width:4.5rem;">Manutenzione</th>
               <th style="width:2.5rem;"></th>
             </tr>
@@ -55,6 +56,7 @@
               <td>{{ row.model|default:"—" }}</td>
               <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
               <td class="td-muted">{{ row.notes|default:"—" }}</td>
+              <td class="inv-avail-cell">{{ row.disponibilita_html|safe }}</td>
               <td class="inv-maint-cell">
                 <button type="button" class="inv-maint-switch{% if row.in_manutenzione %} is-on{% endif %}"{% if not can_write %} disabled title="Accesso in sola lettura"{% endif %} role="switch" aria-checked="{% if row.in_manutenzione %}true{% else %}false{% endif %}" aria-label="Manutenzione" onclick="toggleMaintenance('Generatore', '{{ row.uid }}', this)"><span class="inv-maint-knob"></span></button>
               </td>
@@ -80,6 +82,7 @@
               <th>Diametro (mm)</th>
               <th>Stabilimento</th>
               <th>Note</th>
+              <th style="width:5.5rem;">Disponibilità</th>
               <th style="width:2.5rem;"></th>
             </tr>
           </thead>
@@ -90,6 +93,7 @@
               <td>{{ row.diameter|default:"—" }}</td>
               <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
               <td class="td-muted">{{ row.notes|default:"—" }}</td>
+              <td class="inv-avail-cell">{{ row.disponibilita_html|safe }}</td>
               <td style="text-align:center;">{% if can_write %}<button class="btn-delete" onclick="deleteRow('Mandrino', '{{ row.uid }}', this)" title="Elimina">🗑</button>{% endif %}</td>
             </tr>
             {% endfor %}
@@ -112,6 +116,7 @@
               <th>Passo (mm)</th>
               <th>Stabilimento</th>
               <th class="td-right">Interasse (mm)</th>
+              <th style="width:5.5rem;">Disponibilità</th>
               <th style="width:2.5rem;"></th>
             </tr>
           </thead>
@@ -122,6 +127,7 @@
               <td>{{ row.pitch|default:"—" }}</td>
               <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
               <td class="td-right">{{ row.center_distance|default:"—" }}</td>
+              <td class="inv-avail-cell">{{ row.disponibilita_html|safe }}</td>
               <td style="text-align:center;">{% if can_write %}<button class="btn-delete" onclick="deleteRow('Maschera', '{{ row.uid }}', this)" title="Elimina">🗑</button>{% endif %}</td>
             </tr>
             {% endfor %}
@@ -144,6 +150,7 @@
               <th>Diametro (mm)</th>
               <th>Stabilimento</th>
               <th>Note</th>
+              <th style="width:5.5rem;">Disponibilità</th>
               <th style="width:2.5rem;"></th>
             </tr>
           </thead>
@@ -154,6 +161,7 @@
               <td>{{ row.diameter|default:"—" }}</td>
               <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
               <td class="td-muted">{{ row.notes|default:"—" }}</td>
+              <td class="inv-avail-cell">{{ row.disponibilita_html|safe }}</td>
               <td style="text-align:center;">{% if can_write %}<button class="btn-delete" onclick="deleteRow('Tastatore', '{{ row.uid }}', this)" title="Elimina">🗑</button>{% endif %}</td>
             </tr>
             {% endfor %}
@@ -176,6 +184,7 @@
               <th>Modello</th>
               <th>Stabilimento</th>
               <th>Note</th>
+              <th style="width:5.5rem;">Disponibilità</th>
               <th style="width:4.5rem;">Manutenzione</th>
               <th style="width:2.5rem;"></th>
             </tr>
@@ -187,6 +196,7 @@
               <td>{{ row.model|default:"—" }}</td>
               <td class="td-muted stab-plant-cell" data-stab="{{ row.plant|default:'' }}">{{ row.plant|default:"—" }}</td>
               <td class="td-muted">{{ row.notes|default:"—" }}</td>
+              <td class="inv-avail-cell">{{ row.disponibilita_html|safe }}</td>
               <td class="inv-maint-cell">
                 <button type="button" class="inv-maint-switch{% if row.in_manutenzione %} is-on{% endif %}"{% if not can_write %} disabled title="Accesso in sola lettura"{% endif %} role="switch" aria-checked="{% if row.in_manutenzione %}true{% else %}false{% endif %}" aria-label="Manutenzione" onclick="toggleMaintenance('Testa', '{{ row.uid }}', this)"><span class="inv-maint-knob"></span></button>
               </td>
@@ -275,6 +285,9 @@
   </div>
 </div>
 
+<!-- Availability popover (fixed, above table stacking contexts) -->
+<div id="inv-avail-popover" hidden role="tooltip"></div>
+
 <!-- Detail / Edit modal -->
 <div class="det-overlay" id="det-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="det-title">
   <div class="det-modal">
@@ -321,6 +334,7 @@
                 <td>${esc(d.model)}</td>
                 <td>${stabBadge(d.plant)}</td>
                 <td class="td-muted">${esc(d.notes)}</td>
+                <td class="inv-avail-cell">${availCellHtml('Generatore', d.uid)}</td>
                 <td class="inv-maint-cell">${maintSwitchHtml('Generatore', d.uid, isMaintOn(d.in_manutenzione))}</td>
                 <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Generatore','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
       }
@@ -339,6 +353,7 @@
                 <td>${esc(d.diameter)}</td>
                 <td>${stabBadge(d.plant)}</td>
                 <td class="td-muted">${esc(d.notes)}</td>
+                <td class="inv-avail-cell">${availCellHtml('Mandrino', d.uid)}</td>
                 <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Mandrino','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
       }
     },
@@ -356,6 +371,7 @@
                 <td>${esc(d.pitch)}</td>
                 <td>${stabBadge(d.plant)}</td>
                 <td class="td-right">${esc(d.center_distance)}</td>
+                <td class="inv-avail-cell">${availCellHtml('Maschera', d.uid)}</td>
                 <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Maschera','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
       }
     },
@@ -373,6 +389,7 @@
                 <td>${esc(d.diameter)}</td>
                 <td>${stabBadge(d.plant)}</td>
                 <td class="td-muted">${esc(d.notes)}</td>
+                <td class="inv-avail-cell">${availCellHtml('Tastatore', d.uid)}</td>
                 <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Tastatore','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
       }
     },
@@ -391,6 +408,7 @@
                 <td>${esc(d.model)}</td>
                 <td>${stabBadge(d.plant)}</td>
                 <td class="td-muted">${esc(d.notes)}</td>
+                <td class="inv-avail-cell">${availCellHtml('Testa', d.uid)}</td>
                 <td class="inv-maint-cell">${maintSwitchHtml('Testa', d.uid, isMaintOn(d.in_manutenzione))}</td>
                 <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Testa','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
       }
@@ -448,6 +466,93 @@
     .catch(function() { alert('Errore di rete.'); })
     .finally(function() { btn.disabled = false; });
   }
+
+  // ── Disponibilità: pallino verde/rosso con popover al passaggio del mouse ──
+  const INV_AVAILABILITY = {{ disponibilita_json|safe }};
+
+  // Una risorsa appena aggiunta non ha ancora impegni.
+  const AVAIL_FREE = {
+    stato: 'libera',
+    etichetta: 'Libera',
+    tooltip: 'Libera oggi.\nNessun impegno pianificato.',
+  };
+
+  function availInfo(table, uid) {
+    return (INV_AVAILABILITY[table] || {})[uid] || AVAIL_FREE;
+  }
+
+  function availCellHtml(table, uid) {
+    var info = availInfo(table, uid);
+    var tip = esc(info.tooltip || '');
+    return '<span class="inv-avail inv-avail--' + esc(info.stato) + '" tabindex="0" role="img"' +
+           ' aria-label="' + tip + '" data-tooltip="' + tip + '">' +
+           '<span class="inv-avail-dot"></span></span>';
+  }
+
+  function renameAvailability(table, oldUid, newUid) {
+    var byUid = INV_AVAILABILITY[table];
+    if (!byUid || !oldUid || !newUid || oldUid === newUid || !byUid[oldUid]) return;
+    byUid[newUid] = byUid[oldUid];
+    delete byUid[oldUid];
+  }
+
+  var _availAnchor = null;
+
+  function closeAvailPopover() {
+    var pop = document.getElementById('inv-avail-popover');
+    if (!pop) return;
+    pop.hidden = true;
+    pop.textContent = '';
+    _availAnchor = null;
+  }
+
+  function openAvailPopover(el) {
+    var tip = el.getAttribute('data-tooltip');
+    var pop = document.getElementById('inv-avail-popover');
+    if (!tip || !pop) return;
+    pop.textContent = tip;
+    pop.hidden = false;
+    _availAnchor = el;
+    var margin = 8;
+    var rect = el.getBoundingClientRect();
+    pop.style.left = '0';
+    pop.style.top = '0';
+    var popRect = pop.getBoundingClientRect();
+    var left = rect.left + rect.width / 2 - popRect.width / 2;
+    var top = rect.bottom + margin;
+    if (left + popRect.width > window.innerWidth - margin) {
+      left = window.innerWidth - popRect.width - margin;
+    }
+    if (left < margin) left = margin;
+    if (top + popRect.height > window.innerHeight - margin) {
+      top = rect.top - popRect.height - margin;
+    }
+    if (top < margin) top = margin;
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+  }
+
+  document.addEventListener('mouseover', function(e) {
+    var dot = e.target.closest('.inv-avail[data-tooltip]');
+    if (dot && dot !== _availAnchor) openAvailPopover(dot);
+  });
+
+  document.addEventListener('mouseout', function(e) {
+    var dot = e.target.closest('.inv-avail[data-tooltip]');
+    if (dot && dot === _availAnchor && !dot.contains(e.relatedTarget)) closeAvailPopover();
+  });
+
+  document.addEventListener('focusin', function(e) {
+    var dot = e.target.closest('.inv-avail[data-tooltip]');
+    if (dot) openAvailPopover(dot);
+  });
+
+  document.addEventListener('focusout', function(e) {
+    if (e.target.closest('.inv-avail[data-tooltip]') === _availAnchor) closeAvailPopover();
+  });
+
+  window.addEventListener('resize', closeAvailPopover);
+  window.addEventListener('scroll', closeAvailPopover, true);
 
   const STAB_COLORS = {{ plant_colors_json|safe }};
 
@@ -648,7 +753,7 @@
   });
 
   document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') { closeAddDropdown(); closeImportModal(); closeAddModal(); closeDetailModal(); }
+    if (e.key === 'Escape') { closeAddDropdown(); closeImportModal(); closeAddModal(); closeDetailModal(); closeAvailPopover(); }
   });
 
   // ── Detail / Edit Modal ────────────────────────────────────────────────────
@@ -664,6 +769,7 @@
       var raw = tr.getAttribute('data-' + f.name.replace(/_/g, '-')) || '';
       d[f.name] = f.type === 'checkbox' ? isMaintOn(raw) : raw;
     });
+    closeAvailPopover();
     detState = { tr: tr, cfg: cfg, originalData: d };
     document.getElementById('det-title').textContent = cfg.label + ': ' + (d.uid || '—');
     renderViewMode();
@@ -760,6 +866,7 @@
         showDetError(res.body.error || 'Errore sconosciuto.');
       } else {
         var tr = detState.tr;
+        renameAvailability(cfg.table, originalUid, newData.uid);
         tr.innerHTML = cfg.renderRow(newData);
         tr.setAttribute('data-uid', newData.uid || '');
         cfg.fields.forEach(function(f) {
