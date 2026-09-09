@@ -12,7 +12,7 @@ from django.urls import reverse
 
 from ui.models import Attivita, Job, MppSyncQueue, Stabilimento, TestaItem, UserProfile
 from ui.services.importer import ImportStatus
-from ui.tests.helpers import create_writer
+from ui.tests.helpers import assign_minimum_kit, create_writer
 
 
 def _ready_status():
@@ -272,6 +272,8 @@ class BridgeWriteTest(TestCase):
         )
 
     def test_update_attivita(self, _mock_status) -> None:
+        # Recording the start requires the minimum resource kit.
+        assign_minimum_kit(self.att)
         resp = self.client.put(
             reverse(
                 "api_bridge_attivita_update",

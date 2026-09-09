@@ -87,11 +87,13 @@ class BridgeWriteError(Exception):
         *,
         status_code: int = 400,
         conflicts: list | None = None,
+        missing_resources: list | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
         self.conflicts = conflicts
+        self.missing_resources = missing_resources
 
 
 def _parse_date(val, field: str = "data"):
@@ -182,6 +184,7 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
             )
 
     old_inizio, old_fine = a.data_inizio, a.data_fine
+    old_actual_start = a.actual_start
     if "start" in data:
         a.data_inizio = _parse_date(data["start"], "Inizio")
     if "finish" in data:
@@ -259,9 +262,11 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
             )
 
     # Re-planning is validated up front; recording a fact never is.  Setting
-    # «Inizio/Fine effettiva» states what already happened, so it can surface a
-    # conflict but must never be refused -- the conflict becomes a note plus a
-    # reschedule proposal on the activity that has not started yet.
+    # «Inizio/Fine effettiva» states what already happened, so a *resource
+    # conflict* can be surfaced but must never refuse the save -- it becomes a
+    # note plus a reschedule proposal on the activity that has not started yet.
+    # The one exception is the minimum-resources rule below: an activity
+    # cannot be launched at all without its minimum kit.
     # When new resources came in they were already validated above; otherwise
     # check the ones currently booked.
     existing_pairs = (
@@ -273,6 +278,25 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
             )
         )
     )
+    # Starting is not a fact that can simply be recorded: an activity may not
+    # be launched before the minimum set of resources is booked (one testa,
+    # one generatore and, per testa model, the minimum of each accessory).
+    # Only the transition to «avviata» is guarded, so unrelated edits on an
+    # activity started before the rule existed keep working.
+    if a.actual_start is not None and old_actual_start is None:
+        from ui.services.problem_detection import (
+            format_missing_minimum_message,
+            missing_minimum_resources,
+        )
+
+        shortfalls = missing_minimum_resources(a, existing_pairs)
+        if shortfalls:
+            raise BridgeWriteError(
+                format_missing_minimum_message(shortfalls),
+                status_code=409,
+                missing_resources=shortfalls,
+            )
+
     window = occupation_window(a)
     warnings: list[dict] = []
     if existing_pairs and window is not None:
