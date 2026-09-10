@@ -42,27 +42,42 @@ def serialize_jobs() -> list[dict]:
     return _fetch_jobs()
 
 
-def _inventory_rows(model, fields: list[str]) -> list[dict]:
-    return [dict(row) for row in model.objects.order_by("uid").values(*fields)]
+def _inventory_rows(table: str, model, fields: list[str]) -> list[dict]:
+    """Return one inventory table, each row carrying today's availability.
+
+    The descriptor is the inventory page's own
+    (:func:`ui.services.resource_availability.annotate_inventory_rows`), computed
+    over the activities of every plant.  The dataset filters activities by the
+    user's plant, so the tablet cannot derive availability from them.
+    """
+    from ui.services.resource_availability import annotate_inventory_rows
+
+    rows = [dict(row) for row in model.objects.order_by("uid").values(*fields)]
+    annotate_inventory_rows(table, rows)
+    for row in rows:
+        row.pop("disponibilita_html", None)
+    return rows
 
 
 def serialize_inventario() -> dict[str, list[dict]]:
     """Return all five inventory tables in one payload."""
     return {
         "Testa": _inventory_rows(
-            TestaItem, ["uid", "model", "plant", "notes", "in_manutenzione"]
+            "Testa", TestaItem, ["uid", "model", "plant", "notes", "in_manutenzione"]
         ),
         "Mandrino": _inventory_rows(
-            MandrinoItem, ["uid", "diameter", "plant", "notes"]
+            "Mandrino", MandrinoItem, ["uid", "diameter", "plant", "notes"]
         ),
         "Tastatore": _inventory_rows(
-            TastatoreItem, ["uid", "diameter", "plant", "notes"]
+            "Tastatore", TastatoreItem, ["uid", "diameter", "plant", "notes"]
         ),
         "Maschera": _inventory_rows(
-            MascheraItem, ["uid", "pitch", "plant", "center_distance"]
+            "Maschera", MascheraItem, ["uid", "pitch", "plant", "center_distance"]
         ),
         "Generatore": _inventory_rows(
-            GeneratoreItem, ["uid", "model", "plant", "notes", "in_manutenzione"]
+            "Generatore",
+            GeneratoreItem,
+            ["uid", "model", "plant", "notes", "in_manutenzione"],
         ),
     }
 

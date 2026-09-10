@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from ui.models import Attivita, Job, MppSyncQueue, Stabilimento, TestaItem, UserProfile
+from ui.models import (
+    Attivita,
+    Job,
+    MandrinoItem,
+    MppSyncQueue,
+    RisorsaAttivita,
+    Stabilimento,
+    TestaItem,
+    UserProfile,
+)
 from ui.services.importer import ImportStatus
 from ui.tests.helpers import assign_minimum_kit, create_writer
 
@@ -175,6 +184,51 @@ class BridgeReadTest(TestCase):
         inventario = resp.json()["data"]["inventario"]
         uids = {row["uid"] for row in inventario.get("Testa", [])}
         self.assertIn("OV-T-SCHIO", uids)
+
+    def test_dataset_inventario_carries_availability_from_every_plant(
+        self, _mock_status
+    ) -> None:
+        # The tablet only receives its own plant's activities: availability must
+        # come from the server, over every plant, with the inventory page's rule.
+        valbrembo = Stabilimento.objects.create(nome="Valbrembo", colore="#00aa00")
+        UserProfile.objects.update_or_create(
+            user=self.user, defaults={"stabilimento": valbrembo}
+        )
+        today = date.today()
+        elsewhere = Attivita.objects.create(
+            commessa="B400",
+            item=1,
+            activity="Altrove",
+            stabilimento="Schio",
+            data_inizio=today - timedelta(days=1),
+            data_fine=today + timedelta(days=5),
+        )
+        # Planned only, never started: it still holds its resources today.
+        RisorsaAttivita.objects.create(
+            attivita=elsewhere, tipo="testa", risorsa_id="AV-T-BUSY"
+        )
+        RisorsaAttivita.objects.create(
+            attivita=elsewhere, tipo="mandrino", risorsa_id="AV-M-BUSY"
+        )
+        TestaItem.objects.create(uid="AV-T-BUSY", model="TP60", plant="Valbrembo")
+        TestaItem.objects.create(uid="AV-T-FREE", model="TP60", plant="Valbrembo")
+        MandrinoItem.objects.create(uid="AV-M-BUSY", diameter="12", plant="Valbrembo")
+
+        resp = self.client.get(reverse("api_bridge_dataset"))
+        data = resp.json()["data"]
+
+        self.assertNotIn("Schio", {a["plant"] for a in data["attivita"]})
+
+        teste = {row["uid"]: row for row in data["inventario"]["Testa"]}
+        busy = teste["AV-T-BUSY"]["disponibilita"]
+        self.assertFalse(busy["libera"])
+        self.assertEqual(busy["stato"], "occupata")
+        self.assertTrue(busy["tooltip"].startswith("Occupata oggi"))
+        self.assertTrue(teste["AV-T-FREE"]["disponibilita"]["libera"])
+        self.assertNotIn("disponibilita_html", teste["AV-T-FREE"])
+
+        mandrini = {row["uid"]: row for row in data["inventario"]["Mandrino"]}
+        self.assertFalse(mandrini["AV-M-BUSY"]["disponibilita"]["libera"])
 
 
 @patch("ui.views_bridge.get_status", side_effect=_ready_status)
