@@ -2,6 +2,23 @@
 
 ## 2026-09-10
 
+### Added
+
+- **L'inizio effettivo non puo' essere una data futura.** Registrare l'inizio di
+  un'attivita' registra un fatto, e un fatto non puo' avere la data di un giorno
+  che non e' ancora arrivato: l'operatore puo' indicare solo la data odierna o
+  una data passata. La regola vive in
+  `ui.services.bridge_write.validate_actual_start_not_future` e vale per
+  entrambe le vie di scrittura — `/api/tasks/update/` e il ponte tablet — che
+  rispondono **400** con un messaggio che nomina sia la data digitata sia
+  quella odierna. In Pianificazione il selettore di «Inizio effett.» si ferma a
+  oggi (`max`) e il pannello ripete il controllo prima di partire, cosi' il
+  rifiuto e' immediato. Viene controllato solo un valore *nuovo*: un'attivita'
+  che porta gia' un inizio effettivo futuro, arrivato dal .mpp prima che la
+  regola esistesse, resta modificabile e puo' essere corretta. Le date
+  pianificate (`start` / `finish`) non sono toccate: programmare in avanti e'
+  esattamente il loro scopo.
+
 ### Fixed
 
 - **Accettando una proposta le risorse ora arrivano anche nel file .mpp.**

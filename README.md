@@ -86,8 +86,25 @@ function; nothing re-implements it.
 something that already happened, so the save always succeeds. A resulting
 conflict becomes a `sovrapposizione` note on the activity that has not started
 yet, plus a reschedule proposal. Only a real change to the planned dates or to
-the assigned resources can be rejected with a 409 — plus the minimum-kit rule
-below, which is the one thing that can refuse a start.
+the assigned resources can be rejected with a 409 — plus the two rules below on
+starting an activity, which are the only things that can refuse a start: the
+minimum kit must be booked, and the start cannot be dated in the future.
+
+## The effective start is never in the future
+
+`actual_start` records a fact, so it cannot carry the date of a day that has
+not come: the operator may write **today or any past date**, never tomorrow.
+`ui.services.bridge_write.validate_actual_start_not_future` is the single
+definition of the rule; `/api/tasks/update/` and the tablet bridge both reach it
+through `update_attivita` and answer **400** with the two dates spelled out.
+
+Only a *new* value is checked, so an activity that already carries a future
+`actual_start` — imported from the `.mpp` before the rule existed — stays
+editable, and correcting it to today or to a past date always works. Planned
+dates (`start` / `finish`) are unaffected: planning ahead is the point.
+
+In Pianificazione the **Inizio effett.** date picker carries `max` = today, and
+the panel repeats the check before the round-trip.
 
 ## Minimum resources to start
 

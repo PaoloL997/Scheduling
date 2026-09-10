@@ -7,6 +7,7 @@ import json
 import logging
 
 from django.db import transaction
+from django.utils.timezone import localdate
 
 from ui.models import Attivita, MppSyncQueue, RisorsaAttivita
 from ui.services.resource_conflicts import (
@@ -126,6 +127,52 @@ def _parse_date(val, field: str = "data"):
         ) from exc
 
 
+def format_future_start_message(
+    actual_start: datetime.date, today: datetime.date
+) -> str:
+    """Explain why an «inizio effettivo» dated after today is refused.
+
+    Args:
+        actual_start: The date the operator typed.
+        today: The reference day, i.e. the latest date accepted.
+
+    Returns:
+        str: The message shown to the operator.
+    """
+    return (
+        f"L'inizio effettivo non può essere una data futura: "
+        f"«{actual_start.isoformat()}» viene dopo oggi ({today.isoformat()}). "
+        f"Indica la data odierna o una data passata."
+    )
+
+
+def validate_actual_start_not_future(
+    actual_start: datetime.date | None, *, today: datetime.date | None = None
+) -> None:
+    """Refuse an «inizio effettivo» that has not happened yet.
+
+    Recording a start records a fact, and a fact cannot be dated on a day that
+    has not come: the operator may only write today or a past date.  This is
+    the single definition of the rule; both the web API and the tablet bridge
+    reach it through :func:`update_attivita`.
+
+    Args:
+        actual_start: The parsed date, or ``None`` when the field is cleared.
+        today: Reference day, defaulting to the server's current date.
+
+    Raises:
+        BridgeWriteError: 400 when *actual_start* is after *today*.
+    """
+    if actual_start is None:
+        return
+    reference = today if today is not None else localdate()
+    if actual_start > reference:
+        raise BridgeWriteError(
+            format_future_start_message(actual_start, reference),
+            status_code=400,
+        )
+
+
 def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -> dict:
     """Update a single :class:`~ui.models.Attivita` and enqueue write-back.
 
@@ -191,6 +238,11 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
         a.data_fine = _parse_date(data["finish"], "Fine")
     if "actual_start" in data:
         a.actual_start = _parse_date(data["actual_start"], "Inizio effettivo")
+        # Only a *new* value is checked: the pianificazione panel echoes the
+        # field back untouched, so an activity already carrying a future start
+        # (imported from the .mpp before the rule existed) stays editable.
+        if a.actual_start != old_actual_start:
+            validate_actual_start_not_future(a.actual_start)
     if "actual_finish" in data:
         a.actual_finish = _parse_date(data["actual_finish"], "Fine effettiva")
 

@@ -2124,6 +2124,31 @@ function _missingMinimumMessage(shortfalls) {
        + "l'inizio effettivo.";
 }
 
+// ── «Inizio effettivo»: mai nel futuro ───────────────────────────────────────
+// Registrare l'inizio registra un fatto, e un fatto non può avere la data di un
+// giorno che non è ancora arrivato.  Il server è l'autorità
+// (ui.services.bridge_write.validate_actual_start_not_future); qui si evita il
+// giro di rete e si limita anche il selettore di data del pannello.
+
+function _oggiIso() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// Le date ISO si confrontano bene come stringhe: nessuna conversione, nessun
+// fuso orario di mezzo.
+function _isFutureActualStart(iso, today) {
+  if (!iso) return false;
+  return iso > (today || _oggiIso());
+}
+
+function _futureActualStartMessage(iso, today) {
+  const oggi = today || _oggiIso();
+  return `L'inizio effettivo non può essere una data futura: «${iso}» viene dopo `
+       + `oggi (${oggi}). Indica la data odierna o una data passata.`;
+}
+
 function _shortfallNoteHtml(catKey, selected, min, available) {
   const mancanti = min - selected;
   if (mancanti <= 0) return '';
@@ -3571,7 +3596,11 @@ async function enterEditMode() {
               </div>`;
     }
     const inputType = f.isDate ? 'date' : (f.isNumber ? 'number' : 'text');
-    const inputAttrs = f.isNumber ? 'min="1" step="1"' : '';
+    let inputAttrs = f.isNumber ? 'min="1" step="1"' : '';
+    if (f.key === 'actualStart') {
+      // Il calendario del browser non offre nemmeno i giorni futuri.
+      inputAttrs += ` max="${_oggiIso()}" title="Solo la data odierna o una data passata"`;
+    }
     const editVal = f.isNumber ? (parseInt(v, 10) || v) : v;
     let hint = '';
     if (isOrm && f.key === 'actualStart' && !originalData.actualStart) {
@@ -3659,6 +3688,13 @@ async function saveEdit() {
     const itemValue = _normalizeItem(newData.item, '');
     if (!itemValue) {
       _showPianDetError('Il campo Disegno+item è obbligatorio.');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Salva';
+      return;
+    }
+    if (newData.actualStart !== originalData.actualStart
+        && _isFutureActualStart(newData.actualStart)) {
+      _showPianDetError(_futureActualStartMessage(newData.actualStart));
       saveBtn.disabled = false;
       saveBtn.textContent = 'Salva';
       return;
