@@ -138,10 +138,14 @@ dot names the activities holding the item and the day it comes free, a green one
 how many days it stays free and which activities take it next. Back-to-back
 bookings are followed, so the release day is the first genuinely idle one.
 
+A testa or generatore in maintenance is red whatever its bookings: the unit
+cannot be used, so `in_manutenzione` overrides the occupancy and the tooltip
+says so. Toggling maintenance (or saving the detail form) answers with the
+recomputed descriptor, so the dot repaints without a reload.
+
 `ui/services/resource_availability.py` builds both states from the same
 `occupation_window`, through
-`resource_conflicts.bookings_not_ended`. Maintenance is unrelated and keeps its
-own column.
+`resource_conflicts.bookings_not_ended`.
 
 ## Resource overlaps
 

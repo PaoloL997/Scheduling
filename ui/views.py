@@ -837,8 +837,12 @@ def api_inventario_detail(request: HttpRequest, table: str, uid: str) -> JsonRes
 
     Response schema (success)::
 
-        {"ok": true, "uid": "<new_uid>"}   # PUT / PATCH
-        {"ok": true}                        # DELETE
+        {"ok": true, "uid": "<new_uid>", "disponibilita": {...}}  # PUT / PATCH
+        {"ok": true}                                               # DELETE
+
+    ``disponibilita`` is the item's availability today (see
+    :func:`ui.services.resource_availability.resource_availability`), so the
+    page can repaint the dot after a maintenance change.
 
     Response schema (error)::
 
@@ -910,7 +914,7 @@ def api_inventario_detail(request: HttpRequest, table: str, uid: str) -> JsonRes
             riferimento=f"{table}:{new_uid}",
         )
 
-        return JsonResponse({"ok": True, "uid": new_uid})
+        return _edited_resource_response(table, new_uid)
 
     # PUT
     new_uid = (data.get("uid") or "").strip()
@@ -936,7 +940,20 @@ def api_inventario_detail(request: HttpRequest, table: str, uid: str) -> JsonRes
         riferimento=f"{table}:{new_uid}",
     )
 
-    return JsonResponse({"ok": True, "uid": new_uid})
+    return _edited_resource_response(table, new_uid)
+
+
+def _edited_resource_response(table: str, uid: str) -> JsonResponse:
+    """Return the success payload of an inventory edit, with today's availability.
+
+    Entering maintenance turns the availability dot red (and may move the
+    unit's bookings to a spare), so the page repaints it from ``disponibilita``.
+    """
+    from ui.services.resource_availability import resource_availability
+
+    return JsonResponse(
+        {"ok": True, "uid": uid, "disponibilita": resource_availability(table, uid)}
+    )
 
 
 @write_required

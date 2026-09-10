@@ -5,6 +5,10 @@ An item is *occupata* when an activity occupancy window
 *libera* otherwise.  Occupancy is never re-implemented here: the bookings come
 from :func:`ui.services.resource_conflicts.bookings_not_ended`.
 
+A testa or generatore flagged ``in_manutenzione`` cannot be used whatever its
+bookings, so it is *occupata* too: the flag overrides the occupancy and the
+tooltip says the unit is in maintenance.
+
 Both states carry the context the inventory tooltip shows: an occupied item
 says which activities hold it and when it is released, a free one says how long
 it stays free and which activities take it next.  Back-to-back bookings are
@@ -102,9 +106,35 @@ def _release_day(occupazioni: list[_Occupazione], today: date) -> date:
     return end + _ONE_DAY
 
 
-def _build_info(occupazioni: list[_Occupazione], today: date) -> dict:
+def _maintenance_info(ordered: list[_Occupazione]) -> dict:
+    """Return the descriptor of a unit in maintenance, unusable whatever it holds."""
+    lines = ["In manutenzione: non disponibile."]
+    if ordered:
+        lines += ["Attività pianificate:", *_activity_lines(ordered)]
+    return {
+        "stato": "occupata",
+        "libera": False,
+        "in_manutenzione": True,
+        "etichetta": "In manutenzione",
+        "occupata_fino": None,
+        "libera_dal": None,
+        "prossimo_impegno": None,
+        "giorni": None,
+        "attivita": [o.as_dict() for o in ordered],
+        "tooltip": "\n".join(lines),
+    }
+
+
+def _build_info(
+    occupazioni: list[_Occupazione],
+    today: date,
+    in_manutenzione: bool = False,
+) -> dict:
     """Assemble the availability descriptor for a single resource."""
     ordered = sorted(occupazioni, key=lambda o: (o.inizio, o.fine, o.label))
+
+    if in_manutenzione:
+        return _maintenance_info(ordered)
 
     if any(o.inizio <= today for o in ordered):
         libera_dal = _release_day(ordered, today)
@@ -118,6 +148,7 @@ def _build_info(occupazioni: list[_Occupazione], today: date) -> dict:
         return {
             "stato": "occupata",
             "libera": False,
+            "in_manutenzione": False,
             "etichetta": "Occupata",
             "occupata_fino": (libera_dal - _ONE_DAY).isoformat(),
             "libera_dal": libera_dal.isoformat(),
@@ -131,6 +162,7 @@ def _build_info(occupazioni: list[_Occupazione], today: date) -> dict:
         return {
             "stato": "libera",
             "libera": True,
+            "in_manutenzione": False,
             "etichetta": "Libera",
             "occupata_fino": None,
             "libera_dal": None,
@@ -151,6 +183,7 @@ def _build_info(occupazioni: list[_Occupazione], today: date) -> dict:
     return {
         "stato": "libera",
         "libera": True,
+        "in_manutenzione": False,
         "etichetta": "Libera",
         "occupata_fino": None,
         "libera_dal": None,
@@ -165,6 +198,8 @@ def availability_map(
     tipo: str,
     risorsa_ids: Iterable[str],
     today: date | None = None,
+    *,
+    in_manutenzione: Iterable[str] = (),
 ) -> dict[str, dict]:
     """Return the availability descriptor of every requested resource.
 
@@ -173,13 +208,17 @@ def availability_map(
             ``maschera``, ``generatore``).
         risorsa_ids: Inventory UIDs to describe.
         today: Reference day; defaults to the current date.
+        in_manutenzione: UIDs flagged in maintenance; they are *occupata*
+            whatever their bookings.
 
     Returns:
         dict[str, dict]: One descriptor per UID with keys ``stato``, ``libera``,
-            ``etichetta``, ``occupata_fino``, ``libera_dal``,
-            ``prossimo_impegno``, ``giorni``, ``attivita`` and ``tooltip``.
+            ``in_manutenzione``, ``etichetta``, ``occupata_fino``,
+            ``libera_dal``, ``prossimo_impegno``, ``giorni``, ``attivita`` and
+            ``tooltip``.
     """
     day = today or date.today()
+    in_maint = set(in_manutenzione)
     per_uid: dict[str, list[_Occupazione]] = {
         uid: [] for uid in risorsa_ids if uid is not None
     }
@@ -195,7 +234,10 @@ def availability_map(
                 fine=occ_end,
             )
         )
-    return {uid: _build_info(occupazioni, day) for uid, occupazioni in per_uid.items()}
+    return {
+        uid: _build_info(occupazioni, day, uid in in_maint)
+        for uid, occupazioni in per_uid.items()
+    }
 
 
 def availability_cell_html(info: dict) -> str:
@@ -228,7 +270,8 @@ def annotate_inventory_rows(
         table: Inventory table name (``Generatore``, ``Mandrino``,
             ``Maschera``, ``Tastatore``, ``Testa``).
         rows: Row dicts as returned by the inventory queries; each must carry
-            a ``uid`` key.  Mutated in place.
+            a ``uid`` key, and a truthy ``in_manutenzione`` marks a unit in
+            maintenance.  Mutated in place.
         today: Reference day; defaults to the current date.
 
     Returns:
@@ -236,9 +279,42 @@ def annotate_inventory_rows(
     """
     day = today or date.today()
     tipo = TIPO_BY_TABLE.get(table)
-    infos = availability_map(tipo, [r.get("uid") for r in rows], day) if tipo else {}
+    in_maint = {r.get("uid") for r in rows if r.get("in_manutenzione")}
+    infos = (
+        availability_map(
+            tipo, [r.get("uid") for r in rows], day, in_manutenzione=in_maint
+        )
+        if tipo
+        else {}
+    )
     for row in rows:
-        info = infos.get(row.get("uid")) or _build_info([], day)
+        info = infos.get(row.get("uid")) or _build_info(
+            [], day, bool(row.get("in_manutenzione"))
+        )
         row["disponibilita"] = info
         row["disponibilita_html"] = availability_cell_html(info)
     return rows
+
+
+def resource_availability(table: str, uid: str, today: date | None = None) -> dict:
+    """Return today's descriptor of one inventory item, read from the database.
+
+    Used after an edit so the page repaints the dot without a reload: entering
+    maintenance turns it red and may also move the unit's bookings to a spare.
+
+    Args:
+        table: Inventory table name.
+        uid: Inventory UID of the item.
+        today: Reference day; defaults to the current date.
+
+    Returns:
+        dict: A descriptor as returned by :func:`availability_map`.
+    """
+    from ui.models import GeneratoreItem, TestaItem
+
+    model = {"Generatore": GeneratoreItem, "Testa": TestaItem}.get(table)
+    in_manutenzione = bool(
+        model and model.objects.filter(uid=uid, in_manutenzione=True).exists()
+    )
+    row = {"uid": uid, "in_manutenzione": in_manutenzione}
+    return annotate_inventory_rows(table, [row], today)[0]["disponibilita"]

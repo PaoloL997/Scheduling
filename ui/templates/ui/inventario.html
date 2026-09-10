@@ -462,9 +462,21 @@
         return;
       }
       applyMaintenanceRow(tr, on);
+      storeAvailability(table, uid, res.body.disponibilita);
+      var cell = tr && tr.querySelector('.inv-avail-cell');
+      if (cell) {
+        if (_availAnchor && cell.contains(_availAnchor)) closeAvailPopover();
+        cell.innerHTML = availCellHtml(table, uid);
+      }
     })
     .catch(function() { alert('Errore di rete.'); })
     .finally(function() { btn.disabled = false; });
+  }
+
+  // La manutenzione rende rosso il pallino: la risposta porta lo stato ricalcolato.
+  function storeAvailability(table, uid, info) {
+    if (!info || !uid) return;
+    (INV_AVAILABILITY[table] = INV_AVAILABILITY[table] || {})[uid] = info;
   }
 
   // ── Disponibilità: pallino verde/rosso con popover al passaggio del mouse ──
@@ -869,6 +881,7 @@
       } else {
         var tr = detState.tr;
         renameAvailability(cfg.table, originalUid, newData.uid);
+        storeAvailability(cfg.table, res.body.uid || newData.uid, res.body.disponibilita);
         tr.innerHTML = cfg.renderRow(newData);
         tr.setAttribute('data-uid', newData.uid || '');
         cfg.fields.forEach(function(f) {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from django.test import Client, TestCase
@@ -21,7 +22,7 @@ from ui.services.resource_availability import (
     availability_cell_html,
     availability_map,
 )
-from ui.tests.helpers import create_reader
+from ui.tests.helpers import create_reader, create_writer
 
 TODAY = date(2026, 9, 9)
 
@@ -312,3 +313,89 @@ class InventarioPageAvailabilityTest(TestCase):
         self.assertIn("const INV_AVAILABILITY = ", html)
         self.assertIn('"Generatore":', html)
         self.assertIn('"G1":', html)
+
+    def test_maintenance_dot_is_rendered_red(self) -> None:
+        TestaItem.objects.filter(uid="T1").update(in_manutenzione=True)
+        html = self.client.get(reverse("inventario")).content.decode()
+        row = html.split('<tr data-uid="T1"')[1].split("</tr>")[0]
+        self.assertIn("inv-avail--occupata", row)
+        self.assertIn("In manutenzione: non disponibile.", row)
+
+
+class AvailabilityMaintenanceTest(TestCase):
+    """A testa or generatore in maintenance is red whatever its bookings."""
+
+    def test_maintenance_without_bookings_is_red(self) -> None:
+        info = availability_map("testa", ["T1"], TODAY, in_manutenzione={"T1"})["T1"]
+        self.assertEqual(info["stato"], "occupata")
+        self.assertFalse(info["libera"])
+        self.assertTrue(info["in_manutenzione"])
+        self.assertEqual(info["etichetta"], "In manutenzione")
+        self.assertEqual(info["tooltip"], "In manutenzione: non disponibile.")
+
+    def test_maintenance_lists_planned_activities(self) -> None:
+        att = _make_activity("X001", 1, "2026-09-21", "2026-09-30")
+        _book(att, "generatore", "G1")
+        info = availability_map("generatore", ["G1"], TODAY, in_manutenzione=["G1"])[
+            "G1"
+        ]
+        self.assertEqual(info["stato"], "occupata")
+        self.assertEqual([a["attivita_id"] for a in info["attivita"]], [att.pk])
+        self.assertEqual(
+            info["tooltip"],
+            "In manutenzione: non disponibile.\n"
+            "Attività pianificate:\n"
+            f"• {att} (21/09/2026 – 30/09/2026)",
+        )
+
+    def test_other_units_are_unaffected(self) -> None:
+        result = availability_map("testa", ["T1", "T2"], TODAY, in_manutenzione={"T1"})
+        self.assertEqual(result["T2"]["stato"], "libera")
+        self.assertFalse(result["T2"]["in_manutenzione"])
+
+    def test_annotate_reads_the_row_flag(self) -> None:
+        rows = [
+            {"uid": "T1", "in_manutenzione": True},
+            {"uid": "T2", "in_manutenzione": False},
+        ]
+        annotate_inventory_rows("Testa", rows, TODAY)
+        self.assertEqual(rows[0]["disponibilita"]["stato"], "occupata")
+        self.assertIn("inv-avail--occupata", rows[0]["disponibilita_html"])
+        self.assertEqual(rows[1]["disponibilita"]["stato"], "libera")
+
+
+class MaintenanceToggleAvailabilityTest(TestCase):
+    """Editing an item answers with its recomputed availability."""
+
+    def setUp(self) -> None:
+        self.client = Client()
+        self.client.force_login(create_writer("manutentore"))
+        TestaItem.objects.create(uid="T1", model="t", plant="Valbrembo")
+        self.url = reverse(
+            "api_inventario_detail", kwargs={"table": "Testa", "uid": "T1"}
+        )
+
+    def _send(self, method: str, body: dict) -> dict:
+        resp = getattr(self.client, method)(
+            self.url, data=json.dumps(body), content_type="application/json"
+        )
+        self.assertEqual(resp.status_code, 200)
+        return resp.json()["disponibilita"]
+
+    def test_patch_into_maintenance_returns_red(self) -> None:
+        info = self._send("patch", {"in_manutenzione": True})
+        self.assertEqual(info["stato"], "occupata")
+        self.assertTrue(info["in_manutenzione"])
+
+    def test_patch_back_to_service_returns_green(self) -> None:
+        TestaItem.objects.filter(uid="T1").update(in_manutenzione=True)
+        info = self._send("patch", {"in_manutenzione": False})
+        self.assertEqual(info["stato"], "libera")
+        self.assertFalse(info["in_manutenzione"])
+
+    def test_put_returns_availability(self) -> None:
+        info = self._send(
+            "put",
+            {"uid": "T1", "model": "t", "plant": "Valbrembo", "in_manutenzione": True},
+        )
+        self.assertEqual(info["stato"], "occupata")

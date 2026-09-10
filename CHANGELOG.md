@@ -21,6 +21,17 @@
 
 ### Fixed
 
+- **La disponibilita' e' rossa anche per teste e generatori in manutenzione.**
+  In Inventario il pallino diventava rosso solo quando un'attivita' in corso
+  occupava la risorsa: una testa o un generatore in manutenzione restava verde
+  pur non essendo utilizzabile. Ora `in_manutenzione` prevale sulle
+  occupazioni: il pallino e' rosso, l'etichetta e' «In manutenzione» e il
+  tooltip lo dice, elencando le attivita' eventualmente ancora pianificate. Il
+  descrittore porta la nuova chiave `in_manutenzione`, che arriva anche al
+  tablet attraverso il ponte. Accendere o spegnere l'interruttore, o salvare la
+  scheda della risorsa, restituisce la disponibilita' ricalcolata, cosi' il
+  pallino si aggiorna senza ricaricare la pagina.
+
 - **Accettando una proposta le risorse ora arrivano anche nel file .mpp.**
   `apply_optimization_result` riscriveva le assegnazioni sul database ma
   accodava per il write-back un payload senza la chiave `resources`, e
