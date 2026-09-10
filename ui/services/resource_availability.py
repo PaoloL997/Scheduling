@@ -64,6 +64,11 @@ def _format_range(occupazione: _Occupazione) -> str:
     return f"{_format_day(occupazione.inizio)} – {_format_day(occupazione.fine)}"
 
 
+def _activity_label(attivita) -> str:
+    """Return ``commessa-item-activity`` as typed, not the URL-encoded id."""
+    return f"{attivita.commessa}-{attivita.item}-{attivita.activity}"
+
+
 def _activity_lines(occupazioni: list[_Occupazione]) -> list[str]:
     """Return one bullet per activity, truncated to keep the tooltip short."""
     shown = occupazioni[:_MAX_TOOLTIP_ACTIVITIES]
@@ -185,7 +190,7 @@ def availability_map(
         bucket.append(
             _Occupazione(
                 attivita_id=row.attivita_id,
-                label=str(row.attivita),
+                label=_activity_label(row.attivita),
                 inizio=occ_start,
                 fine=occ_end,
             )

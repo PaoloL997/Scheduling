@@ -165,6 +165,20 @@ class AvailabilityOccupiedTest(TestCase):
             "Si libera fra 7 giorni (16/09/2026).",
         )
 
+    def test_activity_label_is_not_url_encoded(self) -> None:
+        att = Attivita.objects.create(
+            commessa="25078",
+            item="01+SNA",
+            activity="qualifica",
+            data_inizio=date(2026, 9, 1),
+            data_fine=date(2026, 9, 15),
+        )
+        _book(att, "testa", "T1")
+        info = availability_map("testa", ["T1"], TODAY)["T1"]
+        self.assertEqual(info["attivita"][0]["label"], "25078-01+SNA-qualifica")
+        self.assertIn("• 25078-01+SNA-qualifica (", info["tooltip"])
+        self.assertNotIn("%2B", info["tooltip"])
+
     def test_booking_ending_today_still_occupies(self) -> None:
         _book(_make_activity("X001", 1, "2026-09-01", "2026-09-09"), "testa", "T1")
         info = availability_map("testa", ["T1"], TODAY)["T1"]
