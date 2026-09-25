@@ -56,24 +56,32 @@ const tail = [...document.querySelectorAll('#bars-svg rect')]
 const tailRight = tail
   ? Number(tail.getAttribute('x')) + Number(tail.getAttribute('width'))
   : 0;
-const badgeRects = [...document.querySelectorAll('#bars-svg rect')]
-  .filter((r) => !r.getAttribute('data-task') && Number(r.getAttribute('height')) === 16);
-const firstBadgeX = Math.min(...badgeRects.map((r) => Number(r.getAttribute('x'))));
+const delayLabels = [...document.querySelectorAll('#bars-svg text')]
+    .filter((t) => /^\+\d+ gg$/.test(t.textContent));
+const delayX = Math.min(...delayLabels.map((r) => Number(r.getAttribute('x'))));
 
 console.log({
   plannedX,
   plannedRight,
   tailRight,
-  firstBadgeX,
-  badgeOnPlanned: firstBadgeX < plannedRight,
-  badgeBeforeTailEnd: firstBadgeX < tailRight,
+  delayX,
+  badgeOnPlanned: delayX < plannedRight,
+  badgeBeforeTailEnd: delayX < tailRight,
 });
 
-if (firstBadgeX < tailRight) {
-  throw new Error(`badge overlaps actual tail (badgeX=${firstBadgeX}, tailRight=${tailRight})`);
+// Started late but closed: no "+N gg", only a plain green "Completata"
+// placed after the bars, with no card behind it.
+if (delayLabels.length !== 0) {
+  throw new Error(`completed activity must carry no delay, got ${delayLabels.length}`);
 }
-if (firstBadgeX < plannedRight) {
-  throw new Error(`badge overlaps planned bar (badgeX=${firstBadgeX}, plannedRight=${plannedRight})`);
+const done = [...document.querySelectorAll('#bars-svg text')].filter((t) => t.textContent === 'Completata');
+if (done.length !== 1) throw new Error(`expected one "Completata" label, got ${done.length}`);
+const doneX = Number(done[0].getAttribute('x'));
+if (doneX < plannedRight || doneX < tailRight) {
+  throw new Error(`"Completata" overlaps the bars (x=${doneX}, planned=${plannedRight}, tail=${tailRight})`);
 }
+const cards = [...document.querySelectorAll('#bars-svg rect')]
+  .filter((r) => !r.getAttribute('data-task') && Number(r.getAttribute('height')) === 16);
+if (cards.length !== 0) throw new Error(`"Completata" must have no card, got ${cards.length}`);
 
-console.log('ok', { plannedRight, tailRight, firstBadgeX });
+console.log('ok', { plannedRight, tailRight, delayX });

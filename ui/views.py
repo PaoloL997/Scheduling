@@ -40,7 +40,9 @@ from ui.models import (
     Job,
     MandrinoItem,
     MascheraItem,
+    ProblemaAttivita,
     Responsabile,
+    RisorsaAttivita,
     Stabilimento,
     TastatoreItem,
     TestaItem,
@@ -113,10 +115,19 @@ def index(request: HttpRequest):
     Args:
         request: The incoming HTTP request.
 
+    The page also receives the user's own plant, which pre-selects the plant
+    filter so each user starts on the activities of their stabilimento.
+
     Returns:
         HttpResponse: The rendered index template.
     """
-    return render(request, "ui/index.html")
+    profile = getattr(request.user, "profile", None)
+    user_plant = profile.stabilimento.nome if profile and profile.stabilimento else ""
+    return render(
+        request,
+        "ui/index.html",
+        {"home_config": {"userPlant": user_plant}},
+    )
 
 
 @login_required
@@ -1434,7 +1445,11 @@ def api_gantt(request: HttpRequest) -> JsonResponse:
         {
           "tasks": [{commessa, item, activity, duration_min, start, finish,
                      actual_start, actual_finish, baseline_start, baseline_finish,
-                     plant, plant_color, responsible, resources, predecessors}],
+                     plant, plant_color, responsible, resources,
+                     resources_by_tipo: {testa, generatore, mandrino,
+                                         tastatore, maschera: [uid]},
+                     moving_resources: [uid with an open spostamento],
+                     predecessors}],
           "deadlines": {"job_id": "YYYY-MM-DD"}
         }
 
@@ -1482,8 +1497,21 @@ def _load_gantt_data(plant_colors: dict) -> tuple[list, dict]:
         )
         .order_by("commessa", "item", "activity")
     )
+    # Resources that must be moved from another plant (open "spostamento"
+    # notes), keyed by activity, so the kanban can flag their chips.
+    moving: dict[int, set[str]] = {}
+    for att_pk, uid in ProblemaAttivita.objects.filter(
+        risolto=False, tipo=ProblemaAttivita.TIPO_SPOSTAMENTO
+    ).values_list("attivita_id", "risorsa_uid"):
+        if uid:
+            moving.setdefault(att_pk, set()).add(uid)
     for att in activities:
         resources_str = ";".join(r.risorsa_id for r in att.risorse.all()) or None
+        by_tipo: dict[str, list[str]] = {
+            tipo: [] for tipo, _ in RisorsaAttivita.TIPO_CHOICES
+        }
+        for r in att.risorse.all():
+            by_tipo.setdefault(r.tipo, []).append(r.risorsa_id)
         tasks.append(
             {
                 "commessa": att.commessa,
@@ -1510,6 +1538,8 @@ def _load_gantt_data(plant_colors: dict) -> tuple[list, dict]:
                 "plant_color": plant_colors.get(att.stabilimento or "", "#4a90e2"),
                 "responsible": att.responsabile or None,
                 "resources": resources_str,
+                "resources_by_tipo": by_tipo,
+                "moving_resources": sorted(moving.get(att.pk, ())),
                 "predecessors": att.predecessors,
                 "orm_id": att.pk,
                 "warning_count": att.open_problems,

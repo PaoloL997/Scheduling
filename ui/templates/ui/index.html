@@ -18,68 +18,343 @@
     gap: 10px;
   }
 
-  /* ── Stats row ── */
-  #stats-row {
+  /* ── Header: view switch, then today + filter ── */
+  #home-header {
     display: flex;
+    flex-direction: column;
+    align-items: flex-start;
     gap: 10px;
     flex-shrink: 0;
   }
-  .stat-card {
-    flex: 1;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 10px 14px;
+  #today-row {
+    align-self: stretch;
     display: flex;
-    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 32px;
+  }
+  #today-left {
+    display: flex;
     align-items: center;
     gap: 10px;
-    min-width: 0;
-    box-shadow: var(--shadow);
-    transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
-    cursor: pointer;
-    user-select: none;
+    position: relative;
   }
-  .stat-card:hover {
-    border-color: hsl(220, 10%, 30%);
-    background: var(--surface-2);
-  }
-  .stat-card.is-active {
-    border-color: hsl(211, 70%, 48%);
-    box-shadow: 0 0 0 1px hsl(211, 70%, 48% / 0.35), var(--shadow);
-    background: var(--surface-2);
-  }
-  .stat-icon {
-    width: 28px; height: 28px;
-    border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-    background: hsla(220, 15%, 100%, 0.06);
-  }
-  .stat-body {
-    display: flex;
-    flex-direction: row;
-    align-items: baseline;
+  #toggle-row[hidden] { display: none; }
+  #today-label { font-size: 14px; color: var(--text); }
+  #today-label b { font-weight: 700; }
+  #filter-btn {
+    position: relative;
+    height: 30px;
+    padding: 0 12px;
     gap: 6px;
-    min-width: 0;
-    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    font-family: inherit; font-size: 13px; font-weight: 500;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
   }
-  .stat-value {
-    font-size: 18px;
+  #filter-btn:hover, #filter-btn[aria-expanded="true"] { background: var(--surface-2); color: var(--text); }
+  #filter-btn.is-active { color: hsl(211, 80%, 65%); border-color: hsl(211, 70%, 48%); }
+  #filter-btn.is-active::after {
+    content: '';
+    position: absolute; top: -3px; right: -3px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: hsl(211, 80%, 60%);
+  }
+  #filter-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 50;
+    width: 260px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  #filter-pop[hidden] { display: none; }
+  .fp-title {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.4px;
+    text-transform: uppercase; color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  .fp-select {
+    display: block;
+    width: 100%;
+    height: 32px;
+    padding: 0 30px 0 10px;
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: var(--surface-2);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%239aa1ad' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 12px 12px;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 30px;
+    cursor: pointer;
+  }
+  .fp-select:focus { outline: none; border-color: hsl(211, 70%, 48%); }
+  input.fp-select { cursor: text; }
+  input.fp-select::placeholder { color: var(--text); opacity: 1; }
+  .fp-combo { position: relative; }
+  .fp-combo-list {
+    position: absolute;
+    top: calc(100% + 4px); left: 0; right: 0;
+    z-index: 60;
+    max-height: 200px;
+    overflow-y: auto;
+    margin: 0; padding: 4px;
+    list-style: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+  }
+  .fp-combo-list[hidden] { display: none; }
+  .fp-combo-list li {
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .fp-combo-list li.is-active { background: var(--surface-2); }
+  .fp-combo-list li[aria-selected="true"] { color: hsl(211, 80%, 65%); font-weight: 600; }
+  .fp-combo-list li.fp-combo-empty { color: var(--text-muted); cursor: default; }
+  /* Shown only while a filter is on, so a default filter is never silent. */
+  #fp-reset {
+    height: 30px;
+    padding: 0 12px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-family: inherit; font-size: 13px; font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  #fp-reset:hover { background: var(--surface-2); color: var(--text); }
+  #fp-reset[hidden] { display: none; }
+  .fp-check {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--text);
+    cursor: pointer;
+  }
+  .fp-check input { accent-color: hsl(211, 70%, 48%); }
+  #gantt-empty {
+    padding: 40px 0; text-align: center;
+    font-size: 13px; color: var(--text-muted);
+  }
+  #gantt-empty[hidden] { display: none; }
+  #view-switch {
+    display: flex;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .vbtn {
+    padding: 5px 16px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .vbtn:hover { color: var(--text); }
+  .vbtn[aria-checked="true"] { background: hsl(211, 70%, 48%); color: #fff; }
+
+  /* ── Views ── */
+  .home-view {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .home-view[hidden] { display: none; }
+
+  /* ── Kanban board: one row per commessa, one column per state ── */
+  #kanban-board {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    box-shadow: var(--shadow);
+    /* Scrolls with wheel/touch, but no visible scrollbar. */
+    scrollbar-width: none;
+  }
+  #kanban-board::-webkit-scrollbar { display: none; }
+  .kb-grid {
+    display: grid;
+    grid-template-columns: 230px repeat(3, minmax(270px, 1fr));
+    min-width: min-content;
+  }
+  .kb-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
     font-weight: 700;
     color: var(--text);
-    line-height: 1;
-    letter-spacing: -0.3px;
-    flex-shrink: 0;
   }
-  .stat-label {
-    font-size: 12px;
-    font-weight: 400;
+  .kb-head-sq { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  .kb-head-count {
+    margin-left: auto;
     color: var(--text-muted);
-    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  /* "In corso" column: a faint blue wash, header included. */
+  .kb-col-wip { background-color: hsl(215 80% 60% / .05); }
+  .kb-head.kb-col-wip {
+    background: linear-gradient(hsl(215 80% 60% / .05), hsl(215 80% 60% / .05)), var(--surface);
+  }
+  .kb-cell {
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .kb-cell:not(.kb-job) { border-left: 1px solid var(--border); }
+  .kb-empty {
+    flex: 1;
+    min-height: 48px;
+    border: 1px dashed var(--border);
+    border-radius: 0.5rem;
+  }
+  .kb-count {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  /* Commessa cell */
+  .kb-job {
+    border-left: 3px solid var(--accent);
+    cursor: pointer;
+    user-select: none;
+    gap: 6px;
+  }
+  .kb-job:hover { background: var(--surface-2); }
+  .kb-job:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .kb-job-code { font-size: 16px; font-weight: 800; color: var(--text); }
+  .kb-job-meta { font-size: 12px; color: var(--text-muted); line-height: 1.4; }
+  .kb-job-meta b { color: var(--text); font-weight: 600; }
+  .kb-job-n {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  /* .pian-progress-wrap grows in its row layout; here it must keep its height. */
+  .kb-job .pian-progress-wrap { flex: 0 0 auto; margin-top: 2px; }
+
+  /* Activity card */
+  .kb-card {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .kb-card:hover { background: var(--surface-2); }
+  .kb-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .kb-card-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .kb-card-plant {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .kb-card-warn {
+    margin-left: auto;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px; height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+  }
+  .kb-card-warn:hover { background: hsla(36, 90%, 50%, 0.18); }
+  .kb-card-warn:focus-visible { outline: 2px solid hsl(36, 92%, 54%); }
+  .kb-card-name {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    line-height: 1;
+    white-space: nowrap;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-weight: 600;
+  }
+  .kb-dates {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    column-gap: 8px;
+    row-gap: 2px;
+    align-items: baseline;
+    font-variant-numeric: tabular-nums;
+  }
+  .kb-dates dt { color: var(--text-subtle); font-weight: 600; }
+  .kb-dates dd { color: var(--text-muted); }
+  .kb-dates dd.is-actual { color: hsl(156 60% 52%); }
+  .kb-dates .kb-when { color: var(--text-muted); text-align: right; }
+  .kb-dates .kb-when.is-late { color: hsl(4, 90%, 62%); font-weight: 700; }
+  .kb-res { display: flex; flex-wrap: wrap; gap: 4px; }
+  .kb-res .pian-res-chip--moving {
+    background: hsl(18 90% 48% / .16);
+    box-shadow: inset 0 0 0 1px hsl(18 90% 48% / .7);
+    color: hsl(28 95% 66%);
+  }
+  .kb-board-empty {
+    padding: 40px 0;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-muted);
   }
 
   /* ── Toggle row ── */
@@ -359,68 +634,88 @@
 {% block content %}
 <!-- Gantt page -->
 <div id="page">
-  <!-- Stats row -->
-  <div id="stats-row">
-    <div class="stat-card is-active" data-stat-filter="total" role="button" tabindex="0" aria-pressed="true" title="Mostra tutte le attività">
-      <div class="stat-icon">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="hsl(220,60%,65%)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <line x1="2" y1="4" x2="14" y2="4"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="12" x2="9" y2="12"/>
-        </svg>
-      </div>
-      <div class="stat-body">
-        <span class="stat-value" id="stat-total">–</span>
-        <span class="stat-label">Attività totali</span>
-      </div>
+  <!-- Header: view switch -->
+  <div id="home-header">
+    <div id="view-switch" role="radiogroup" aria-label="Visualizzazione">
+      <button class="vbtn" type="button" role="radio" data-home-view="kanban" aria-checked="true">Kanban</button>
+      <button class="vbtn" type="button" role="radio" data-home-view="gantt" aria-checked="false">Gantt</button>
     </div>
-    <div class="stat-card" data-stat-filter="late" role="button" tabindex="0" aria-pressed="false" title="Filtra attività in ritardo">
-      <div class="stat-icon">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="hsl(4,90%,62%)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="5" x2="8" y2="8.5"/><circle cx="8" cy="11" r="0.8" fill="hsl(4,90%,62%)" stroke="none"/>
-        </svg>
+    <div id="today-row">
+      <div id="today-left">
+        <span id="today-label"><b>Oggi:</b> <span id="today-date"></span></span>
+        <button id="filter-btn" type="button" title="Filtra attività"
+                aria-haspopup="true" aria-expanded="false" aria-controls="filter-pop">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="1.5 2.5 14.5 2.5 9.5 8.5 9.5 13.5 6.5 12 6.5 8.5"/>
+          </svg>
+          Filtra
+        </button>
+        <div id="filter-pop" role="dialog" aria-label="Filtri" hidden>
+          <div>
+            <div class="fp-title">Stato</div>
+            <select id="fp-status" class="fp-select" aria-label="Stato">
+              <option value="">Tutte</option>
+              <option value="wip">In lavorazione</option>
+              <option value="late">In ritardo</option>
+              <option value="completed">Completate</option>
+              <option value="todo">Da iniziare</option>
+            </select>
+          </div>
+          <div>
+            <div class="fp-title">Commessa</div>
+            <div class="fp-combo">
+              <input id="fp-commessa" class="fp-select" type="text" placeholder="Tutte le commesse"
+                     autocomplete="off" spellcheck="false" role="combobox" aria-label="Commessa"
+                     aria-autocomplete="list" aria-expanded="false" aria-controls="fp-commessa-list">
+              <ul id="fp-commessa-list" class="fp-combo-list" role="listbox" hidden></ul>
+            </div>
+          </div>
+          <div>
+            <div class="fp-title">Stabilimento</div>
+            <select id="fp-plant" class="fp-select" aria-label="Stabilimento"><option value="">Tutti gli stabilimenti</option></select>
+          </div>
+          <label class="fp-check">
+            <input id="fp-completed-jobs" type="checkbox"> Mostra commesse completate
+          </label>
+        </div>
+        <button id="fp-reset" type="button" hidden>Azzera filtri</button>
       </div>
-      <div class="stat-body">
-        <span class="stat-value" id="stat-late" style="color:hsl(4,90%,62%)">–</span>
-        <span class="stat-label">Attività in ritardo</span>
-      </div>
-    </div>
-    <div class="stat-card" data-stat-filter="wip" role="button" tabindex="0" aria-pressed="false" title="Filtra attività in lavorazione">
-      <div class="stat-icon">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="hsl(211,80%,65%)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="8" cy="8" r="6.5"/><polyline points="8 5 8 8 10 10"/>
-        </svg>
-      </div>
-      <div class="stat-body">
-        <span class="stat-value" id="stat-wip" style="color:hsl(211,80%,65%)">–</span>
-        <span class="stat-label">Attività in lavorazione</span>
+      <!-- Toggle row -->
+      <div id="toggle-row" hidden>
+        <!-- Navigation: prev / today / next -->
+        <div id="nav-group">
+          <button id="nav-prev" class="nbtn" aria-label="Periodo precedente">&#8249;</button>
+          <button id="nav-today" class="nbtn" aria-label="Oggi">Oggi</button>
+          <button id="nav-next" class="nbtn" aria-label="Periodo successivo">&#8250;</button>
+        </div>
+        <div id="nav-group">
+          <button id="nav-expand-toggle" class="nbtn" type="button" data-mode="expand">Espandi tutto</button>
+        </div>
+        <div id="toggle-group">
+          <button class="tbtn active" data-view="horizon">Panoramica</button>
+          <button class="tbtn" data-view="week">Settimana</button>
+          <button class="tbtn" data-view="month">Mese</button>
+          <button class="tbtn" data-view="year">Anno</button>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- Toggle row -->
-  <div id="toggle-row">
-    <!-- Navigation: prev / today / next -->
-    <div id="nav-group">
-      <button id="nav-prev" class="nbtn" aria-label="Periodo precedente">&#8249;</button>
-      <button id="nav-today" class="nbtn" aria-label="Oggi">Oggi</button>
-      <button id="nav-next" class="nbtn" aria-label="Periodo successivo">&#8250;</button>
-    </div>
-    <div id="nav-group">
-      <button id="nav-expand-toggle" class="nbtn" type="button" data-mode="expand">Espandi tutto</button>
-    </div>
-    <div id="toggle-group">
-      <button class="tbtn active" data-view="horizon">Panoramica</button>
-      <button class="tbtn" data-view="week">Settimana</button>
-      <button class="tbtn" data-view="month">Mese</button>
-      <button class="tbtn" data-view="year">Anno</button>
-    </div>
+  <!-- Kanban view (empty for now) -->
+  <div id="view-kanban" class="home-view">
+    <div id="kanban-board" aria-label="Kanban commesse"></div>
   </div>
 
+  <!-- Gantt view -->
+  <div id="view-gantt" class="home-view" hidden>
   <!-- Gantt card -->
   <div id="card">
     <div id="axis-row">
       <div id="axis-scroll"><svg id="axis-svg"></svg></div>
     </div>
     <div id="bars-scroll">
+      <div id="gantt-empty" hidden>Nessuna attività corrisponde ai filtri.</div>
       <svg id="bars-svg"></svg>
     </div>
   </div>
@@ -489,6 +784,7 @@
       <span class="gl-txt">Oggi</span>
     </div>
   </div>
+  </div>
 </div>
 
 <!-- Gantt tooltip -->
@@ -510,18 +806,477 @@
 
 {% block extra_js %}
 {% load static %}
+{{ home_config|json_script:"home-config" }}
 <script src="{% static 'ui/gantt.js' %}"></script>
 <script>
-const _homeGantt = new GanttChart({
-  prefix: '',
-  enableStats: true,
-  enableDeadlineEditor: false,
-  enableWarningNav: true,
-  collapsibleGroups: true,
-  initialView: 'horizon',
+let _homeGantt = null;
+const homeConfig = JSON.parse(document.getElementById('home-config').textContent || '{}');
+// Each user starts on the activities of their own plant (UserProfile.stabilimento).
+// Completed commesse stay hidden until the filter asks for them.
+const homeFilter = {
+  status: null, commessa: null, plant: homeConfig.userPlant || null, showCompletedJobs: false,
+};
+
+document.getElementById('today-date').textContent =
+  new Date().toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' });
+
+function homeFilterActive() {
+  return !!(homeFilter.status || homeFilter.commessa || homeFilter.plant || homeFilter.showCompletedJobs);
+}
+
+function syncFilterButtons() {
+  const active = homeFilterActive();
+  document.getElementById('filter-btn').classList.toggle('is-active', active);
+  document.getElementById('fp-reset').hidden = !active;
+}
+syncFilterButtons();
+
+function applyHomeFilter() {
+  syncFilterButtons();
+  renderKanban();
+  if (!_homeGantt) return;
+  _homeGantt.setTaskFilter({ ...homeFilter });
+  showFilteredActivities();
+}
+
+// A filter selects activities: open every commessa so the matching activity
+// rows are visible, and fold them back when the filter is cleared.
+function showFilteredActivities() {
+  if (homeFilterActive()) _homeGantt.expandAllGroups();
+  else _homeGantt.collapseAllGroups();
+  syncGanttEmpty();
+}
+
+function syncGanttEmpty() {
+  const empty = !!_homeGantt && _homeGantt.tasks.length > 0 && _homeGantt.displayTasks().length === 0;
+  document.getElementById('gantt-empty').hidden = !empty;
+}
+
+function fillSelect(sel, allLabel, keys, current) {
+  sel.replaceChildren(new Option(allLabel, ''), ...keys.map(k => new Option(k, k)));
+  // Keep a selection that is gone from the data visible, so it can be cleared.
+  if (current && !keys.includes(current)) sel.add(new Option(current, current));
+  sel.value = current || '';
+}
+
+let commesseOptions = [];
+
+// Searchable commessa picker: typing narrows the list, "" means all.
+const commessaCombo = (function () {
+  const input = document.getElementById('fp-commessa');
+  const list = document.getElementById('fp-commessa-list');
+  let active = -1;
+  let shown = [];
+
+  const items = () => [...list.querySelectorAll('li[data-value]')];
+
+  function render(query) {
+    const q = (query || '').trim().toLowerCase();
+    shown = q
+      ? commesseOptions.filter(c => c.toLowerCase().includes(q))
+      : [''].concat(commesseOptions);
+    list.replaceChildren(...shown.map(v => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      li.dataset.value = v;
+      li.textContent = v || 'Tutte le commesse';
+      li.setAttribute('aria-selected', v === (homeFilter.commessa || '') ? 'true' : 'false');
+      return li;
+    }));
+    if (!shown.length) {
+      const li = document.createElement('li');
+      li.className = 'fp-combo-empty';
+      li.textContent = 'Nessuna commessa trovata';
+      list.append(li);
+    }
+    setActive(shown.length ? 0 : -1);
+  }
+
+  function setActive(i) {
+    active = i;
+    items().forEach((li, n) => li.classList.toggle('is-active', n === i));
+    const cur = items()[i];
+    if (cur) cur.scrollIntoView({ block: 'nearest' });
+  }
+
+  function open(query) {
+    render(query);
+    list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  }
+
+  function close() {
+    list.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    input.value = homeFilter.commessa || '';
+  }
+
+  function choose(value) {
+    homeFilter.commessa = value || null;
+    close();
+    applyHomeFilter();
+  }
+
+  input.addEventListener('focus', () => { input.select(); open(''); });
+  input.addEventListener('click', () => { if (list.hidden) open(''); });
+  input.addEventListener('input', () => open(input.value));
+  input.addEventListener('blur', close);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (list.hidden) { open(input.value); return; }
+      const n = items().length;
+      if (n) setActive((active + (e.key === 'ArrowDown' ? 1 : -1) + n) % n);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!list.hidden && active >= 0) choose(shown[active]);
+    } else if (e.key === 'Escape' && !list.hidden) {
+      e.stopPropagation();
+      close();
+    }
+  });
+  // mousedown keeps the focus in the input, so blur does not close first.
+  list.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const li = e.target.closest('li[data-value]');
+    if (li) choose(li.dataset.value);
+  });
+
+  return { sync: () => { if (list.hidden) input.value = homeFilter.commessa || ''; } };
+})();
+
+function loadFilterOptions() {
+  return fetch('/api/gantt/', { cache: 'no-store' })
+    .then(r => r.json())
+    .then(data => {
+      const tasks = data.tasks || [];
+      const uniq = values => [...new Set(values.filter(Boolean))].sort();
+      commesseOptions = uniq(tasks.map(t => t.commessa || t.job_id));
+      commessaCombo.sync();
+      fillSelect(document.getElementById('fp-plant'), 'Tutti gli stabilimenti',
+        uniq(tasks.map(t => t.plant)), homeFilter.plant);
+    })
+    .catch(() => {});
+}
+
+(function bindFilter() {
+  const btn = document.getElementById('filter-btn');
+  const pop = document.getElementById('filter-pop');
+  const setOpen = open => {
+    pop.hidden = !open;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) loadFilterOptions();
+  };
+  btn.addEventListener('click', e => { e.stopPropagation(); setOpen(pop.hidden); });
+  pop.addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('click', () => setOpen(false));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') setOpen(false); });
+  document.getElementById('fp-status').addEventListener('change', e => {
+    homeFilter.status = e.target.value || null;
+    applyHomeFilter();
+  });
+  document.getElementById('fp-plant').addEventListener('change', e => {
+    homeFilter.plant = e.target.value || null;
+    applyHomeFilter();
+  });
+  document.getElementById('fp-completed-jobs').addEventListener('change', e => {
+    homeFilter.showCompletedJobs = e.target.checked;
+    applyHomeFilter();
+  });
+  document.getElementById('fp-reset').addEventListener('click', e => {
+    e.stopPropagation();
+    homeFilter.status = null;
+    homeFilter.commessa = null;
+    homeFilter.plant = null;
+    homeFilter.showCompletedJobs = false;
+    document.getElementById('fp-status').value = '';
+    document.getElementById('fp-commessa').value = '';
+    document.getElementById('fp-plant').value = '';
+    document.getElementById('fp-completed-jobs').checked = false;
+    applyHomeFilter();
+  });
+})();
+
+// ── Kanban ──────────────────────────────────────────────────────────────
+const KB_STATES = [
+  { key: 'todo', label: 'Da iniziare', color: 'var(--text-subtle)' },
+  { key: 'wip', label: 'In corso', color: 'var(--accent)' },
+  { key: 'done', label: 'Completata', color: 'var(--green)' },
+];
+const KB_RES_ORDER = ['testa', 'generatore', 'mandrino', 'tastatore', 'maschera'];
+const KB_RES_LABELS = { testa: 'Testa', generatore: 'Generatore', mandrino: 'Mandrino', tastatore: 'Tastatore', maschera: 'Maschera' };
+const kanban = { tasks: [], deadlines: {}, collapsed: new Set(), loaded: false };
+
+function kbDate(iso) {
+  if (!iso) return null;
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+  return (y && m && d) ? new Date(y, m - 1, d) : null;
+}
+function kbToday() { const t = new Date(); t.setHours(0, 0, 0, 0); return t; }
+function kbDays(a, b) { return Math.round((a - b) / 86400000); }
+function kbDM(d) { return d ? String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') : '—'; }
+function kbDMY(d) { return d ? kbDM(d) + '/' + d.getFullYear() : '—'; }
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function kbState(t) {
+  if (t.actual_finish) return 'done';
+  if (t.actual_start) return 'wip';
+  return 'todo';
+}
+
+function kbFirstDay(t) {
+  const days = [kbDate(t.start), kbDate(t.actual_start)].filter(Boolean);
+  return days.length ? new Date(Math.min(...days)) : null;
+}
+function kbLastDay(t) {
+  const days = [kbDate(t.finish), kbDate(t.actual_finish)].filter(Boolean);
+  return days.length ? new Date(Math.max(...days)) : null;
+}
+
+// Same triangle as the Gantt: opens the activity's problems in pianificazione.
+function kbWarnButton(t) {
+  const btn = el('button', 'kb-card-warn');
+  btn.type = 'button';
+  const label = t.warning_count === 1 ? '1 problema da risolvere' : t.warning_count + ' problemi da risolvere';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+  btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true">'
+    + '<path fill="hsl(36,92%,54%)" d="M10 2.15c.47 0 .9.25 1.14.66l7.2 12.85A1.32 1.32 0 0 1 17.2 17.8H2.8a1.32 1.32 0 0 1-1.14-1.98L8.86 2.81c.24-.41.67-.66 1.14-.66z"/>'
+    + '<path fill="hsl(28,28%,10%)" d="M10 7.05c.36 0 .65.28.65.64v3.55c0 .36-.29.64-.65.64s-.65-.28-.65-.64V7.69c0-.36.29-.64.65-.64zm0 6.2a.82.82 0 1 1 0 1.64.82.82 0 0 1 0-1.64z"/>'
+    + '</svg>';
+  const open = e => {
+    e.stopPropagation();
+    window.location.href = '/pianificazione/?focus=' + encodeURIComponent(t.orm_id);
+  };
+  btn.addEventListener('click', open);
+  btn.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation(); });
+  return btn;
+}
+
+function kbCard(t, today) {
+  const card = el('article', 'kb-card');
+
+  const top = el('div', 'kb-card-top');
+  const name = (t.item ? t.item + ' · ' : '') + (t.activity || '');
+  const chip = el('span', 'kb-card-name', name);
+  chip.title = name;
+  top.append(chip);
+  if (t.plant) top.append(el('span', 'kb-card-plant', t.plant));
+  if (t.orm_id && t.warning_count > 0) top.append(kbWarnButton(t));
+  card.append(top);
+
+  const planS = kbDate(t.start), planF = kbDate(t.finish);
+  const actS = kbDate(t.actual_start), actF = kbDate(t.actual_finish);
+  const dates = el('dl', 'kb-dates');
+  dates.append(el('dt', null, 'Prev.'), el('dd', null, kbDM(planS) + ' → ' + kbDM(planF)));
+  // Late: "+N gg" in red, counted like the Gantt. Otherwise, when not
+  // started yet, how long until the planned start.
+  const delay = GanttChart.taskDelayDays(t, today);
+  let when = '';
+  if (delay > 0) {
+    when = '+' + delay + ' gg';
+  } else if (kbState(t) === 'todo' && planS && planS >= today) {
+    const n = kbDays(planS, today);
+    when = n === 0 ? 'inizio prev. oggi' : 'inizio prev. fra ' + n + ' gg';
+  }
+  dates.append(el('dd', 'kb-when' + (delay > 0 ? ' is-late' : ''), when));
+  const eff = actS ? kbDM(actS) + ' → ' + (actF ? kbDM(actF) : '…') : '—';
+  dates.append(el('dt', null, 'Eff.'), el('dd', actS ? 'is-actual' : null, eff), el('dd'));
+  card.append(dates);
+
+  const byTipo = t.resources_by_tipo || {};
+  const moving = new Set(t.moving_resources || []);
+  const res = el('div', 'kb-res');
+  KB_RES_ORDER.forEach(tipo => {
+    (byTipo[tipo] || []).forEach(uid => {
+      const main = tipo === 'testa' || tipo === 'generatore';
+      const c = el('span', 'pian-res-chip ' + (main ? 'pian-res-chip--testa' : 'pian-res-chip--acc'), uid);
+      c.title = KB_RES_LABELS[tipo] + ' ' + uid;
+      if (moving.has(uid)) {
+        c.classList.add('pian-res-chip--moving');
+        c.title = 'spostamento richiesto';
+      }
+      res.append(c);
+    });
+  });
+  if (res.childElementCount) card.append(res);
+
+  // Opens the activity's detail modal on the pianificazione page.
+  if (t.orm_id) {
+    card.tabIndex = 0;
+    card.setAttribute('role', 'link');
+    card.title = 'Apri il dettaglio in Pianificazione';
+    const open = () => { window.location.href = '/pianificazione/?attivita=' + encodeURIComponent(t.orm_id); };
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+  }
+  return card;
+}
+
+// Deadline, overall period and completion bar of an expanded commessa.
+function kbJobDetails(cell, key, tasks) {
+  const jobId = tasks[0].job_id || key;
+  const deadline = kbDate(kanban.deadlines[jobId]);
+  const first = tasks.map(kbFirstDay).filter(Boolean);
+  const last = tasks.map(kbLastDay).filter(Boolean);
+  const meta = el('div', 'kb-job-meta');
+  const dl = el('div');
+  dl.append('Consegna ', el('b', null, kbDMY(deadline)));
+  const period = el('div', null, 'Periodo ' + (first.length ? kbDM(new Date(Math.min(...first))) : '—')
+    + ' → ' + (last.length ? kbDM(new Date(Math.max(...last))) : '—'));
+  meta.append(dl, period);
+  cell.append(meta);
+
+  const done = tasks.filter(t => kbState(t) === 'done').length;
+  const pct = tasks.length ? Math.round(done / tasks.length * 100) : 0;
+  const wrap = el('div', 'pian-progress-wrap');
+  wrap.append(el('span', 'pian-progress-pct', pct + '%'));
+  const bar = el('div', 'pian-progress');
+  bar.setAttribute('role', 'progressbar');
+  bar.setAttribute('aria-label', 'Attività completate');
+  bar.setAttribute('aria-valuemin', '0');
+  bar.setAttribute('aria-valuemax', '100');
+  bar.setAttribute('aria-valuenow', String(pct));
+  const track = el('div', 'pian-progress-track');
+  const fill = el('div', 'pian-progress-fill');
+  fill.style.width = pct + '%';
+  track.append(fill);
+  bar.append(track);
+  wrap.append(bar, el('span', 'kb-job-n', done + '/' + tasks.length));
+  cell.append(wrap);
+}
+
+function kbJobCell(key, tasks, today) {
+  const cell = el('div', 'kb-cell kb-job');
+  cell.tabIndex = 0;
+  cell.setAttribute('role', 'button');
+  const collapsed = kanban.collapsed.has(key);
+  cell.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  cell.title = collapsed ? 'Espandi la commessa' : 'Comprimi la commessa';
+
+  cell.append(el('div', 'kb-job-code', key));
+  if (!collapsed) kbJobDetails(cell, key, tasks);
+
+  const toggle = () => {
+    if (kanban.collapsed.has(key)) kanban.collapsed.delete(key);
+    else kanban.collapsed.add(key);
+    renderKanban();
+  };
+  cell.addEventListener('click', toggle);
+  cell.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+  });
+  return cell;
+}
+
+function renderKanban() {
+  const board = document.getElementById('kanban-board');
+  if (!kanban.loaded) return;
+  const today = kbToday();
+  const tasks = GanttChart.filterTasks(kanban.tasks, homeFilter, today);
+
+  const groups = new Map();
+  tasks.forEach(t => {
+    const key = t.commessa || t.job_id || '—';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  });
+  const firstOf = list => {
+    const days = list.map(kbFirstDay).filter(Boolean);
+    return days.length ? Math.min(...days) : Infinity;
+  };
+  const rows = [...groups.entries()]
+    .sort((a, b) => (firstOf(a[1]) - firstOf(b[1])) || a[0].localeCompare(b[0]));
+
+  const grid = el('div', 'kb-grid');
+  const head = el('div', 'kb-head', 'Commessa');
+  grid.append(head);
+  KB_STATES.forEach(st => {
+    const h = el('div', 'kb-head' + (st.key === 'wip' ? ' kb-col-wip' : ''));
+    const sq = el('span', 'kb-head-sq');
+    sq.style.background = st.color;
+    const n = tasks.filter(t => kbState(t) === st.key).length;
+    h.append(sq, el('span', null, st.label), el('span', 'kb-head-count', String(n)));
+    grid.append(h);
+  });
+
+  const byStart = (a, b) => {
+    const da = kbDate(a.start) || kbDate(a.actual_start);
+    const db = kbDate(b.start) || kbDate(b.actual_start);
+    return (da ? da.getTime() : Infinity) - (db ? db.getTime() : Infinity);
+  };
+  rows.forEach(([key, list]) => {
+    grid.append(kbJobCell(key, list, today));
+    const collapsed = kanban.collapsed.has(key);
+    KB_STATES.forEach(st => {
+      const cell = el('div', 'kb-cell' + (st.key === 'wip' ? ' kb-col-wip' : ''));
+      const inState = list.filter(t => kbState(t) === st.key).sort(byStart);
+      if (collapsed) {
+        cell.append(el('div', 'kb-count', inState.length === 1 ? '1 attività' : inState.length + ' attività'));
+      } else if (!inState.length) {
+        cell.append(el('div', 'kb-empty'));
+      } else {
+        inState.forEach(t => cell.append(kbCard(t, today)));
+      }
+      grid.append(cell);
+    });
+  });
+
+  board.replaceChildren(grid);
+  if (!rows.length) {
+    board.append(el('div', 'kb-board-empty',
+      kanban.tasks.length ? 'Nessuna attività corrisponde ai filtri.' : 'Nessuna attività da mostrare.'));
+  }
+}
+
+function loadKanban() {
+  return fetch('/api/gantt/', { cache: 'no-store' })
+    .then(r => r.json())
+    .then(data => {
+      kanban.tasks = data.tasks || [];
+      kanban.deadlines = data.deadlines || {};
+      kanban.loaded = true;
+      renderKanban();
+    })
+    .catch(() => {});
+}
+loadKanban();
+
+function showHomeView(view) {
+  document.querySelectorAll('#view-switch .vbtn').forEach(btn => {
+    btn.setAttribute('aria-checked', btn.dataset.homeView === view ? 'true' : 'false');
+  });
+  document.getElementById('view-kanban').hidden = view !== 'kanban';
+  document.getElementById('view-gantt').hidden = view !== 'gantt';
+  document.getElementById('toggle-row').hidden = view !== 'gantt';
+  if (view !== 'gantt') return;
+  if (!_homeGantt) {
+    _homeGantt = new GanttChart({
+      prefix: '',
+      enableStats: false,
+      enableDeadlineEditor: false,
+      enableWarningNav: true,
+      collapsibleGroups: true,
+      initialView: 'horizon',
+      taskFilter: { ...homeFilter },
+    });
+    _homeGantt.bindIndexPage();
+    _homeGantt.bindControls();
+    _homeGantt.loadFromUrl('/api/gantt/').then(() => { if (homeFilterActive()) showFilteredActivities(); else syncGanttEmpty(); });
+  } else {
+    _homeGantt.renderWhenReady();
+  }
+}
+document.querySelectorAll('#view-switch .vbtn').forEach(btn => {
+  btn.addEventListener('click', () => showHomeView(btn.dataset.homeView));
 });
-_homeGantt.bindIndexPage();
-_homeGantt.bindControls();
-_homeGantt.loadFromUrl('/api/gantt/');
 </script>
 {% endblock %}

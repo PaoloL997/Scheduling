@@ -756,6 +756,10 @@
     </div>
     <div class="det-body-wrap">
       <div id="det-body" class="det-grid"></div>
+      <div id="det-problems" class="det-problems" hidden>
+        <span id="det-problems-text"></span>
+        <button type="button" class="det-problems-btn" onclick="openProblemsFromDetail()">Risolvi</button>
+      </div>
       <div id="det-error" class="det-error" style="display:none;"></div>
     </div>
     <div class="det-footer">
@@ -3399,6 +3403,17 @@ document.addEventListener('DOMContentLoaded', () => {
     history.replaceState({}, '', window.location.pathname);
     openNotesModal(parseInt(focusId, 10));
   }
+
+  // Auto-open the activity detail modal when arriving from a home kanban card
+  const attivitaId = new URLSearchParams(window.location.search).get('attivita');
+  if (attivitaId) {
+    history.replaceState({}, '', window.location.pathname);
+    const row = document.querySelector(`.pian-activity-row[data-orm-id="${CSS.escape(attivitaId)}"]`);
+    if (row) {
+      row.scrollIntoView({ block: 'center' });
+      openDetailModal(row, 'task');
+    }
+  }
 });
 
 const TASK_FIELDS = [
@@ -3468,6 +3483,15 @@ function openDetailModal(tr, entityType) {
     title  = `Commessa: ${data.commessa}`;
   }
   _detState = { tr, entityType, originalData: { ...data }, fields };
+  // Open problems on this activity: point at them under the fields.
+  const openProblems = entityType === 'task' ? parseInt(ds.warningCount || '0', 10) : 0;
+  const problemsEl = document.getElementById('det-problems');
+  if (problemsEl) {
+    problemsEl.hidden = !(openProblems > 0 && data.ormId);
+    document.getElementById('det-problems-text').textContent = openProblems === 1
+      ? "C'è 1 problema da risolvere"
+      : `Ci sono ${openProblems} problemi da risolvere`;
+  }
   document.getElementById('det-title').textContent = title;
   document.getElementById('det-error').classList.remove('det-error--warn');
   document.getElementById('det-error').style.display = 'none';
@@ -3477,6 +3501,13 @@ function openDetailModal(tr, entityType) {
   const ov = document.getElementById('det-modal-overlay');
   ov.classList.add('is-open');
   ov.style.display = 'flex';
+}
+
+function openProblemsFromDetail() {
+  const ormId = _detState && _detState.originalData && _detState.originalData.ormId;
+  if (!ormId) return;
+  closeDetailModal();
+  openNotesModal(parseInt(ormId, 10));
 }
 
 function closeDetailModal() {

@@ -52,16 +52,12 @@ const planned = document.querySelector('#bars-svg rect[data-task]');
 if (!planned) throw new Error('expected planned bar');
 
 const plannedRight = Number(planned.getAttribute('x')) + Number(planned.getAttribute('width'));
-const badgeRects = [...document.querySelectorAll('#bars-svg rect')]
-  .filter((r) => !r.getAttribute('data-task') && Number(r.getAttribute('height')) === 16);
+const delayLabels = [...document.querySelectorAll('#bars-svg text')]
+    .filter((t) => /^\+\d+ gg$/.test(t.textContent));
 
-if (badgeRects.length < 1) throw new Error('expected status badge rects');
-
-const firstBadgeX = Math.min(...badgeRects.map((r) => Number(r.getAttribute('x'))));
-if (firstBadgeX <= plannedRight) {
-  throw new Error(
-    `badge should start after actual finish, not planned end (badgeX=${firstBadgeX}, plannedRight=${plannedRight})`
-  );
+// No status badges any more: a closed activity is never late, so it carries none.
+if (delayLabels.length !== 0) {
+  throw new Error(`completed activity must carry no badge, got ${delayLabels.length}`);
 }
 
-console.log('ok', { plannedRight, firstBadgeX, badgeCount: badgeRects.length });
+console.log('ok', { plannedRight, badgeCount: delayLabels.length });

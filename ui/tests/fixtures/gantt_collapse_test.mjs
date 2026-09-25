@@ -133,4 +133,33 @@ assert(btn.textContent === 'Espandi tutto', `button label, got ${btn.textContent
   assert(taskBars().length === 3, `non-collapsible should show all bars, got ${taskBars().length}`);
 }
 
+// A commessa wholly outside the window takes no row: the visible collapsed
+// summaries sit exactly where they would without it, with no empty gap.
+{
+  const visible = [
+    { ...tasks[0] },
+    { ...tasks[2] },
+    { commessa: 'C3', job_id: 'C3', activity_id: 'C3-a', item: '1', activity: 'a',
+      start: '2026-08-01', finish: '2026-08-08' },
+  ];
+  const old = { commessa: 'OLD', job_id: 'OLD', activity_id: 'OLD-a', item: '1', activity: 'a',
+    start: '2026-02-01', finish: '2026-02-10' };
+  const summaryYs = (list) => {
+    const c = new GanttChart({ prefix: '', collapsibleGroups: true, enableStats: false });
+    c.tasks = list;
+    c.deadlines = {};
+    c._dataMinD = new Date('2026-05-01T00:00:00');
+    c._dataMaxD = new Date('2026-12-31T00:00:00');
+    c.fitToData = true;
+    c.render(list, 'year');
+    return [...document.querySelectorAll('rect[data-toggle-group]')].map(r => Number(r.getAttribute('y')));
+  };
+  const without = summaryYs(visible);
+  const withOld = summaryYs([old, ...visible]);
+  assert(
+    withOld.join(',') === without.join(','),
+    `out-of-window commessa must take no row: ${withOld.join(', ')} vs ${without.join(', ')}`
+  );
+}
+
 console.log('ok');

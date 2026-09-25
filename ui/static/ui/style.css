@@ -2389,6 +2389,34 @@ a .nav-warn-badge {
   border-left-color: hsl(38 95% 55%);
 }
 
+/* Detail modal: open problems on the activity, with a way to them. */
+.det-problems {
+  margin-top: 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: hsl(38 90% 62%);
+}
+.det-problems[hidden] { display: none; }
+.det-problems-btn {
+  flex-shrink: 0;
+  padding: 0.4rem 1rem;
+  border: none;
+  border-radius: var(--radius);
+  background: hsl(45 95% 55%);
+  color: hsl(40 60% 10%);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.det-problems-btn:hover { background: hsl(45 95% 62%); }
+.det-problems-btn:focus-visible { outline: 2px solid hsl(45 95% 70%); outline-offset: 2px; }
+
 /* Clickable rows hint */
 .data-table tbody tr { cursor: pointer; }
 

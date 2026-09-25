@@ -56,17 +56,20 @@ const tail = [...document.querySelectorAll('#bars-svg rect')]
 const tailRight = tail
   ? Number(tail.getAttribute('x')) + Number(tail.getAttribute('width'))
   : 0;
-const badgeRects = [...document.querySelectorAll('#bars-svg rect')]
-  .filter((r) => !r.getAttribute('data-task') && Number(r.getAttribute('height')) === 16);
-const firstBadgeX = Math.min(...badgeRects.map((r) => Number(r.getAttribute('x'))));
+const delayLabels = [...document.querySelectorAll('#bars-svg text')]
+    .filter((t) => /^\+\d+ gg$/.test(t.textContent));
+const delayX = Math.min(...delayLabels.map((r) => Number(r.getAttribute('x'))));
 
 if (tailRight <= plannedRight) {
   throw new Error(`expected estimated actual tail past planned end (${tailRight} vs ${plannedRight})`);
 }
-if (firstBadgeX < tailRight) {
+if (delayLabels.length !== 1) {
+  throw new Error(`expected the delay badge of a late-started activity, got ${delayLabels.length}`);
+}
+if (delayX < tailRight) {
   throw new Error(
-    `badge overlaps actual tail (badgeX=${firstBadgeX}, tailRight=${tailRight}, plannedRight=${plannedRight})`
+    `badge overlaps actual tail (badgeX=${delayX}, tailRight=${tailRight}, plannedRight=${plannedRight})`
   );
 }
 
-console.log('ok', { plannedRight, tailRight, firstBadgeX });
+console.log('ok', { plannedRight, tailRight, delayX });
