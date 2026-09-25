@@ -408,9 +408,9 @@ def _resolve_predecessor_name(activity_id: str, id_to_name: dict) -> str:
     if key in id_to_name:
         return id_to_name[key]
 
-    parts = activity_id.split("-", 2)
-    if len(parts) == 3:
-        return unquote(parts[2])
+    parts = activity_id.split("-")
+    if len(parts) >= 3:
+        return unquote(parts[-1])
 
     return activity_id
 

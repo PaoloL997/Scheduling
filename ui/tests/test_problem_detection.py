@@ -49,8 +49,8 @@ class GetTestaMinRequirementsTest(TestCase):
             },
         )
 
-    def test_tp60_custom_drops_consumable_minimums(self) -> None:
-        """TP60 Custom keeps testa/generatore minimums and frees consumables."""
+    def test_tp60_custom_uses_fixed_consumable_minimums(self) -> None:
+        """TP60 Custom: 2 mandrini, 1 maschera, no tastatore; testa/generatore kept."""
         ConfigurazioneTesta.objects.create(
             modello_testa="IRIS",
             min_mandrini=2,
@@ -62,9 +62,9 @@ class GetTestaMinRequirementsTest(TestCase):
             get_testa_min_requirements("IRIS", tp60_custom=True),
             {
                 "teste": 1,
-                "mandrini": 0,
+                "mandrini": 2,
                 "tastatori": 0,
-                "maschere": 0,
+                "maschere": 1,
                 "generatori": 2,
             },
         )
@@ -241,7 +241,7 @@ class DetectShortfallProblemsTest(TestCase):
 
 
 class DetectTp60CustomShortfallTest(TestCase):
-    """TP60 Custom activities may skip consumables without raising problems."""
+    """TP60 Custom activities need 2 mandrini and 1 maschera, no tastatore."""
 
     def setUp(self) -> None:
         from ui.models import TestaItem
@@ -264,14 +264,14 @@ class DetectTp60CustomShortfallTest(TestCase):
             tp60_custom=True,
         )
 
-    def test_deselected_consumables_create_no_problem(self) -> None:
+    def test_missing_tastatore_creates_no_problem(self) -> None:
         count = detect_and_save_problems(
             self.att,
             {
                 "teste": ["T1"],
-                "mandrini": [],
+                "mandrini": ["M1", "M2"],
                 "tastatori": [],
-                "maschere": [],
+                "maschere": ["MA1"],
                 "generatori": ["G1"],
             },
         )
@@ -282,7 +282,7 @@ class DetectTp60CustomShortfallTest(TestCase):
             ).exists()
         )
 
-    def test_missing_testa_and_generatore_are_still_flagged(self) -> None:
+    def test_everything_but_the_tastatore_is_flagged(self) -> None:
         detect_and_save_problems(
             self.att,
             {
@@ -298,7 +298,7 @@ class DetectTp60CustomShortfallTest(TestCase):
                 attivita=self.att, tipo=ProblemaAttivita.TIPO_ACQUISTO
             ).values_list("risorsa_tipo", flat=True)
         )
-        self.assertEqual(flagged, {"testa", "generatore"})
+        self.assertEqual(flagged, {"testa", "generatore", "mandrino", "maschera"})
 
     def test_spostamento_still_detected_for_selected_resources(self) -> None:
         detect_and_save_problems(
@@ -316,8 +316,8 @@ class DetectTp60CustomShortfallTest(TestCase):
         )
         self.assertEqual(problema.risorsa_uid, "T2")
 
-    def test_enabling_flag_auto_resolves_existing_shortfall(self) -> None:
-        """A shortfall opened before the flag is closed once it is set."""
+    def test_enabling_flag_auto_resolves_tastatore_shortfall(self) -> None:
+        """The tastatore shortfall opened before the flag closes once it is set."""
         self.att.tp60_custom = False
         self.att.save(update_fields=["tp60_custom"])
         empty = {
@@ -339,16 +339,16 @@ class DetectTp60CustomShortfallTest(TestCase):
 
         self.att.tp60_custom = True
         self.att.save(update_fields=["tp60_custom"])
-        created = detect_and_save_problems(self.att, empty)
+        detect_and_save_problems(self.att, empty)
 
-        self.assertEqual(created, 0)
-        self.assertFalse(
+        open_types = set(
             ProblemaAttivita.objects.filter(
                 attivita=self.att,
                 tipo=ProblemaAttivita.TIPO_ACQUISTO,
                 risolto=False,
-            ).exists()
+            ).values_list("risorsa_tipo", flat=True)
         )
+        self.assertEqual(open_types, {"mandrino", "maschera"})
 
     def test_normal_activity_still_flags_missing_consumables(self) -> None:
         att = Attivita.objects.create(

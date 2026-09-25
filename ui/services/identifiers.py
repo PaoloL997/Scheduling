@@ -103,8 +103,10 @@ def parse_activity_id(activity_id: str) -> tuple[str, str, str]:
     Raises:
         ValueError: When the activity_id does not contain exactly three parts.
     """
-    parts = (activity_id or "").split("-", 2)
-    if len(parts) != 3:
+    # The item may itself contain "-" (``{disegno}-{item}``): commessa is the
+    # first component, activity the last, and the item is everything between.
+    commessa_raw, _, rest = (activity_id or "").partition("-")
+    item_raw, _, activity_raw = rest.rpartition("-")
+    if not rest or not item_raw:
         raise ValueError("activity_id non valido")
-    commessa_raw, item_raw, activity_raw = parts
     return _dec(commessa_raw), _dec(item_raw), _dec(activity_raw)

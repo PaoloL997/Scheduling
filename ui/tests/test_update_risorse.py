@@ -367,7 +367,7 @@ class StrictRequirementsTest(TestCase):
 
 
 class Tp60CustomRequirementsTest(TestCase):
-    """The TP60 Custom flag relaxes the consumable minimums returned by the API."""
+    """The TP60 Custom flag fixes the consumable minimums returned by the API."""
 
     def setUp(self) -> None:
         self.factory = RequestFactory()
@@ -392,30 +392,30 @@ class Tp60CustomRequirementsTest(TestCase):
         resp = api_get_risorse(request)
         return json.loads(resp.content)
 
-    def test_min_requirements_are_zeroed_for_consumables(self) -> None:
+    def test_min_requirements_are_the_tp60_custom_ones(self) -> None:
         data = self._get(modello_testa="TP60", tp60_custom="1")
         self.assertTrue(data["ok"])
         self.assertEqual(
             data["min_requirements"],
             {
                 "teste": 1,
-                "mandrini": 0,
+                "mandrini": 2,
                 "tastatori": 0,
-                "maschere": 0,
+                "maschere": 1,
                 "generatori": 1,
             },
         )
 
-    def test_consumables_are_not_preselected(self) -> None:
-        """The head and generator are still proposed; consumables are not."""
+    def test_tastatore_is_not_preselected(self) -> None:
+        """Head, generator and mandrini are still proposed; the tastatore is not."""
+        TastatoreItem.objects.create(uid="TS_TP60", diameter="25", plant="Valbrembo")
         plain = self._get(modello_testa="TP60")
         custom = self._get(modello_testa="TP60", tp60_custom="1")
-        self.assertEqual(plain["pre_mandrini"], ["M_TP60"])
+        self.assertEqual(plain["pre_tastatori"], ["TS_TP60"])
         self.assertEqual(custom["pre_testa"], plain["pre_testa"])
         self.assertEqual(custom["pre_generatori"], plain["pre_generatori"])
-        self.assertEqual(custom["pre_mandrini"], [])
+        self.assertEqual(custom["pre_mandrini"], ["M_TP60"])
         self.assertEqual(custom["pre_tastatori"], [])
-        self.assertEqual(custom["pre_maschere"], [])
 
     def test_consumable_lists_stay_available(self) -> None:
         """Only the tick is dropped: the planner can still pick one by hand."""
@@ -467,7 +467,9 @@ class Tp60CustomRequirementsTest(TestCase):
                 attivita=att, tipo=ProblemaAttivita.TIPO_ACQUISTO, risolto=False
             ).values_list("risorsa_tipo", flat=True)
         )
-        self.assertEqual(open_types, {"generatore"})
+        # Only the tastatore shortfall goes away: TP60 Custom still needs
+        # 2 mandrini and 1 maschera.
+        self.assertEqual(open_types, {"generatore", "mandrino", "maschera"})
 
     def test_flag_defaults_from_the_edited_activity(self) -> None:
         att = Attivita.objects.create(
@@ -482,7 +484,8 @@ class Tp60CustomRequirementsTest(TestCase):
         )
         data = self._get(exclude_activity_id=str(att.pk))
         self.assertTrue(data["ok"])
-        self.assertEqual(data["min_requirements"]["mandrini"], 0)
+        self.assertEqual(data["min_requirements"]["mandrini"], 2)
+        self.assertEqual(data["min_requirements"]["tastatori"], 0)
         self.assertEqual(data["min_requirements"]["teste"], 1)
 
 

@@ -47,7 +47,7 @@ Activities can have a WPS (Welding Procedure Specification) PDF attached. The ap
 
 ### TP60 Custom (Sporgenza Tubo-Piastra)
 
-Below the WPS measurements the wizard shows a **TP60 Custom (Sporgenza Tubo-Piastra)** flag, saved on `Attivita.tp60_custom`. Such workings may not need every accessory: mandrini, tastatori and maschere become optional, so nothing is pre-selected for them and leaving them unselected raises no `acquisto` problem to resolve. Their lists stay populated, so the planner can still tick one by hand. Teste and generatori keep their minimums and their pre-selection.
+Below the WPS measurements the wizard shows a **TP60 Custom (Sporgenza Tubo-Piastra)** flag, saved on `Attivita.tp60_custom`. Such workings need a fixed set of accessories, whatever the testa configuration says: **2 mandrini and 1 maschera, no tastatore**. Those are the minimums used for pre-selection and for `acquisto` problems; leaving the tastatore unselected raises no problem, and its list stays populated so the planner can still tick one by hand. Teste and generatori keep their configured minimums.
 
 ## Access layers
 

@@ -198,7 +198,7 @@ class ApiGetRisorseEditFlowTest(TestCase):
 
 
 class Tp60CustomPreselectionTest(TestCase):
-    """A TP60 Custom activity starts with no consumable ticked."""
+    """A TP60 Custom activity ticks 2 mandrini and 1 maschera, no tastatore."""
 
     def setUp(self) -> None:
         cfg = ConfigurazioneTesta.objects.create(
@@ -237,11 +237,11 @@ class Tp60CustomPreselectionTest(TestCase):
         self.assertEqual(result["pre_tastatori"], {"T1"})
         self.assertEqual(result["pre_maschere"], {"MA1"})
 
-    def test_consumables_are_not_preselected_with_the_flag(self) -> None:
+    def test_tastatore_is_not_preselected_with_the_flag(self) -> None:
         result = self._result(tp60_custom=True)
-        self.assertEqual(result["pre_mandrini"], set())
+        self.assertEqual(result["pre_mandrini"], {"M1", "M2"})
         self.assertEqual(result["pre_tastatori"], set())
-        self.assertEqual(result["pre_maschere"], set())
+        self.assertEqual(result["pre_maschere"], {"MA1"})
 
     def test_head_and_generator_are_still_preselected(self) -> None:
         result = self._result(tp60_custom=True)
@@ -249,7 +249,7 @@ class Tp60CustomPreselectionTest(TestCase):
         self.assertEqual(result["pre_generatori"], {"G1"})
 
     def test_consumables_stay_selectable_by_hand(self) -> None:
-        """Only the tick is dropped: the lists still offer every item."""
+        """The lists still offer every item, tastatori included."""
         result = self._result(tp60_custom=True)
         self.assertEqual([r["uid"] for r in result["mandrini"]], ["M1", "M2"])
         self.assertEqual([r["uid"] for r in result["tastatori"]], ["T1"])
@@ -258,12 +258,14 @@ class Tp60CustomPreselectionTest(TestCase):
             result["min_requirements"],
             {
                 "teste": 1,
-                "mandrini": 0,
+                "mandrini": 2,
                 "tastatori": 0,
-                "maschere": 0,
+                "maschere": 1,
                 "generatori": 1,
             },
         )
+
+
 class StartedActivityUsesItsRealWindowTest(TestCase):
     """An activity under way is offered what is free from its *actual* start.
 
