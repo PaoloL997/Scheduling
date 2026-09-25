@@ -9,9 +9,10 @@ import math
 from collections.abc import Callable
 from datetime import date
 
-#: Consumable categories a TP60 Custom (Sporgenza Tubo-Piastra) activity may
-#: legitimately leave unselected without it counting as a problem.
-TP60_CUSTOM_OPTIONAL_CATS = ("mandrini", "tastatori", "maschere")
+#: Fixed consumable minimums of a TP60 Custom (Sporgenza Tubo-Piastra)
+#: activity, replacing the testa configuration: 2 mandrini and 1 maschera,
+#: no tastatore.
+TP60_CUSTOM_REQUIREMENTS = {"mandrini": 2, "tastatori": 0, "maschere": 1}
 
 
 def get_stabilimenti() -> list[str]:
@@ -243,9 +244,9 @@ def get_testa_min_requirements(
     Args:
         modello_testa: Testa model name used for configuration lookup.
         tp60_custom: When ``True`` the activity is a TP60 Custom (Sporgenza
-            Tubo-Piastra) job: the consumable categories listed in
-            :data:`TP60_CUSTOM_OPTIONAL_CATS` become optional (minimum ``0``)
-            because such workings may not need them.
+            Tubo-Piastra) job: the consumable minimums are the fixed ones in
+            :data:`TP60_CUSTOM_REQUIREMENTS` (2 mandrini, 1 maschera, no
+            tastatore) instead of the configured ones.
 
     Returns:
         dict[str, int]: Keys ``teste``, ``mandrini``, ``tastatori``,
@@ -263,8 +264,7 @@ def get_testa_min_requirements(
         "generatori": min_generatori,
     }
     if tp60_custom:
-        for cat in TP60_CUSTOM_OPTIONAL_CATS:
-            requirements[cat] = 0
+        requirements.update(TP60_CUSTOM_REQUIREMENTS)
     return requirements
 
 
@@ -481,11 +481,11 @@ def get_available_resources(
             result whatever the filters say — the resources currently assigned
             to the activity being edited.  Those rows are returned first and
             annotated with ``assigned_current`` and ``unavailable_reason``.
-        tp60_custom: When ``True``, the consumable categories in
-            :data:`TP60_CUSTOM_OPTIONAL_CATS` have a minimum of ``0``: they are
-            reported as optional in ``min_requirements`` and nothing is
-            pre-selected for them.  The lists themselves are unchanged, so the
-            planner can still tick a consumable by hand.
+        tp60_custom: When ``True``, the consumable minimums are the fixed
+            ones in :data:`TP60_CUSTOM_REQUIREMENTS` (2 mandrini, 1 maschera,
+            no tastatore), both in ``min_requirements`` and in what gets
+            pre-selected.  The lists themselves are unchanged, so the planner
+            can still tick a tastatore by hand.
 
     Returns:
         dict: With keys ``teste``, ``mandrini``, ``tastatori``, ``maschere``,

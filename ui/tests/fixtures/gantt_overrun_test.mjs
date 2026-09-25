@@ -61,11 +61,11 @@ function render(task) {
   const dashes = [...document.querySelectorAll('#bars-svg line')]
     .filter((l) => l.getAttribute('stroke-dasharray')
       && Number(l.getAttribute('y1')) === Number(l.getAttribute('y2')));
-  const badgeRects = rects.filter((r) => !r.getAttribute('data-task')
-    && Number(r.getAttribute('height')) === 16);
+  const delayLabels = [...document.querySelectorAll('#bars-svg text')]
+    .filter((t) => /^\+\d+ gg$/.test(t.textContent));
   const badgeTexts = [...document.querySelectorAll('#bars-svg text')]
     .map((t) => t.textContent);
-  return { ticks, dashes, badgeRects, badgeTexts };
+  return { ticks, dashes, delayLabels, badgeTexts };
 }
 
 const base = {
@@ -100,15 +100,16 @@ const todayTick = Math.max(...over.ticks.map((t) => Number(t.getAttribute('x')))
 if (Math.abs(todayTick + 1 - dashRight) > 2) {
   throw new Error(`today tick not at dash end (tick=${todayTick}, dash=${dashRight})`);
 }
-const firstBadgeX = Math.min(...over.badgeRects.map((r) => Number(r.getAttribute('x'))));
-if (!over.badgeTexts.includes('IN RITARDO')) {
-  throw new Error(`overrunning activity is not flagged late: ${over.badgeTexts}`);
+const delayX = Math.min(...over.delayLabels.map((r) => Number(r.getAttribute('x'))));
+// Open 30 days past the planned finish: flagged with the delay only.
+if (!over.badgeTexts.includes('+30 gg')) {
+  throw new Error(`overrunning activity is not flagged +30 gg: ${over.badgeTexts}`);
 }
-if (!over.badgeTexts.includes('IN LAVORAZIONE')) {
-  throw new Error(`overrunning activity lost its in-progress badge: ${over.badgeTexts}`);
+if (over.delayLabels.length !== 1) {
+  throw new Error(`expected only the delay badge, got ${over.delayLabels.length}`);
 }
-if (firstBadgeX < dashRight) {
-  throw new Error(`badge before overrun end (badge=${firstBadgeX}, dash=${dashRight})`);
+if (delayX < dashRight) {
+  throw new Error(`badge before overrun end (badge=${delayX}, dash=${dashRight})`);
 }
 
 // The estimated-end tick is only dropped while overrunning: an activity
@@ -127,7 +128,7 @@ if (within.dashes.length !== 0) {
 if (within.ticks.length !== 2) {
   throw new Error(`expected start and estimated-end ticks, got ${within.ticks.length}`);
 }
-if (within.badgeTexts.includes('IN RITARDO')) {
+if (within.delayLabels.length !== 0) {
   throw new Error('activity inside its estimate must not be flagged late');
 }
 
@@ -147,5 +148,5 @@ console.log('ok', {
   overrunTicks: over.ticks.length,
   withinTicks: within.ticks.length,
   dashRight,
-  firstBadgeX,
+  delayX,
 });

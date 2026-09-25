@@ -466,7 +466,9 @@ body {
    Pianificazione — project cards inspired by numeric brief
    ================================================================ */
 :root {
-  --pian-card-cols: minmax(120px, 1fr) 96px 96px 96px 96px minmax(152px, 1.35fr) minmax(110px, 0.9fr) minmax(110px, 0.9fr) minmax(130px, 1.1fr) minmax(120px, 0.9fr) minmax(72px, auto);
+  /* Fixed tracks: every row is its own grid, so only fixed widths keep the
+     columns aligned across rows; resources take all the remaining space. */
+  --pian-card-cols: 180px 92px 92px 92px 92px 64px 108px minmax(0, 1fr) 116px;
 }
 
 .pian-page {
@@ -899,8 +901,90 @@ body {
   border-bottom: 0;
 }
 
-.pian-activity-row:nth-child(even) {
-  background: hsl(220 14% 13% / 0.5);
+/* ── disegno sub-groups (commessa > disegno > item · attività) ───────────── */
+.pian-disegno-group + .pian-disegno-group {
+  border-top: 1px solid var(--border);
+}
+
+.pian-disegno-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.25rem;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border-bottom: 1px solid hsl(220 10% 22%);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.pian-disegno-head:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.pian-disegno-head:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+.pian-disegno-chevron {
+  flex-shrink: 0;
+  color: var(--text-subtle);
+  transition: transform 0.2s ease, color 0.15s;
+}
+
+.pian-disegno-head:hover .pian-disegno-chevron {
+  color: var(--text-muted);
+}
+
+.pian-disegno-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.pian-disegno-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.pian-disegno-lbl {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.pian-disegno-name.is-empty {
+  font-weight: 500;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.pian-disegno-count {
+  min-width: 1.35rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.pian-disegno-group.is-collapsed .pian-disegno-chevron {
+  transform: rotate(-90deg);
+}
+
+.pian-disegno-group.is-collapsed .pian-disegno-head {
+  border-bottom-color: transparent;
+}
+
+.pian-disegno-group.is-collapsed .pian-activity-row {
+  display: none;
 }
 
 .pian-activity-row:hover {
@@ -962,9 +1046,7 @@ body {
 }
 
 .pian-col-stab,
-.pian-col-resp,
-.pian-col-res,
-.pian-col-pred {
+.pian-col-res {
   min-width: 0;
   overflow: hidden;
   color: var(--text-muted);
@@ -973,15 +1055,26 @@ body {
   white-space: nowrap;
 }
 
-.pian-col-pred {
-  color: var(--text-subtle);
-  font-size: 0.775rem;
+.pian-col-delay {
+  min-width: 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.pian-col-status {
-  display: flex;
-  align-items: center;
-  min-width: 0;
+/* Same red as the Gantt "+N gg" label. */
+.pian-col-delay.is-late {
+  color: hsl(4 90% 62%);
+}
+
+/* Completed activity: the whole row turns green (Gantt "Completata" hue). */
+.pian-activity-row.is-completed {
+  background: hsl(142 50% 45% / 0.06);
+}
+
+.pian-activity-row.is-completed:hover {
+  background: hsl(142 50% 45% / 0.11);
 }
 
 .pian-col-action {
@@ -1038,13 +1131,10 @@ body {
 .pian-res-inner {
   display: inline-flex;
   align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 0.25rem;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .pian-res-chip {
@@ -1063,6 +1153,12 @@ body {
 
 .pian-res-chip--testa { color: var(--text); }
 .pian-res-chip--gen   { color: var(--text-muted); }
+.pian-res-chip--acc {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-muted);
+  font-weight: 500;
+}
 
 .pian-res-accessories {
   color: var(--text-subtle);
@@ -1141,7 +1237,6 @@ body {
   }
 
   .pian-col-id,
-  .pian-col-status,
   .pian-col-action {
     grid-column: 1 / -1;
   }
@@ -1240,7 +1335,6 @@ body {
   }
 
   .pian-col-id,
-  .pian-col-status,
   .pian-col-action {
     grid-column: 1 / -1;
   }
@@ -2388,6 +2482,34 @@ a .nav-warn-badge {
   border-color: hsl(38 40% 28%);
   border-left-color: hsl(38 95% 55%);
 }
+
+/* Detail modal: open problems on the activity, with a way to them. */
+.det-problems {
+  margin-top: 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: hsl(38 90% 62%);
+}
+.det-problems[hidden] { display: none; }
+.det-problems-btn {
+  flex-shrink: 0;
+  padding: 0.4rem 1rem;
+  border: none;
+  border-radius: var(--radius);
+  background: hsl(45 95% 55%);
+  color: hsl(40 60% 10%);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.det-problems-btn:hover { background: hsl(45 95% 62%); }
+.det-problems-btn:focus-visible { outline: 2px solid hsl(45 95% 70%); outline-offset: 2px; }
 
 /* Clickable rows hint */
 .data-table tbody tr { cursor: pointer; }

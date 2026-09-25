@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-25
+
+### Changed
+
+- **TP60 Custom richiede 2 mandrini e 1 maschera.** Con il flag *TP60 Custom
+  (Sporgenza Tubo-Piastra)* i minimi degli accessori non sono piu' tutti a zero:
+  servono sempre 2 mandrini e 1 maschera, qualunque cosa dica la configurazione
+  della testa, e solo il tastatore non e' richiesto. Sono i minimi usati sia per
+  la preselezione nel wizard sia per i problemi di `acquisto`
+  (`ui.services.activity_inventory.TP60_CUSTOM_REQUIREMENTS`).
+
 ## 2026-09-10
 
 ### Added

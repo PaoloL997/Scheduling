@@ -4,8 +4,12 @@
 
   const AXIS_H = 44;
   const NS = 'http://www.w3.org/2000/svg';
-  const ROW_H = 38;
+  // Vertical rhythm: each activity row is its label (~12px) + bar + 12px of
+  // air, and an open commessa leaves the same 12px between its summary bar
+  // and the first activity label.
+  const ROW_H = 46;
   const HEADER_H = 36;
+  const HEADER_TASKS_GAP = 8;
   const BAR_H = 22;
   const GROUP_GAP = 16;
   // Inset the plot from the card edge so bars never sit flush (~5 mm at 96 dpi).
@@ -265,6 +269,48 @@
     return startedLate || overdue || pastDue;
   }
 
+  /** Calendar days an activity is behind plan; 0 exactly when ``taskIsLate``
+   *  is false. The largest of: days lost by a late start, days waiting to
+   *  start counting today (so the planned start day is already +1), and days
+   *  still open past the planned finish. */
+  function taskDelayDays(t, today) {
+    if (!taskIsLate(t, today)) return 0;
+    const DAY = 86400000;
+    const days = (a, b) => Math.round((a - b) / DAY);
+    const planS = parseDate(t.start);
+    const planF = parseDate(t.finish);
+    const actS = t.actual_start ? parseDate(t.actual_start) : null;
+    let delay = 0;
+    if (actS && !isNaN(planS) && actS > planS) delay = Math.max(delay, days(actS, planS));
+    if (!actS && !isNaN(planS) && today >= planS) delay = Math.max(delay, days(today, planS) + 1);
+    if (!t.actual_finish && !isNaN(planF) && today > planF) delay = Math.max(delay, days(today, planF));
+    return Math.max(delay, 1);
+  }
+
+  /** Home filter bar, shared by the Gantt and the kanban:
+   *  ``{ status: null | 'wip' | 'late' | 'completed' | 'todo', commessa, plant,
+   *     showCompletedJobs }``. A commessa whose activities are all completed is
+   *  left out unless ``showCompletedJobs`` is set or it is the one picked. */
+  function filterTasks(tasks, f, today) {
+    let all = tasks || [];
+    if (!f) return all;
+    if (!f.showCompletedJobs) {
+      const open = new Set();
+      all.forEach(t => { if (!taskIsCompleted(t)) open.add(t.commessa || t.job_id || 'unknown'); });
+      all = all.filter(t => {
+        const key = t.commessa || t.job_id || 'unknown';
+        return open.has(key) || key === f.commessa;
+      });
+    }
+    if (f.status === 'wip') all = all.filter(taskIsWip);
+    else if (f.status === 'late') all = all.filter(t => taskIsLate(t, today));
+    else if (f.status === 'completed') all = all.filter(taskIsCompleted);
+    else if (f.status === 'todo') all = all.filter(t => !t.actual_start);
+    if (f.commessa) all = all.filter(t => (t.commessa || t.job_id || 'unknown') === f.commessa);
+    if (f.plant) all = all.filter(t => (t.plant || '') === f.plant);
+    return all;
+  }
+
   /** Comparison key for an activity_id: a rename can change the case of the
    *  activity component without rewriting the predecessors pointing at it. */
   function normActivityId(value) {
@@ -337,10 +383,8 @@
       const planF = parseDate(t.finish);
       const actS = t.actual_start ? parseDate(t.actual_start) : null;
       const actF = t.actual_finish ? parseDate(t.actual_finish) : null;
-      if (!isNaN(planS)) {
-        if (actS && actS > planS) anyLate = true;
-        else if (!actS && !actF && today >= planS) anyLate = true;
-      }
+      // Same rule as the home "In ritardo" filter, so the label and the filter agree.
+      if (taskIsLate(t, today)) anyLate = true;
 
       if (hasDeadline && !isNaN(planS) && !isNaN(planF)) {
         const durMs = planF - planS;
@@ -459,6 +503,8 @@
       this.compareTasks = options.compareTasks || [];
       // Home stats filter: null | 'late' | 'wip' (totals card clears the filter).
       this.statFilter = null;
+      // Home filter bar: { status: null | 'wip' | 'late' | 'completed' | 'todo', commessa, plant: null | string }.
+      this.taskFilter = options.taskFilter || null;
       this._dataMinD = null;
       this._dataMaxD = null;
       this._bound = false;
@@ -487,15 +533,27 @@
     }
 
     displayTasks() {
-      const all = this.tasks || [];
-      if (!this.statFilter) return all;
-      if (this.statFilter === 'wip') return all.filter(taskIsWip);
-      if (this.statFilter === 'late') {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        return all.filter(t => taskIsLate(t, today));
+      let all = this.tasks || [];
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (this.statFilter === 'wip') all = all.filter(taskIsWip);
+      else if (this.statFilter === 'late') all = all.filter(t => taskIsLate(t, today));
+      return filterTasks(all, this.taskFilter, today);
+    }
+
+    setTaskFilter(filter) {
+      this.taskFilter = filter || null;
+      this._refitAndRender();
+    }
+
+    _refitAndRender() {
+      if (!this._fitLocked) {
+        const visible = this.displayTasks();
+        const basis = visible.length ? visible : this.tasks;
+        if (this.view === 'horizon') this.applyHorizonToData(basis);
+        else if (this.fitToData) this.applyFitToData(basis);
       }
-      return all;
+      this._renderCurrent();
     }
 
     _renderCurrent() {
@@ -511,13 +569,7 @@
       if (next && this.statFilter === next) next = null;
       this.statFilter = next;
       this._syncStatFilterUI();
-      if (!this._fitLocked) {
-        const visible = this.displayTasks();
-        const basis = visible.length ? visible : this.tasks;
-        if (this.view === 'horizon') this.applyHorizonToData(basis);
-        else if (this.fitToData) this.applyFitToData(basis);
-      }
-      this._renderCurrent();
+      this._refitAndRender();
     }
 
     _syncStatFilterUI() {
@@ -705,8 +757,10 @@
       this.tasks = tasks || [];
       this.deadlines = deadlines || {};
       if (!this._fitLocked) {
-        if (this.view === 'horizon') this.applyHorizonToData(this.tasks);
-        else if (this.fitToData) this.applyFitToData(this.tasks);
+        const visible = this.displayTasks();
+        const basis = visible.length ? visible : this.tasks;
+        if (this.view === 'horizon') this.applyHorizonToData(basis);
+        else if (this.fitToData) this.applyFitToData(basis);
       }
       if (this.enableStats) this.updateStats(this.tasks);
       this.renderWhenReady();
@@ -877,11 +931,17 @@
     }
 
     render(tasks, view) {
-      if (!tasks.length || this._rendering) return;
+      if (this._rendering) return;
       const barsEl = this.el('bars-scroll');
       const axisSvg = this.el('axis-svg');
       const barsSvg = this.el('bars-svg');
       if (!barsEl || !axisSvg || !barsSvg) return;
+      if (!tasks.length) {
+        // A filter can leave nothing to draw: clear the previous bars.
+        axisSvg.innerHTML = '';
+        barsSvg.innerHTML = '';
+        return;
+      }
       this._rendering = true;
       try {
 
@@ -1007,6 +1067,9 @@
         const spanEnd = new Date(Math.max(...allFinish.map(d => d.getTime())));
         const summaryX1 = Math.max(dateToX(spanStart), clipL);
         const summaryX2 = Math.min(dateToX(spanEnd), clipR);
+        // Nothing of this commessa falls in the window: drop the row instead
+        // of leaving an empty gap between the visible ones.
+        if (!visibleTasks.length && summaryX2 <= summaryX1) return;
         const groupKey = g.commessa || g.job_id;
         const expanded = this._isGroupExpanded(groupKey);
         const layoutTasks = expanded ? visibleTasks : [];
@@ -1021,6 +1084,7 @@
       pendingGroups.forEach(meta => {
         const headerY = yOffset;
         yOffset += HEADER_H;
+        if (meta.layoutTasks.length) yOffset += HEADER_TASKS_GAP;
         const taskEntries = meta.layoutTasks.map(row => {
           const y = yOffset;
           yOffset += ROW_H;
@@ -1151,7 +1215,7 @@
           lbl.setAttribute('x', g.summaryX1 + 6);
           lbl.setAttribute('y', sumY - 5);
           lbl.setAttribute('fill', g.colour);
-          lbl.setAttribute('font-size', '12');
+          lbl.setAttribute('font-size', '14');
           lbl.setAttribute('font-weight', '700');
           lbl.setAttribute('font-family', '-apple-system,BlinkMacSystemFont,sans-serif');
           if (self.collapsibleGroups) {
@@ -1168,7 +1232,7 @@
             const attLabel = stats.total === 1 ? '1 att.' : (stats.total + ' att.');
             const metaSpan = document.createElementNS(NS, 'tspan');
             metaSpan.setAttribute('fill', theme.metaText);
-            metaSpan.setAttribute('font-size', '11');
+            metaSpan.setAttribute('font-size', '13');
             metaSpan.setAttribute('font-weight', '650');
             metaSpan.setAttribute('letter-spacing', '0.01em');
             metaSpan.textContent = '  ·  ' + attLabel + '  ·  ' + stats.pct + '%';
@@ -1178,7 +1242,7 @@
               'fill',
               (theme.statusColors && theme.statusColors[stats.status]) || theme.metaText
             );
-            statusSpan.setAttribute('font-size', '11');
+            statusSpan.setAttribute('font-size', '13');
             statusSpan.setAttribute('font-weight', '650');
             statusSpan.setAttribute('letter-spacing', '0.01em');
             statusSpan.textContent = '  ·  ' + stats.status;
@@ -1211,7 +1275,7 @@
             const dlFmt = dlDate.toLocaleDateString('it-IT', {
               day: '2-digit', month: '2-digit', year: '2-digit',
             });
-            const ownH = HEADER_H + (g.tasks.length ? g.tasks.length * ROW_H : 0);
+            const ownH = HEADER_H + (g.tasks.length ? HEADER_TASKS_GAP + g.tasks.length * ROW_H : 0);
             const dlTop = g.headerY + HEADER_H;
             const dlBot = g.headerY + ownH;
 
@@ -1375,12 +1439,6 @@
           const isStarted = !!(row.actual_start);
           const isCompleted = !!(row.actual_start && row.actual_finish);
           const isOverdue = !isStarted && today >= planS;
-          const isLate = !!(row.actual_start && parseDate(row.actual_start) > planS);
-          // Still open past the planned finish: late even if it started on time.
-          const isPastDue = !row.actual_finish && today > planF;
-          // Never started and already past the planned finish: the plan is
-          // stale. Mirrors _compute_activity_status in ui/views.py.
-          const isExpired = !isStarted && isPastDue;
           const boxStrokeW = (!self.simplified && isOverdue) ? '1.5' : (changed ? '2' : '1');
           const boxStrokeOp = theme.barStrokeOpacity;
 
@@ -1435,6 +1493,22 @@
             };
             if (tx2 > tx1) drawActualPart(tx1, midY - TAIL_H / 2, tx2 - tx1, TAIL_H, '0.90');
             if (actX1raw + TICK_W >= clipL && actX1raw <= clipR) drawTickAt(actX1raw);
+            if (actX1raw + TICK_W < clipL) {
+              // The start tick is cut off by the left edge: a small arrow on
+              // the edge says the activity did start, earlier than the view.
+              const ARROW_W = 7, ARROW_H = 10;
+              const arrow = document.createElementNS(NS, 'polygon');
+              arrow.setAttribute('points', [
+                clipL + ',' + midY,
+                (clipL + ARROW_W) + ',' + (midY - ARROW_H / 2),
+                (clipL + ARROW_W) + ',' + (midY + ARROW_H / 2),
+              ].join(' '));
+              arrow.setAttribute('fill', C);
+              arrow.setAttribute('opacity', '0.95');
+              arrow.setAttribute('data-start-offscreen', '1');
+              arrow.setAttribute('pointer-events', 'none');
+              barsSvg.appendChild(arrow);
+            }
             // While overrunning, the end tick sits on today alone: the
             // estimated end is where the dashes start, not a second end.
             if (!overrunEnd && actX2raw >= clipL && actX2raw - TICK_W <= clipR) {
@@ -1478,42 +1552,31 @@
           }
 
           if (!self.simplified) {
-            const BADGE_H = 16, BADGE_RX = 5, BADGE_PAD = 10, GAP = 6, BADGE_FONT = 9;
-            const SLATE = 'hsl(220,14%,38%)';
-            const charW = BADGE_FONT * 0.60;
-            const badges = [];
-            if (isCompleted) badges.push({ text: '✓ COMPLETATA', color: 'hsl(142,55%,40%)' });
-            else {
-              if (isLate || isOverdue || isPastDue) badges.push({ text: 'IN RITARDO', color: RED });
-              if (isStarted) badges.push({ text: 'IN LAVORAZIONE', color: SLATE });
-              else if (isExpired) badges.push({ text: 'NON INIZIATA · SCADUTA', color: 'hsl(18,90%,48%)' });
-              else badges.push({ text: isOverdue ? 'DA INIZIARE' : 'PIANIFICATA', color: SLATE });
-            }
-            let bx = Math.max(badgeAnchorX, clipL) + BADGE_PAD;
-            badges.forEach(({ text, color, plain, keep }) => {
-              const bw = Math.ceil(text.length * charW) + (plain ? 0 : 14);
-              if (!keep && bx + bw > totalW + 100) return;
-              const by = midY - BADGE_H / 2;
-              if (!plain) {
-                const bg = document.createElementNS(NS, 'rect');
-                bg.setAttribute('x', bx); bg.setAttribute('y', by);
-                bg.setAttribute('width', bw); bg.setAttribute('height', BADGE_H);
-                bg.setAttribute('rx', BADGE_RX); bg.setAttribute('fill', color);
-                bg.setAttribute('opacity', '0.92'); bg.setAttribute('pointer-events', 'none');
-                barsSvg.appendChild(bg);
+            const PAD = 10, GAP = 8, DELAY_FONT = 12;
+            let bx = Math.max(badgeAnchorX, clipL) + PAD;
+            // No status badges, only plain text after the bar: a closed
+            // activity reads "Completata" in green, a late one "+N gg" in red
+            // (a closed activity is never late, so at most one shows).
+            const delay = taskDelayDays(row, today);
+            const note = isCompleted
+              ? { text: 'Completata', color: 'hsl(142,60%,52%)' }
+              : (delay > 0 ? { text: '+' + delay + ' gg', color: RED } : null);
+            if (note) {
+              const text = note.text;
+              const bw = Math.ceil(text.length * DELAY_FONT * 0.62);
+              if (bx + bw <= totalW + 100) {
+                const bt = document.createElementNS(NS, 'text');
+                bt.setAttribute('x', bx);
+                bt.setAttribute('y', midY + DELAY_FONT * 0.36);
+                bt.setAttribute('fill', note.color);
+                bt.setAttribute('font-size', DELAY_FONT);
+                bt.setAttribute('font-weight', '700');
+                bt.setAttribute('pointer-events', 'none');
+                bt.textContent = text;
+                barsSvg.appendChild(bt);
+                bx += bw + GAP;
               }
-              const bt = document.createElementNS(NS, 'text');
-              bt.setAttribute('x', plain ? bx : bx + bw / 2);
-              bt.setAttribute('y', by + BADGE_H / 2 + 3.5);
-              bt.setAttribute('fill', plain ? 'hsl(220,10%,62%)' : 'white');
-              bt.setAttribute('font-size', BADGE_FONT);
-              bt.setAttribute('font-weight', plain ? '500' : '700');
-              bt.setAttribute('text-anchor', plain ? 'start' : 'middle');
-              bt.setAttribute('pointer-events', 'none');
-              bt.textContent = text;
-              barsSvg.appendChild(bt);
-              bx += bw + GAP;
-            });
+            }
             if (self.enableWarningNav && !isCompleted && row.warning_count > 0) {
               // Always surface unresolved problems: the warning badge is drawn
               // even when the bar sits near the right edge (it stays within the
@@ -1766,5 +1829,7 @@
   GanttChart.computeFitViewport = computeFitViewport;
   GanttChart.computeHorizonViewport = computeHorizonViewport;
   GanttChart.summarizeCommessaTasks = summarizeCommessaTasks;
+  GanttChart.taskDelayDays = taskDelayDays;
+  GanttChart.filterTasks = filterTasks;
   global.GanttChart = GanttChart;
 })(typeof window !== 'undefined' ? window : this);

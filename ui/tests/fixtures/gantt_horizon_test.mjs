@@ -57,6 +57,40 @@ assert(typeof GanttChart.summarizeCommessaTasks === 'function', 'summarizeCommes
   ]);
   assert(s2.status === 'In ritardo', `late start should be In ritardo, got ${s2.status}`);
 
+  // Delay badge days: late start, waiting to start (planned start day = +1),
+  // open past finish; closed or on-time activities are 0.
+  const d = GanttChart.taskDelayDays;
+  const today = new Date(2026, 8, 25);
+  assert(d({ start: '2026-09-20', finish: '2026-10-20', actual_start: '2026-09-23' }, today) === 3, 'late start +3');
+  assert(d({ start: '2026-09-25', finish: '2026-10-20' }, today) === 1, 'not started on start day +1');
+  assert(d({ start: '2026-09-20', finish: '2026-10-20' }, today) === 6, 'not started 5 days after start +6');
+  assert(d({ start: '2026-09-01', finish: '2026-09-15', actual_start: '2026-09-01' }, today) === 10, 'open past finish +10');
+  assert(d({ start: '2026-09-01', finish: '2026-09-15', actual_start: '2026-09-05', actual_finish: '2026-09-20' }, today) === 0, 'closed is 0');
+  assert(d({ start: '2026-10-01', finish: '2026-10-15' }, today) === 0, 'future is 0');
+
+  // Home filter: a commessa with every activity completed is hidden unless
+  // asked for, or picked by name; an open commessa keeps its completed ones.
+  {
+    const ft = GanttChart.filterTasks;
+    const list = [
+      { commessa: 'DONE', actual_start: '2026-09-01', actual_finish: '2026-09-05' },
+      { commessa: 'OPEN', actual_start: '2026-09-01', actual_finish: '2026-09-05' },
+      { commessa: 'OPEN', start: '2026-10-01', finish: '2026-10-05' },
+    ];
+    const keys = f => ft(list, f, today).map(t => t.commessa).join(',');
+    assert(keys({}) === 'OPEN,OPEN', `completed commessa must be hidden by default, got ${keys({})}`);
+    assert(keys({ showCompletedJobs: true }) === 'DONE,OPEN,OPEN', 'showCompletedJobs must bring it back');
+    assert(keys({ commessa: 'DONE' }) === 'DONE', 'picking the completed commessa must show it');
+    assert(ft(list, null, today).length === 3, 'no filter object (other pages) keeps every task');
+  }
+
+  // Started late but already completed: not late, same as the home "In ritardo" filter.
+  const sDoneLate = GanttChart.summarizeCommessaTasks([
+    { start: '2099-06-01', finish: '2099-06-05', actual_start: '2099-06-03', actual_finish: '2099-06-04' },
+    { start: '2099-06-08', finish: '2099-06-12' },
+  ]);
+  assert(sDoneLate.status === 'In tempo', `completed late start should be In tempo, got ${sDoneLate.status}`);
+
   // Duration 4 calendar days; actual start 01/06 → projected end 05/06 > deadline 04/06.
   const s3 = GanttChart.summarizeCommessaTasks([
     { start: '2099-06-01', finish: '2099-06-05', actual_start: '2099-06-01' },

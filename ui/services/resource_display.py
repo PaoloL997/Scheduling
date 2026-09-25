@@ -99,13 +99,17 @@ def format_activity_resources_html(risorse: Iterable) -> str:
         for rid in grouped[tipo]:
             parts.append(f'<span class="pian-res-chip {css}">{escape(rid)}</span>')
 
-    accessories = grouped["mandrino"] + grouped["tastatore"] + grouped["maschera"]
-    n_accessories = len(accessories)
-    if n_accessories:
-        label = "accessorio" if n_accessories == 1 else "accessori"
-        parts.append(
-            f'<span class="pian-res-accessories">+ {n_accessories} {label}</span>'
-        )
+    # Accessories are shown in full too, one chip each.
+    for tipo, label in (
+        ("mandrino", "Mandrino"),
+        ("tastatore", "Tastatore"),
+        ("maschera", "Maschera"),
+    ):
+        for rid in grouped[tipo]:
+            parts.append(
+                f'<span class="pian-res-chip pian-res-chip--acc" title="{label}">'
+                f"{escape(rid)}</span>"
+            )
 
     tooltip_attr = ""
     if fmt["tooltip"]:

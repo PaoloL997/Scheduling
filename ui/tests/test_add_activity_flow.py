@@ -265,8 +265,8 @@ class AddActivityFlowTests(TestCase):
         att = Attivita.objects.get(commessa="C004", item="1", activity="Qualifica")
         self.assertTrue(att.tp60_custom)
 
-    def test_tp60_custom_skips_consumable_warnings(self) -> None:
-        """Deselected consumables raise no problem when the flag is set."""
+    def test_tp60_custom_skips_tastatore_warning(self) -> None:
+        """With 2 mandrini and 1 maschera, a missing tastatore raises no problem."""
         Job.objects.create(commessa="C005")
         ConfigurazioneTesta.objects.create(
             modello_testa="TP60", min_mandrini=2, min_maschere=2
@@ -279,7 +279,12 @@ class AddActivityFlowTests(TestCase):
             "stabilimento": "Valbrembo",
             "data_inizio": "2026-06-10",
             "data_fine": "2026-06-12",
-            "risorse": {"teste": ["T1"], "generatori": ["G1"]},
+            "risorse": {
+                "teste": ["T1"],
+                "generatori": ["G1"],
+                "mandrini": ["M1", "M2"],
+                "maschere": ["MA1"],
+            },
         }
 
         resp = self._post_activity({**payload, "tp60_custom": True})

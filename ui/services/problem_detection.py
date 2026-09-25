@@ -90,8 +90,8 @@ def resource_shortfalls(
         counts: Number of selected resources keyed by wizard category
             (``teste``, ``mandrini``, ``tastatori``, ``maschere``,
             ``generatori``).  Missing keys count as zero.
-        tp60_custom: When ``True`` the consumable categories (mandrini,
-            tastatori, maschere) have no minimum, per
+        tp60_custom: When ``True`` the consumable minimums are the fixed
+            TP60 Custom ones (2 mandrini, 1 maschera, no tastatore), per
             :func:`~ui.services.activity_inventory.get_testa_min_requirements`.
 
     Returns:
@@ -264,9 +264,9 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
       for a given category.  The missing ones must be sourced externally
       (purchase, rental, or loan).
 
-    Activities flagged ``tp60_custom`` (Sporgenza Tubo-Piastra) have no minimum
-    on the consumable categories, so leaving mandrini/tastatori/maschere
-    unselected raises no ``acquisto`` note.
+    Activities flagged ``tp60_custom`` (Sporgenza Tubo-Piastra) need 2
+    mandrini and 1 maschera whatever the testa configuration says, and no
+    tastatore: leaving the tastatore unselected raises no ``acquisto`` note.
 
     Open ``acquisto`` / ``spostamento`` notes are reconciled with the current
     selection: stale ones are auto-resolved, still-valid ones get an updated

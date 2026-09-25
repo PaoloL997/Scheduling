@@ -101,16 +101,14 @@
           <div class="pian-activities" data-commessa="{{ group.job.commessa }}">
             {% if group.activities %}
               <div class="pian-activity-table-head" aria-hidden="true">
-                <span>Attività</span>
+                <span>Item · Attività</span>
                 <span>Inizio</span>
                 <span>Fine</span>
                 <span>Inizio eff.</span>
                 <span>Fine eff.</span>
-                <span>Stato</span>
+                <span>Ritardo</span>
                 <span>Stabilimento</span>
-                <span>Responsabile</span>
                 <span>Risorse</span>
-                <span>Dipendenze</span>
                 <span></span>
               </div>
               {% for task in group.activities %}
@@ -140,7 +138,7 @@
                    data-tube-pitch="{{ task.tube_pitch|default:'' }}"
                    data-predecessors="{{ task.predecessors|default:'' }}"
                    onclick="openDetailModal(this, 'task')">
-                <span class="pian-col-id">{{ task.activity_id }}</span>
+                <span class="pian-col-id" title="{{ task.activity_id }}">{{ task.activity_id }}</span>
                 <span class="pian-col-date pian-col-date--planned-start">
                   <strong>{{ task.start|default:"—" }}</strong>
                 </span>
@@ -149,14 +147,9 @@
                 </span>
                 <span class="pian-col-date pian-col-date--actual-start">{{ task.actual_start|default:"—" }}</span>
                 <span class="pian-col-date pian-col-date--actual-finish">{{ task.actual_finish|default:"—" }}</span>
-                {# Single source of truth: _compute_activity_status in ui/views.py. #}
-                <span class="pian-col-status">
-                  {% for pill in task.status_pills %}<span class="status-pill status-pill--{{ pill.key }}">{{ pill.label }}</span>{% empty %}<span class="status-pill status-pill--da_iniziare">DA INIZIARE</span>{% endfor %}
-                </span>
+                <span class="pian-col-delay"></span>
                 <span class="pian-col-stab stab-plant-cell" data-stab="{{ task.plant|default:'' }}">{{ task.plant|default:"—" }}</span>
-                <span class="pian-col-resp">{{ task.responsible|default:"—" }}</span>
                 <span class="pian-col-res">{% if task.resources_html %}{{ task.resources_html|safe }}{% else %}—{% endif %}</span>
-                <span class="pian-col-pred">{{ task.predecessors|default:"Nessuna" }}</span>
                 <span class="pian-col-action">
                   {% if task.orm_id %}
                     {% if task.warning_count %}
@@ -325,7 +318,7 @@
         </svg>
         <span class="drop-zone-label">Trascina il PDF oppure <span class="drop-zone-link">sfoglia</span></span>
         <span id="s1-fname" class="drop-zone-fname"></span>
-        <span class="drop-zone-hint">Formato: <code>ModelloTesta_Commessa[_Item].pdf</code></span>
+        <span class="drop-zone-hint">Formato: <code>ModelloTesta_Commessa[_Disegno].pdf</code></span>
       </label>
       <input id="s1-file-input" type="file" accept=".pdf" style="display:none;" onchange="s1HandleSelect(this);">
     </div>
@@ -357,8 +350,12 @@
           </div>
         </div>
         <div class="wiz-field">
-          <label>Disegno+item</label>
-          <input id="s1-item" type="text" placeholder="es. DG123+01" value="1" oninput="_s1CommessaItemChange()">
+          <label>Disegno</label>
+          <input id="s1-disegno" type="text" placeholder="es. DG123" oninput="_s1CommessaItemChange()">
+        </div>
+        <div class="wiz-field">
+          <label>Item</label>
+          <input id="s1-item" type="text" placeholder="es. 01" oninput="_s1CommessaItemChange()">
         </div>
         <div class="wiz-field">
           <label>Attività <span class="req">*</span></label>
@@ -401,15 +398,14 @@
           </div>
         </div>
 
-        <!-- TP60 Custom: consumabili facoltativi per questa lavorazione -->
+        <!-- TP60 Custom: 2 mandrini e 1 maschera, nessun tastatore -->
         <label class="wiz-flag-check" for="s1-tp60-custom">
           <input id="s1-tp60-custom" type="checkbox">
           <span class="wiz-flag-check-text">
             <span class="wiz-flag-check-title">TP60 Custom (Sporgenza Tubo-Piastra)</span>
             <span class="wiz-flag-check-hint">
-              Restano obbligatori solo testa e generatore: i consumabili
-              (tastatore, mandrino, maschera) non vengono preselezionati e, se
-              lasciati vuoti, non vengono segnalati come problema.
+              Richiede 2 mandrini e 1 maschera; il tastatore non è
+              richiesto e, se lasciato vuoto, non viene segnalato come problema.
             </span>
           </span>
         </label>
@@ -756,6 +752,10 @@
     </div>
     <div class="det-body-wrap">
       <div id="det-body" class="det-grid"></div>
+      <div id="det-problems" class="det-problems" hidden>
+        <span id="det-problems-text"></span>
+        <button type="button" class="det-problems-btn" onclick="openProblemsFromDetail()">Risolvi</button>
+      </div>
       <div id="det-error" class="det-error" style="display:none;"></div>
     </div>
     <div class="det-footer">
@@ -801,6 +801,24 @@ const buildJobId = (commessa) => _enc(commessa);
 const _normalizeItem = (item, fallback = '1') => {
   const value = String(item ?? '').trim();
   return value || fallback;
+};
+// Disegno and Item are entered separately but stored together as the
+// activity item (``{disegno}-{item}``), so the id reads commessa-disegno-item-attività.
+const _s1ItemValue = () => {
+  const disegno = document.getElementById('s1-disegno').value.trim();
+  const item = document.getElementById('s1-item').value.trim();
+  return _normalizeItem(item ? `${disegno}-${item}` : disegno);
+};
+// Inverse of _s1ItemValue: "DG123-01" -> { disegno:'DG123', itemCode:'01' };
+// a value without "-" is the disegno alone.
+const _splitDisegnoItem = (value) => {
+  const raw = String(value ?? '').trim();
+  const i = raw.lastIndexOf('-');
+  return i > 0 ? { disegno: raw.slice(0, i), itemCode: raw.slice(i + 1) } : { disegno: raw, itemCode: '' };
+};
+const _disegnoItemLabel = (value) => {
+  const { disegno, itemCode } = _splitDisegnoItem(value);
+  return [disegno && `disegno ${disegno}`, itemCode && `item ${itemCode}`].filter(Boolean).join(' · ');
 };
 const buildActivityId = (commessa, item, attivita) => `${_enc(commessa)}-${_enc(_normalizeItem(item))}-${_enc(attivita || '')}`;
 let _selectedPianCommessa = '';
@@ -954,10 +972,8 @@ function _pianVisibleRowsForCommessa(commessa) {
 }
 
 function _pianActivityState(row) {
-  const pills = Array.from(row.querySelectorAll('.status-pill'))
-    .flatMap(p => Array.from(p.classList))
-    .filter(c => c.startsWith('status-pill--'))
-    .map(c => c.replace('status-pill--', ''));
+  const ds = row.dataset;
+  const pills = _computeActivityStatus(ds.start, ds.finish, ds.actualStart, ds.actualFinish).map(p => p.key);
   if (pills.includes('in_ritardo')) return 'in_ritardo';
   if (pills.includes('in_lavorazione') || pills.includes('in_lavorazione_ritardo')) return 'in_lavorazione';
   if (pills.includes('completata')) return 'completata';
@@ -1095,6 +1111,32 @@ function _pianRowStartMs(row) {
   return d ? d.getTime() : Number.POSITIVE_INFINITY;
 }
 
+// Row label inside a disegno group: commessa and disegno are already in the headers.
+function _pianRowLabel(ds) {
+  const { itemCode } = _splitDisegnoItem(ds.item);
+  return [itemCode, ds.activity].filter(Boolean).join(' · ') || ds.activityId || '—';
+}
+
+function _pianDisegnoHeadHtml(disegno, n) {
+  const chevron = `<svg class="pian-disegno-chevron" width="10" height="10" viewBox="0 0 14 14" fill="none" aria-hidden="true"><polyline points="2,4 7,10 12,4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const icon = `<svg class="pian-disegno-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.5 1.75h6l3 3v9.5h-9z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 1.75v3h3M5.75 8.5h4.5M5.75 11h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  return `<div class="pian-disegno-head" role="button" tabindex="0" aria-expanded="true"
+               onclick="togglePianDisegno(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();togglePianDisegno(this);}">
+      ${chevron}${icon}
+      <span class="pian-disegno-name${disegno ? '' : ' is-empty'}">${disegno ? `<span class="pian-disegno-lbl">Disegno</span> ${esc(disegno)}` : 'Senza disegno'}</span>
+      <span class="pian-disegno-count">${n} attività</span>
+    </div>`;
+}
+
+function togglePianDisegno(head) {
+  const group = head.closest('.pian-disegno-group');
+  if (!group) return;
+  const collapsed = group.classList.toggle('is-collapsed');
+  head.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+// Rebuild a commessa's rows as disegno groups; rows (and groups, by their
+// earliest row) are ordered by planned start.
 function sortPianActivitiesInHost(host) {
   if (!host) return;
   const head = host.querySelector('.pian-activity-table-head');
@@ -1105,8 +1147,42 @@ function sortPianActivitiesInHost(host) {
     if (startA !== startB) return startA - startB;
     return String(a.dataset.activityId || '').localeCompare(String(b.dataset.activityId || ''), 'it');
   });
-  rows.forEach(row => host.appendChild(row));
+  const oldGroups = Array.from(host.querySelectorAll('.pian-disegno-group'));
+  const collapsed = new Set(oldGroups.filter(g => g.classList.contains('is-collapsed')).map(g => g.dataset.disegno));
+  const byDisegno = new Map();
+  rows.forEach(row => {
+    const disegno = _splitDisegnoItem(row.dataset.item).disegno;
+    if (!byDisegno.has(disegno)) byDisegno.set(disegno, []);
+    byDisegno.get(disegno).push(row);
+  });
+  byDisegno.forEach((groupRows, disegno) => {
+    const group = document.createElement('div');
+    group.className = 'pian-disegno-group';
+    group.dataset.disegno = disegno;
+    group.innerHTML = _pianDisegnoHeadHtml(disegno, groupRows.length);
+    if (collapsed.has(disegno)) {
+      group.classList.add('is-collapsed');
+      group.firstElementChild.setAttribute('aria-expanded', 'false');
+    }
+    groupRows.forEach(row => {
+      const idCell = row.querySelector('.pian-col-id');
+      if (idCell) idCell.textContent = _pianRowLabel(row.dataset);
+      _pianRenderRowState(row);
+      group.appendChild(row);
+    });
+    host.appendChild(group);
+  });
+  oldGroups.forEach(g => g.remove());
   if (head) host.insertBefore(head, host.firstChild);
+  _pianSyncDisegnoVisibility(host);
+}
+
+function _pianSyncDisegnoVisibility(host) {
+  if (!host) return;
+  host.querySelectorAll('.pian-disegno-group').forEach(g => {
+    const anyVisible = Array.from(g.querySelectorAll('.pian-activity-row')).some(r => r.dataset.searchHidden !== '1');
+    g.style.display = anyVisible ? '' : 'none';
+  });
 }
 
 function sortPianGroupList() {
@@ -1298,9 +1374,9 @@ function openAddModal(opts) {
   document.getElementById('s1-next-btn').style.display = 'none';
   const tp60El = document.getElementById('s1-tp60-custom');
   if (tp60El) tp60El.checked = false;
-  ['s1-testa','s1-commessa','s1-item','s1-attivita','s1-bore-min','s1-bore-mid','s1-bore-max','s1-passo'].forEach(id => {
+  ['s1-testa','s1-commessa','s1-disegno','s1-item','s1-attivita','s1-bore-min','s1-bore-mid','s1-bore-max','s1-passo'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) { el.value = id === 's1-item' ? '1' : ''; el.style.background = ''; el.style.borderColor = ''; }
+    if (el) { el.value = ''; el.style.background = ''; el.style.borderColor = ''; }
   });
   _s1TestaCloseDropdown();
   const commessaInput = document.getElementById('s1-commessa');
@@ -1325,7 +1401,7 @@ function openAddModal(opts) {
   if (_pianLockedJob) {
     step1Skip();
     document.getElementById('s1-commessa').value = _pianLockedJob;
-    _s1CheckCommessa(_pianLockedJob, document.getElementById('s1-item').value);
+    _s1CheckCommessa(_pianLockedJob, _s1ItemValue());
   }
   _syncS1AttivitaHint();
   document.addEventListener('keydown', _wizEsc);
@@ -1400,7 +1476,7 @@ async function _s1Upload(file) {
 
 async function _s1CheckCommessa(commessa, itemVal) {
   const status = document.getElementById('s1-commessa-status');
-  const item = _normalizeItem(itemVal || document.getElementById('s1-item').value);
+  const item = _normalizeItem(itemVal || _s1ItemValue());
   WIZ.predecessors = [];
   WIZ.predecessorItems = [];
   if (!commessa) {
@@ -1549,7 +1625,7 @@ function _s1PredecessorsHtml(items) {
         </label>
         ${items.map(a => {
           const label = a.activity || a.activity_id;
-          const itemLbl = a.item != null && a.item !== '' ? `item ${a.item}` : '';
+          const itemLbl = _disegnoItemLabel(a.item);
           const dates = [a.start, a.finish].filter(Boolean).join(' → ');
           const meta = [itemLbl, a.activity_id, dates].filter(Boolean).join(' · ');
           return `<label class="s1-predecessor-item">
@@ -1652,13 +1728,13 @@ async function _s1CommessaChange(val) {
     document.getElementById('s1-commessa-status').style.display = 'none';
     return;
   }
-  await _s1CheckCommessa(commessa, document.getElementById('s1-item').value);
+  await _s1CheckCommessa(commessa, _s1ItemValue());
 }
 
 async function _s1CommessaItemChange() {
   const commessa = document.getElementById('s1-commessa').value.trim();
   if (!commessa) return;
-  await _s1CheckCommessa(commessa, document.getElementById('s1-item').value);
+  await _s1CheckCommessa(commessa, _s1ItemValue());
 }
 
 function _s1ShowError(msg) {
@@ -1690,7 +1766,7 @@ function _s1ContinueToPredecessor() {
   const commessa = document.getElementById('s1-commessa').value.trim();
   WIZ.modello_testa = document.getElementById('s1-testa').value.trim();
   WIZ.commessa      = commessa;
-  WIZ.item          = _normalizeItem(document.getElementById('s1-item').value);
+  WIZ.item          = _s1ItemValue();
   WIZ.attivita      = document.getElementById('s1-attivita').value.trim();
   WIZ.tp60Custom    = !!document.getElementById('s1-tp60-custom')?.checked;
   const _n = v => { const f = parseFloat(v); return isNaN(f) ? null : f; };
@@ -1724,6 +1800,9 @@ function _s1ValidateAttivita() {
   if (!attivita) {
     return 'Seleziona un tipo attività.';
   }
+  if (document.getElementById('s1-item')?.value.trim() && !document.getElementById('s1-disegno')?.value.trim()) {
+    return "Indica il disegno a cui appartiene l'item.";
+  }
   return '';
 }
 
@@ -1744,7 +1823,7 @@ async function step1Next() {
   }
   errEl.style.display = 'none';
   document.getElementById('s1-commessa').style.borderColor = '';
-  await _s1CheckCommessa(commessa, document.getElementById('s1-item').value);
+  await _s1CheckCommessa(commessa, _s1ItemValue());
   if (WIZ.newJob && !WIZ.newJob.delivery_date) {
     _s1OpenCommessaStep(commessa);
     return;
@@ -1768,7 +1847,8 @@ function _s1ShowDataPanel(autofill) {
     };
     setF('s1-testa',    p.modello_testa,   true);
     setF('s1-commessa', p.commessa,         true);
-    setF('s1-item',     p.item != null ? p.item : 1, false);
+    setF('s1-disegno',  p.item != null ? p.item : '', false);
+    setF('s1-item',     '', false);
     document.getElementById('s1-attivita').value = '';
     setF('s1-bore-min', b.min,              true);
     setF('s1-bore-mid', b.mid,              true);
@@ -1817,7 +1897,7 @@ function _renderPredecessorStep() {
       </label>
       ${items.map(a => {
         const label = a.activity || a.activity_id;
-        const itemLbl = a.item != null && a.item !== '' ? `item ${a.item}` : '';
+        const itemLbl = _disegnoItemLabel(a.item);
         const dates = [a.start, a.finish].filter(Boolean).join(' → ');
         const meta = [itemLbl, a.activity_id, dates].filter(Boolean).join(' · ');
         return `<label class="s1-predecessor-item">
@@ -2752,7 +2832,7 @@ function _s6BuildRiepilogo() {
   const inventoryMap = window._S5_INVENTORY_MAP || {};
   const invStore = _RISORSE_DATA_STORES.s5 || {};
   const mins = r.minRequirements || (r.tp60Custom
-    ? { teste: 1, mandrini: 0, tastatori: 0, maschere: 0, generatori: 1 }
+    ? { teste: 1, mandrini: 2, tastatori: 0, maschere: 1, generatori: 1 }
     : { teste: 1, mandrini: 1, tastatori: 1, maschere: 1, generatori: 1 });
   const catLabels = {
     teste: 'Teste', mandrini: 'Mandrini', tastatori: 'Tastatori',
@@ -2838,7 +2918,7 @@ function _s6BuildRiepilogo() {
       ${r.tp60Custom ? `
       <div class="s6-recap-item full-width">
         <span class="s6-recap-label">TP60 Custom</span>
-        <span class="s6-recap-value">Sporgenza Tubo-Piastra — consumabili facoltativi</span>
+        <span class="s6-recap-value">Sporgenza Tubo-Piastra — 2 mandrini, 1 maschera, nessun tastatore</span>
       </div>` : ''}
     </div>
     <div class="s6-recap-right">
@@ -2941,8 +3021,40 @@ function _computeActivityStatus(start, finish, actualStart, actualFinish) {
   return pills;
 }
 
-function _statusPillsHtml(pills) {
-  return pills.map(p => `<span class="status-pill status-pill--${p.key}">${p.label}</span>`).join('');
+// Same rules as taskIsLate / taskDelayDays in gantt.js: calendar days behind
+// plan, the largest of a late start, days waiting to start (the planned start
+// day already counts +1) and days still open past the planned finish.
+function _pianDelayDays(ds) {
+  const day = s => {
+    const [y, m, d] = String(s || '').slice(0, 10).split('-').map(Number);
+    return y && m && d ? new Date(y, m - 1, d) : null;
+  };
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const planS = day(ds.start), planF = day(ds.finish);
+  const actS = day(ds.actualStart), actF = day(ds.actualFinish);
+  if (actS && actF) return 0;
+  const startedLate = !!(actS && planS && actS > planS);
+  const overdue = !!(!actS && planS && today >= planS);
+  const pastDue = !!(!actF && planF && today > planF);
+  if (!startedLate && !overdue && !pastDue) return 0;
+  const days = (a, b) => Math.round((a - b) / 86400000);
+  let delay = 0;
+  if (startedLate) delay = Math.max(delay, days(actS, planS));
+  if (overdue) delay = Math.max(delay, days(today, planS) + 1);
+  if (pastDue) delay = Math.max(delay, days(today, planF));
+  return Math.max(delay, 1);
+}
+
+// Delay column ("+N gg" in red, like the Gantt) and green row once completed.
+function _pianRenderRowState(row) {
+  const ds = row.dataset;
+  const completed = !!ds.actualFinish;
+  row.classList.toggle('is-completed', completed);
+  const cell = row.querySelector('.pian-col-delay');
+  if (!cell) return;
+  const delay = completed ? 0 : _pianDelayDays(ds);
+  cell.textContent = delay > 0 ? `+${delay} gg` : '';
+  cell.classList.toggle('is-late', delay > 0);
 }
 
 function _refreshActivityRowCells(div) {
@@ -2951,16 +3063,13 @@ function _refreshActivityRowCells(div) {
   const nc = parseInt(ds.noteCount    || '0', 10);
   const ormIdVal = ds.ormId;
 
-  const pills = _computeActivityStatus(ds.start, ds.finish, ds.actualStart, ds.actualFinish);
-
-  const statusCol = div.querySelector('.pian-col-status');
-  if (statusCol) statusCol.innerHTML = _statusPillsHtml(pills);
+  _pianRenderRowState(div);
 
   const idCell = div.querySelector('.pian-col-id');
-  if (idCell) idCell.textContent = ds.activityId || '—';
-
-  const predCell = div.querySelector('.pian-col-pred');
-  if (predCell) predCell.textContent = ds.predecessors || 'Nessuna';
+  if (idCell) {
+    idCell.textContent = _pianRowLabel(ds);
+    idCell.title = ds.activityId || '';
+  }
 
   const plannedStartCell = div.querySelector('.pian-col-date--planned-start');
   if (plannedStartCell) plannedStartCell.innerHTML = `<strong>${esc(ds.start || '—')}</strong>`;
@@ -2976,9 +3085,6 @@ function _refreshActivityRowCells(div) {
 
   const plantCell = div.querySelector('.pian-col-stab');
   if (plantCell) plantCell.innerHTML = ds.plant ? stabBadge(ds.plant) : '—';
-
-  const respCell = div.querySelector('.pian-col-resp');
-  if (respCell) respCell.textContent = ds.responsible || '—';
 
   const resCell = div.querySelector('.pian-col-res');
   if (resCell) {
@@ -3035,20 +3141,18 @@ function _wizAppendRow(ormId, warningCount, noteCount) {
   div.dataset.predecessors   = r.predecessors && r.predecessors.length ? r.predecessors.join(', ') : '';
   div.setAttribute('onclick', 'openDetailModal(this, \'task\')');
 
-  const pills = _computeActivityStatus(r.dataInizio, r.dataFine, null, null);
   const noteBtn = _pianActionButtonsHtml(ormId, wc, nc);
   div.innerHTML = `
-    <span class="pian-col-id">${esc(activityId)}</span>
+    <span class="pian-col-id" title="${esc(activityId)}">${esc(_pianRowLabel(div.dataset))}</span>
     <span class="pian-col-date pian-col-date--planned-start"><strong>${fmt(r.dataInizio)}</strong></span>
     <span class="pian-col-date pian-col-date--planned-finish"><strong>${fmt(r.dataFine)}</strong></span>
     <span class="pian-col-date pian-col-date--actual-start">—</span>
     <span class="pian-col-date pian-col-date--actual-finish">—</span>
-    <span class="pian-col-status">${_statusPillsHtml(pills)}</span>
+    <span class="pian-col-delay"></span>
     <span class="pian-col-stab">${r.stabilimento ? stabBadge(r.stabilimento) : '—'}</span>
-    <span class="pian-col-resp">${esc(fmt(r.responsabile))}</span>
     <span class="pian-col-res">${formatResourcesHtml(resByTipo)}</span>
-    <span class="pian-col-pred">${r.predecessors && r.predecessors.length ? r.predecessors.map(pid => esc(pid)).join(', ') : 'Nessuna'}</span>
     <span class="pian-col-action">${noteBtn}</span>`;
+  _pianRenderRowState(div);
 
   // Find existing group for this commessa or create one
   const list = document.getElementById('pian-group-list');
@@ -3060,7 +3164,7 @@ function _wizAppendRow(ormId, warningCount, noteCount) {
     group.innerHTML = `${_pianGroupHeadHtml({ commessa: r.commessa, n_activities: 0 })}
       <div class="pian-activities" data-commessa="${esc(r.commessa)}">
         <div class="pian-activity-table-head" aria-hidden="true">
-          <span>Attività</span><span>Inizio</span><span>Fine</span><span>Stato</span><span>Stabilimento</span><span>Responsabile</span><span>Risorse</span><span>Dipendenze</span><span></span>
+          <span>Item · Attività</span><span>Inizio</span><span>Fine</span><span>Inizio eff.</span><span>Fine eff.</span><span>Ritardo</span><span>Stabilimento</span><span>Risorse</span><span></span>
         </div>
       </div>`;
     list.prepend(group);
@@ -3207,6 +3311,7 @@ function filterPianGroups(term) {
       row.style.display = visible ? '' : 'none';
       if (visible) hasVisibleRow = true;
     });
+    _pianSyncDisegnoVisibility(_pianActivitiesByCommessa(group.dataset.commessa || ''));
     const statusKey = _pianGroupStatusKey(group);
     const statusMatch = _pianStatusFilter.size === 0 || _pianStatusFilter.has(statusKey);
     const showGroup = statusMatch && (!q || jobMatch || hasVisibleRow);
@@ -3296,10 +3401,11 @@ function formatResourcesHtml(source) {
   for (const rid of byTipo.generatore) {
     parts.push(`<span class="pian-res-chip pian-res-chip--gen">${esc(rid)}</span>`);
   }
-  const nAcc = (byTipo.mandrino.length + byTipo.tastatore.length + byTipo.maschera.length);
-  if (nAcc) {
-    const label = nAcc === 1 ? 'accessorio' : 'accessori';
-    parts.push(`<span class="pian-res-accessories">+ ${nAcc} ${label}</span>`);
+  // Accessories are shown in full too, one chip each.
+  for (const tipo of ['mandrino', 'tastatore', 'maschera']) {
+    for (const rid of byTipo[tipo]) {
+      parts.push(`<span class="pian-res-chip pian-res-chip--acc" title="${esc(_RES_TIPO_LABELS[tipo] || tipo)}">${esc(rid)}</span>`);
+    }
   }
 
   const tooltip = formatResourcesTooltip(byTipo);
@@ -3399,11 +3505,23 @@ document.addEventListener('DOMContentLoaded', () => {
     history.replaceState({}, '', window.location.pathname);
     openNotesModal(parseInt(focusId, 10));
   }
+
+  // Auto-open the activity detail modal when arriving from a home kanban card
+  const attivitaId = new URLSearchParams(window.location.search).get('attivita');
+  if (attivitaId) {
+    history.replaceState({}, '', window.location.pathname);
+    const row = document.querySelector(`.pian-activity-row[data-orm-id="${CSS.escape(attivitaId)}"]`);
+    if (row) {
+      row.scrollIntoView({ block: 'center' });
+      openDetailModal(row, 'task');
+    }
+  }
 });
 
 const TASK_FIELDS = [
   { label:'Commessa',      key:'commessa',      readonly:true },
-  { label:'Disegno+item',  key:'item',          readonly:true },
+  { label:'Disegno',       key:'disegno',       readonly:true },
+  { label:'Item',          key:'itemCode',      readonly:true },
   { label:'Attività',      key:'activity',      readonly:false },
   { label:'Predecessore',  key:'predecessors',  readonly:false, isPredecessor:true },
   { label:'Inizio',        key:'start',         readonly:false, isDate:true },
@@ -3453,6 +3571,7 @@ function openDetailModal(tr, entityType) {
       source:       ds.source       || 'tasks',
       ormId:        ds.ormId        || '',
     };
+    Object.assign(data, _splitDisegnoItem(data.item));
     fields = TASK_FIELDS;
     title  = `Attività: ${data.activityId || buildActivityId(data.commessa, data.item, data.activity)}`;
   } else {
@@ -3468,6 +3587,15 @@ function openDetailModal(tr, entityType) {
     title  = `Commessa: ${data.commessa}`;
   }
   _detState = { tr, entityType, originalData: { ...data }, fields };
+  // Open problems on this activity: point at them under the fields.
+  const openProblems = entityType === 'task' ? parseInt(ds.warningCount || '0', 10) : 0;
+  const problemsEl = document.getElementById('det-problems');
+  if (problemsEl) {
+    problemsEl.hidden = !(openProblems > 0 && data.ormId);
+    document.getElementById('det-problems-text').textContent = openProblems === 1
+      ? "C'è 1 problema da risolvere"
+      : `Ci sono ${openProblems} problemi da risolvere`;
+  }
   document.getElementById('det-title').textContent = title;
   document.getElementById('det-error').classList.remove('det-error--warn');
   document.getElementById('det-error').style.display = 'none';
@@ -3477,6 +3605,13 @@ function openDetailModal(tr, entityType) {
   const ov = document.getElementById('det-modal-overlay');
   ov.classList.add('is-open');
   ov.style.display = 'flex';
+}
+
+function openProblemsFromDetail() {
+  const ormId = _detState && _detState.originalData && _detState.originalData.ormId;
+  if (!ormId) return;
+  closeDetailModal();
+  openNotesModal(parseInt(ormId, 10));
 }
 
 function closeDetailModal() {
@@ -3644,7 +3779,7 @@ async function enterEditMode() {
         .concat(activities.map(a => {
           const sel = a.activity_id === currentPred ? ' selected' : '';
           const dates = [a.start, a.finish].filter(Boolean).join(' → ');
-          const itemLbl = a.item != null && a.item !== '' ? `item ${a.item}` : '';
+          const itemLbl = _disegnoItemLabel(a.item);
           const lbl = a.activity || a.activity_id;
           const meta = [itemLbl, dates].filter(Boolean).join(' · ');
           return `<option value="${esc(a.activity_id)}"${sel}>${esc(lbl)}${meta ? ' · ' + esc(meta) : ''}</option>`;
@@ -3806,6 +3941,7 @@ async function saveEdit() {
     if (entityType === 'task') {
       tr.dataset.jobId = newData.jobId || '';
       tr.dataset.activityId = newData.activityId || '';
+      sortPianActivitiesInHost(tr.closest('.pian-activities'));
       if (json.warning_count != null) tr.dataset.warningCount = String(json.warning_count);
       if (json.note_count != null) tr.dataset.noteCount = String(json.note_count);
       _applyActivityUpdates(json);
@@ -3934,6 +4070,8 @@ async function deleteEntity() {
         if (!remaining.length) {
           const actEl = _pianActivitiesByCommessa(originalData.commessa) || group.querySelector('.pian-activities');
           if (actEl) actEl.innerHTML = '<div class="pian-no-activities">Nessuna attività</div>';
+        } else {
+          sortPianActivitiesInHost(_pianActivitiesByCommessa(originalData.commessa));
         }
         _refreshPianJobCard(group);
       }
@@ -4475,6 +4613,7 @@ function _syncNavWarnBadge() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.pian-activities').forEach(sortPianActivitiesInHost);
   _syncNavWarnBadge();
 });
 

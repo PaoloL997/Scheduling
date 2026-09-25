@@ -43,16 +43,16 @@ function renderTask(chart, task) {
   const tailRight = tail
     ? Number(tail.getAttribute('x')) + Number(tail.getAttribute('width'))
     : 0;
-  const badgeRects = [...document.querySelectorAll('#bars-svg rect')]
-    .filter((r) => !r.getAttribute('data-task') && Number(r.getAttribute('height')) === 16);
-  const firstBadgeX = Math.min(...badgeRects.map((r) => Number(r.getAttribute('x'))));
+  const delayLabels = [...document.querySelectorAll('#bars-svg text')]
+    .filter((t) => /^\+\d+ gg$/.test(t.textContent));
+  const delayX = Math.min(...delayLabels.map((r) => Number(r.getAttribute('x'))));
   const latestBarRight = Math.max(plannedRight, tailRight);
-  if (firstBadgeX < latestBarRight) {
+  if (delayX < latestBarRight) {
     throw new Error(
-      `badge before latest bar end (badgeX=${firstBadgeX}, latestBarRight=${latestBarRight})`
+      `badge before latest bar end (badgeX=${delayX}, latestBarRight=${latestBarRight})`
     );
   }
-  return { plannedRight, tailRight, firstBadgeX };
+  return { plannedRight, tailRight, delayX, badgeCount: delayLabels.length };
 }
 
 const base = {
@@ -66,24 +66,19 @@ const base = {
   warning_count: 0,
 };
 
-// Actual finish after planned finish → badge after actual end.
+// Closed activities are never late, so they carry no badge at all.
 const late = renderTask(makeChart(), {
   ...base,
   actual_start: '2026-06-10',
   actual_finish: '2026-06-28',
 });
-if (late.firstBadgeX <= late.plannedRight) {
-  throw new Error('expected badge after actual finish when late');
-}
-
-// Actual finish before planned finish → badge after planned end.
 const early = renderTask(makeChart(), {
   ...base,
   actual_start: '2026-06-10',
   actual_finish: '2026-06-15',
 });
-if (early.firstBadgeX <= early.plannedRight) {
-  throw new Error('expected badge after planned finish when completed early');
+if (late.badgeCount !== 0 || early.badgeCount !== 0) {
+  throw new Error(`completed activities must carry no badge (late=${late.badgeCount}, early=${early.badgeCount})`);
 }
 
 // No actual finish: estimated end (actual_start + duration) after planned → badge after estimate.
@@ -97,7 +92,11 @@ const inProgress = renderTask(makeChart(), {
 if (inProgress.tailRight <= inProgress.plannedRight) {
   throw new Error('expected estimated actual tail past planned end');
 }
-if (inProgress.firstBadgeX <= inProgress.tailRight) {
+// Started five days late: the "+N gg" badge sits after the estimated end.
+if (inProgress.badgeCount !== 1) {
+  throw new Error(`expected one delay badge when in progress late, got ${inProgress.badgeCount}`);
+}
+if (inProgress.delayX <= inProgress.tailRight) {
   throw new Error('expected badge after estimated actual end when in progress');
 }
 

@@ -77,7 +77,10 @@ class FormatActivityResourcesTests(SimpleTestCase):
         self.assertIn("T001", html)
         self.assertIn('class="pian-res-chip pian-res-chip--gen"', html)
         self.assertIn("G501", html)
-        self.assertIn("+ 1 accessorio", html)
+        self.assertIn(
+            'class="pian-res-chip pian-res-chip--acc" title="Mandrino">M12<', html
+        )
+        self.assertNotIn("accessorio", html)
         self.assertIn('data-tooltip="', html)
         self.assertIn("Mandrino: M12", html)
 
