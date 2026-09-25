@@ -80,7 +80,10 @@ when a resource is held:
 | completed | `[actual_start or data_inizio, actual_finish]` |
 
 Overlap detection, reassignment and availability lists all read that one
-function; nothing re-implements it.
+function; nothing re-implements it.  The **Modifica risorse** picker included:
+for an activity already under way it asks what is free from `actual_start`, not
+from the planned `data_inizio`, so it offers exactly what the save will accept
+— a unit released on the planned start day is no longer hidden.
 
 **Facts are never refused.** Writing `actual_start` / `actual_finish` records
 something that already happened, so the save always succeeds. A resulting

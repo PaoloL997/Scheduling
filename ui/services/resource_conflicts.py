@@ -168,6 +168,57 @@ def occupation_window(attivita) -> tuple[date, date] | None:
     return attivita.data_inizio, attivita.data_fine
 
 
+@dataclass(frozen=True)
+class _EditedActivity:
+    """Duck type for :func:`occupation_window`: form dates, stored facts."""
+
+    data_inizio: date | None
+    data_fine: date | None
+    actual_start: date | None
+    actual_finish: date | None
+
+
+def candidate_window(
+    data_inizio: date,
+    data_fine: date,
+    attivita=None,
+) -> tuple[date, date]:
+    """Return the window the activity being edited would really hold.
+
+    An availability picker asks "which resources are free while this
+    activity holds them?", so it must test the same interval the save will
+    validate.  For an activity that has already started, occupancy follows
+    execution rather than the calendar: it begins on ``actual_start``, so a
+    resource released on the *planned* start day is genuinely free.
+
+    Planned dates come from the caller (the user may be editing them in the
+    form), the actual dates from the stored record, and
+    :func:`occupation_window` turns that pair into the real window.
+
+    Args:
+        data_inizio: Candidate start date as currently shown in the form.
+        data_fine: Candidate end date as currently shown in the form.
+        attivita: The activity being edited, or ``None`` for a new one.
+
+    Returns:
+        tuple[date, date]: The interval to test availability against —
+            ``(data_inizio, data_fine)`` unchanged when the activity has not
+            started yet.
+    """
+    if attivita is None or not (attivita.actual_start or attivita.actual_finish):
+        return data_inizio, data_fine
+
+    window = occupation_window(
+        _EditedActivity(
+            data_inizio=data_inizio,
+            data_fine=data_fine,
+            actual_start=attivita.actual_start,
+            actual_finish=attivita.actual_finish,
+        )
+    )
+    return window or (data_inizio, data_fine)
+
+
 def _candidate_overlap_q(data_inizio: date, data_fine: date) -> Q:
     """Return a wide ORM prefilter; :func:`occupation_window` is authoritative.
 

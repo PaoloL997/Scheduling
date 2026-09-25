@@ -25,6 +25,7 @@ from ui.models import (
     TestaItem,
 )
 from ui.services.activity_inventory import get_available_resources
+from ui.services.resource_conflicts import candidate_window, occupation_window
 from ui.views_attivita import api_get_risorse
 
 START = date(2026, 8, 25)
@@ -263,3 +264,88 @@ class Tp60CustomPreselectionTest(TestCase):
                 "generatori": 1,
             },
         )
+class StartedActivityUsesItsRealWindowTest(TestCase):
+    """An activity under way is offered what is free from its *actual* start.
+
+    Reproduces the reported case: WO411 came off a qualifica that closed on
+    22/09 and the next activity was planned to start that same day, so the
+    inclusive overlap rule counted the generator as busy.  The activity really
+    started on 23/09, which is when it takes its resources — and when the save
+    validates them — so the picker must ask about that day, not the planned one.
+    """
+
+    PLANNED_START = date(2026, 9, 22)
+    PLANNED_FINISH = date(2026, 9, 25)
+
+    def setUp(self) -> None:
+        cfg = ConfigurazioneTesta.objects.create(modello_testa="TP60")
+        for modello in ("P406", "P6"):
+            GeneratoreCompatibile.objects.create(
+                configurazione=cfg, modello_generatore=modello
+            )
+        TestaItem.objects.create(uid="H02", model="TP60", plant="Ricengo")
+        GeneratoreItem.objects.create(uid="WO411", model="P406", plant="Ricengo")
+        GeneratoreItem.objects.create(uid="WO413", model="P6", plant="Ricengo")
+
+        # The previous job released WO411 on the planned start day.
+        closed = Attivita.objects.create(
+            commessa="25079",
+            item="02",
+            activity="qualifica",
+            data_inizio=date(2026, 9, 20),
+            data_fine=self.PLANNED_START,
+            actual_start=date(2026, 9, 20),
+            actual_finish=self.PLANNED_START,
+            stabilimento="Ricengo",
+            modello_testa="TP60",
+        )
+        RisorsaAttivita.objects.create(
+            attivita=closed, tipo="generatore", risorsa_id="WO411"
+        )
+
+        self.att = Attivita.objects.create(
+            commessa="25108",
+            item="01",
+            activity="qualifica",
+            data_inizio=self.PLANNED_START,
+            data_fine=self.PLANNED_FINISH,
+            stabilimento="Ricengo",
+            modello_testa="TP60",
+        )
+        RisorsaAttivita.objects.create(
+            attivita=self.att, tipo="generatore", risorsa_id="WO413"
+        )
+
+    def _generatori(self) -> list[str]:
+        result = get_available_resources(
+            stabilimento="Ricengo",
+            data_inizio=self.PLANNED_START,
+            data_fine=self.PLANNED_FINISH,
+            modello_testa="TP60",
+            exclude_activity_id=self.att.pk,
+            strict_requirements=True,
+            always_include={"generatori": ["WO413"]},
+        )
+        return [r["uid"] for r in result["generatori"]]
+
+    def _start_today(self) -> None:
+        self.att.actual_start = date(2026, 9, 23)
+        self.att.save(update_fields=["actual_start"])
+
+    def test_generator_freed_on_the_planned_start_day_is_offered(self) -> None:
+        self._start_today()
+        self.assertIn("WO411", self._generatori())
+
+    def test_picker_window_matches_the_one_the_save_validates(self) -> None:
+        self._start_today()
+        self.assertEqual(
+            candidate_window(self.PLANNED_START, self.PLANNED_FINISH, self.att),
+            occupation_window(self.att),
+        )
+
+    def test_not_started_activity_keeps_its_planned_window(self) -> None:
+        self.assertEqual(
+            candidate_window(self.PLANNED_START, self.PLANNED_FINISH, self.att),
+            (self.PLANNED_START, self.PLANNED_FINISH),
+        )
+        self.assertNotIn("WO411", self._generatori())

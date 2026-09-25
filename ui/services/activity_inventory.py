@@ -465,7 +465,10 @@ def get_available_resources(
         bore_mid: Mid-range bore used for closest-match pre-selection.
         tube_pitch: Required maschera pitch (mm).
         modello_testa: Testa model name used for config lookup and testa filter.
-        exclude_activity_id: Activity PK to exclude from overlap checks.
+        exclude_activity_id: Activity PK to exclude from overlap checks.  When
+            that activity has already started, ``data_inizio`` / ``data_fine``
+            are replaced by its real occupancy window through
+            :func:`ui.services.resource_conflicts.candidate_window`.
         strict_requirements: When ``True``, each category is empty unless its
             requirement fields are set (modello for teste, bore range for
             mandrini/tastatori, pitch for maschere, compatible config for
@@ -501,6 +504,20 @@ def get_available_resources(
 
     if relax_requirements:
         strict_requirements = False
+
+    if exclude_activity_id is not None:
+        from ui.models import Attivita
+        from ui.services.resource_conflicts import candidate_window
+
+        # An activity already under way holds its resources from the day it
+        # really started, so that is the interval to test — the same one the
+        # save validates.  Otherwise a unit released on the planned start day
+        # would look busy and drop out of the picker.
+        data_inizio, data_fine = candidate_window(
+            data_inizio,
+            data_fine,
+            Attivita.objects.filter(pk=exclude_activity_id).first(),
+        )
 
     *_, gen_models = _get_testa_config(modello_testa)
     min_requirements = get_testa_min_requirements(modello_testa, tp60_custom)
