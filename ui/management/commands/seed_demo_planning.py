@@ -41,8 +41,6 @@ _ACTIVITY_DEFAULTS = {
     "bore_mid": "15.75",
     "tube_pitch": "25.4",
     "duration_min": 2400,
-    "imported_from_mpp": False,
-    "synced_to_mpp": False,
 }
 
 # (commessa, item, activity_name, start, end, predecessor_item or None)

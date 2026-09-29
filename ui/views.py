@@ -16,10 +16,8 @@ from ui.permissions import deny_if_read_only, has_write_access, write_required
 from ui.services.bridge_write import (
     BridgeWriteError,
     delete_attivita,
-    reconcile_delete,
     update_attivita,
 )
-from ui.services.importer import ImportStatus, get_error_detail, get_status
 from ui.services.identifiers import normalize_activity_id, parse_job_id
 from ui.services.resource_display import (
     format_activity_resources,
@@ -108,15 +106,11 @@ def _parse_job_penalty(value) -> float | None:
 def index(request: HttpRequest):
     """Render the main application page.
 
-    The dataset is imported once at server startup via ``AppConfig.ready()``.
-    The rendered template polls ``/api/status`` to detect when the import
-    completes before showing the data.
+    The page receives the user's own plant, which pre-selects the plant
+    filter so each user starts on the activities of their stabilimento.
 
     Args:
         request: The incoming HTTP request.
-
-    The page also receives the user's own plant, which pre-selects the plant
-    filter so each user starts on the activities of their stabilimento.
 
     Returns:
         HttpResponse: The rendered index template.
@@ -702,74 +696,6 @@ def _fetch_jobs() -> list[dict]:
     return result
 
 
-def api_status(request: HttpRequest) -> JsonResponse:
-    """Return the current database import status as JSON.
-
-    Response schema::
-
-        {
-            "status": "loading" | "ready" | "error" | "writing",
-            "detail": "<error message or empty string>"
-        }
-
-    The ``"writing"`` status indicates that a write-back to the source files
-    (``.mpp`` and ``.xlsx``) is in progress.  The frontend should display a
-    blocking overlay and disable all user interactions until the status
-    transitions away from ``"writing"``.
-
-    Args:
-        request: The incoming HTTP request.
-
-    Returns:
-        JsonResponse: A JSON object with ``status`` and ``detail`` fields.
-    """
-    status = get_status()
-    from ui.services.sync_state import get_last_error, get_phase, pending_queue_count
-
-    detail = ""
-    if status == ImportStatus.ERROR:
-        detail = get_error_detail()
-    elif get_phase() == "dirty" or get_last_error():
-        detail = get_last_error() or get_error_detail()
-
-    return JsonResponse(
-        {
-            "status": status.value,
-            "detail": detail,
-            "pending_queue_count": pending_queue_count(),
-            "sync_phase": get_phase(),
-        }
-    )
-
-
-@login_required
-def api_heartbeat(request: HttpRequest) -> JsonResponse:
-    """Refresh the heartbeat timestamp for the authenticated session.
-
-    Called by the frontend every 30 seconds to signal that the browser page is
-    still open.  Uses :meth:`~ui.services.project_session.ProjectSession.register_session`
-    rather than the lighter :meth:`~heartbeat` so that a page reload after a
-    cleanup cycle (session removed from the active set) automatically
-    re-registers the session and restarts the import pipeline — preventing the
-    Gantt from remaining empty until the next explicit login.
-
-    :meth:`register_session` is idempotent when the session is already tracked:
-    it simply refreshes the last-seen timestamp without spawning a second hold
-    thread.
-
-    Args:
-        request: The incoming HTTP request (must be authenticated).
-
-    Returns:
-        JsonResponse: ``{"ok": true}``.
-    """
-    from ui.services.project_session import project_session
-
-    if request.session.session_key:
-        project_session.register_session(request.session.session_key)
-    return JsonResponse({"ok": True})
-
-
 @write_required
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -970,13 +896,10 @@ def _edited_resource_response(table: str, uid: str) -> JsonResponse:
 @write_required
 @require_http_methods(["PUT"])
 def api_tasks_update(request: HttpRequest) -> JsonResponse:
-    """Update a single Attivita record and enqueue a write-back entry.
+    """Update a single Attivita record.
 
     Looks up the :class:`~ui.models.Attivita` record by ``orm_id`` and
-    applies any supplied subset of updatable fields.  After a successful
-    save, an ``update_task`` entry is appended to
-    :class:`~ui.models.MppSyncQueue` so the change is propagated to the
-    MS Project file on the next logout.
+    applies any supplied subset of updatable fields.
 
     Args:
         request: The incoming HTTP PUT request with a JSON body containing
@@ -1280,39 +1203,15 @@ def api_app_settings(request: HttpRequest) -> JsonResponse:
             "ok": True,
             "penale_max": runtime.penale_max,
             "solver_time_limit": runtime.solver_time_limit,
-            "mpp_path": runtime.mpp_path,
-            "xlsx_path": runtime.xlsx_path,
-            "server_dir": runtime.server_dir,
-            "heartbeat_interval_seconds": runtime.heartbeat_interval_seconds,
-            "heartbeat_timeout_seconds": runtime.heartbeat_timeout_seconds,
-            "msp_dispatch_retry_interval_seconds": runtime.msp_dispatch_retry_interval_seconds,
-            "msp_dispatch_retry_max_wait_seconds": runtime.msp_dispatch_retry_max_wait_seconds,
             "openai_wps_model": runtime.openai_wps_model,
-            "auto_import_on_startup": runtime.auto_import_on_startup,
         }
     )
-
-
-_reconcile_delete = reconcile_delete
 
 
 @write_required
 @require_http_methods(["DELETE"])
 def api_attivita_delete(request: HttpRequest) -> JsonResponse:
-    """Delete a single Attivita record and reconcile the MppSyncQueue.
-
-    Reconciliation rules based on the activity's sync state:
-
-    * ``synced_to_mpp=True`` (task exists in the ``.mpp`` file) — cancel any
-      pending ``update_task`` entries for the activity and enqueue
-      ``delete_task`` so the task is removed at the next logout.
-    * ``synced_to_mpp=False`` (task not yet in the ``.mpp`` file) — cancel any
-      pending ``add_task`` / ``update_task`` entries so no ghost task is
-      created at logout; no ``delete_task`` is enqueued.
-
-    The DB deletion and queue reconciliation are performed atomically so the
-    system never ends up in a state where the record is gone but the queue is
-    inconsistent.
+    """Delete a single Attivita record together with its resources.
 
     Args:
         request: The incoming HTTP DELETE request with a JSON body containing
@@ -1359,18 +1258,9 @@ def api_attivita_delete(request: HttpRequest) -> JsonResponse:
 @write_required
 @require_http_methods(["DELETE"])
 def api_jobs_delete(request: HttpRequest) -> JsonResponse:
-    """Delete a job and all its associated activities, reconciling the MppSyncQueue.
+    """Delete a job and all its associated activities.
 
-    For each :class:`~ui.models.Attivita` belonging to the commessa, applies
-    the same reconciliation rules as :func:`api_attivita_delete`:
-
-    * Activities with ``synced_to_mpp=True`` have pending ``update_task``
-      entries cancelled and a ``delete_task`` entry enqueued.
-    * Activities with ``synced_to_mpp=False`` have pending
-      ``add_task`` / ``update_task`` entries cancelled without enqueueing
-      anything (the task never reached the ``.mpp`` file).
-
-    The Job row, all Attivita rows, and all queue mutations are applied
+    The Job row and all its :class:`~ui.models.Attivita` rows are deleted
     atomically.
 
     Args:
@@ -1411,9 +1301,6 @@ def api_jobs_delete(request: HttpRequest) -> JsonResponse:
                 return JsonResponse(
                     {"ok": False, "error": "Job non trovato."}, status=404
                 )
-
-            for a in att_qs:
-                _reconcile_delete(a)
 
             att_qs.delete()
             if job_qs.exists():

@@ -75,8 +75,6 @@ _ACTIVITY_DEFAULTS = {
     "bore_mid": "15.75",
     "tube_pitch": "25.4",
     "duration_min": 2400,
-    "imported_from_mpp": False,
-    "synced_to_mpp": False,
 }
 
 
@@ -433,8 +431,6 @@ class Command(BaseCommand):
                 "bore_mid": "15.75",
                 "tube_pitch": "25.4",
                 "duration_min": duration_min,
-                "imported_from_mpp": False,
-                "synced_to_mpp": False,
                 "data_inizio": start,
                 "data_fine": finish,
                 "actual_start": actual_start,

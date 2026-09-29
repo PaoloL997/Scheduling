@@ -58,13 +58,11 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             data_inizio date NULL,
             data_fine date NULL,
             created_at datetime NOT NULL,
-            synced_to_mpp bool NOT NULL DEFAULT 0,
             actual_finish date NULL,
             actual_start date NULL,
             baseline_finish date NULL,
             baseline_start date NULL,
             duration_min INTEGER NULL,
-            imported_from_mpp bool NOT NULL DEFAULT 1,
             predecessors TEXT NULL,
             activity_id varchar(255) NOT NULL DEFAULT '',
             job_id varchar(255) NOT NULL DEFAULT '',
@@ -129,13 +127,6 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             configurazione_id bigint NOT NULL REFERENCES configurazione_testa(id)
                 DEFERRABLE INITIALLY DEFERRED,
             UNIQUE (configurazione_id, modello_generatore)
-        );
-
-        CREATE TABLE mpp_sync_queue (
-            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-            operation varchar(30) NOT NULL,
-            payload_json TEXT NOT NULL,
-            created_at datetime NOT NULL
         );
 
         CREATE TABLE problema_attivita (
@@ -568,12 +559,10 @@ def _seed_jobs_and_activities(conn: sqlite3.Connection) -> None:
             duration_min,
             predecessors,
             created_at,
-            synced_to_mpp,
-            imported_from_mpp,
             activity_id,
             job_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-06-05 12:00:00', 1, 1, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-06-05 12:00:00', ?, ?)
         """,
         rows,
     )

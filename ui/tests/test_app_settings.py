@@ -31,7 +31,6 @@ class AppSettingsApiTest(TestCase):
     @override_settings(
         PENALE_MAX="5",
         SOLVER_TIME_LIMIT="10",
-        HEARTBEAT_INTERVAL_SECONDS="30",
         OPENAI_WPS_MODEL="gpt-5.6-sol",
     )
     def test_get_returns_defaults(self) -> None:
@@ -41,8 +40,9 @@ class AppSettingsApiTest(TestCase):
         self.assertTrue(data["ok"])
         self.assertEqual(data["penale_max"], 5.0)
         self.assertEqual(data["solver_time_limit"], 10.0)
-        self.assertEqual(data["heartbeat_interval_seconds"], 30)
         self.assertEqual(data["openai_wps_model"], "gpt-5.6-sol")
+        self.assertNotIn("mpp_path", data)
+        self.assertNotIn("heartbeat_interval_seconds", data)
 
     def test_put_is_disabled_for_env_backed_settings(self) -> None:
         resp = self.client.put(

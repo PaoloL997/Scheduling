@@ -7,7 +7,7 @@ import json
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from ui.models import GeneratoreItem, MppSyncQueue
+from ui.models import GeneratoreItem
 from ui.tests.helpers import create_writer
 
 
@@ -40,7 +40,6 @@ class InventoryApiTest(TestCase):
         self.assertTrue(body["ok"])
         self.assertEqual(body["uid"], "G200")
         self.assertTrue(GeneratoreItem.objects.filter(uid="G200").exists())
-        self.assertTrue(MppSyncQueue.objects.filter(operation="add_resource").exists())
 
     def test_add_duplicate_uid_keeps_transaction_usable(self) -> None:
         resp = self.client.post(
@@ -69,13 +68,6 @@ class InventoryApiTest(TestCase):
         self.assertEqual(item.plant, "Nuovo stabilimento")
         self.assertEqual(item.model, "g1")
         self.assertEqual(item.notes, "originale")
-
-        entry = MppSyncQueue.objects.get(operation="update_resource")
-        payload = json.loads(entry.payload_json)
-        self.assertEqual(payload["original_uid"], "G100")
-        self.assertEqual(payload["plant"], "Nuovo stabilimento")
-        self.assertNotIn("measure", payload)
-        self.assertNotIn("notes", payload)
 
     def test_patch_rename_uid(self) -> None:
         resp = self.client.patch(

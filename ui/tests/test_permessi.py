@@ -388,15 +388,6 @@ class BridgePermissionTest(TestCase):
         self.assertEqual(resp.status_code, 403)
         self.assertFalse(resp.json()["ok"])
 
-    def test_reader_cannot_trigger_an_import(self) -> None:
-        self.client.force_login(create_reader("tablet-import"))
-        resp = self.client.post(
-            reverse("api_bridge_import"),
-            data=json.dumps({"force": True}),
-            content_type="application/json",
-        )
-        self.assertEqual(resp.status_code, 403)
-
 
 class RegistrationRuoloTest(TestCase):
     """Accounts created from the public form start read-only."""

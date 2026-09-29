@@ -19,7 +19,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from ui.models import Attivita, MppSyncQueue, RisorsaAttivita
+from ui.models import Attivita, RisorsaAttivita
 from ui.permissions import write_required
 from ui.services.activity_inventory import (
     find_modello_testa_in_db,
@@ -507,48 +507,6 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
     from ui.services.problem_detection import detect_and_save_problems
 
     warning_count = detect_and_save_problems(att, risorse_data)
-
-    # Enqueue write-back to .mpp (outside transaction so PKs are committed)
-    all_resource_ids = [r.risorsa_id for r in risorsa_rows]
-    try:
-        MppSyncQueue.objects.create(
-            operation="add_task",
-            payload_json=json.dumps(
-                {
-                    "attivita_id": att.pk,
-                    "commessa": att.commessa,
-                    "item": att.item,
-                    "activity": att.activity,
-                    "data_inizio": att.data_inizio.isoformat()
-                    if att.data_inizio
-                    else None,
-                    "data_fine": att.data_fine.isoformat() if att.data_fine else None,
-                    "stabilimento": att.stabilimento,
-                    "responsabile": att.responsabile,
-                    "resources": all_resource_ids,
-                    "predecessors": att.predecessors or None,
-                    "modello_testa": att.modello_testa or None,
-                    "bore_min": float(att.bore_min)
-                    if att.bore_min is not None
-                    else None,
-                    "bore_mid": float(att.bore_mid)
-                    if att.bore_mid is not None
-                    else None,
-                    "bore_max": float(att.bore_max)
-                    if att.bore_max is not None
-                    else None,
-                    "tube_pitch": float(att.tube_pitch)
-                    if att.tube_pitch is not None
-                    else None,
-                }
-            ),
-        )
-    except Exception as exc:  # noqa: BLE001
-        import logging
-
-        logging.getLogger(__name__).error(
-            "Impossibile aggiungere alla MppSyncQueue: %s", exc
-        )
 
     from ui.services.operation_log import record_operation
 

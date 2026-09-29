@@ -12,7 +12,6 @@ import shutil
 import subprocess
 from datetime import date, timedelta
 from pathlib import Path
-from unittest.mock import patch
 
 from django.test import Client, RequestFactory, TestCase
 from django.urls import reverse
@@ -25,13 +24,8 @@ from ui.services.bridge_write import (
     update_attivita,
     validate_actual_start_not_future,
 )
-from ui.services.importer import ImportStatus
 from ui.tests.helpers import assign_minimum_kit, create_writer, write_user
 from ui.views import api_tasks_update
-
-
-def _ready_status():
-    return ImportStatus.READY
 
 
 def _activity(commessa: str = "C910", **kwargs) -> Attivita:
@@ -267,7 +261,6 @@ class InizioEffettivoFuturoApiTest(TestCase):
         self.assertEqual(self.att.actual_start, self.today)
 
 
-@patch("ui.views_bridge.get_status", side_effect=_ready_status)
 class InizioEffettivoFuturoBridgeTest(TestCase):
     """The tablet bridge is held to the same rule."""
 
@@ -286,7 +279,7 @@ class InizioEffettivoFuturoBridgeTest(TestCase):
             content_type="application/json",
         )
 
-    def test_bridge_refuses_a_future_start(self, _mock_status) -> None:
+    def test_bridge_refuses_a_future_start(self) -> None:
         resp = self._put((self.today + timedelta(days=1)).isoformat())
 
         self.assertEqual(resp.status_code, 400)
@@ -296,7 +289,7 @@ class InizioEffettivoFuturoBridgeTest(TestCase):
         self.att.refresh_from_db()
         self.assertIsNone(self.att.actual_start)
 
-    def test_bridge_accepts_today(self, _mock_status) -> None:
+    def test_bridge_accepts_today(self) -> None:
         resp = self._put(self.today.isoformat())
 
         self.assertEqual(resp.status_code, 200)

@@ -9,7 +9,6 @@ from ui.models import (
     Attivita,
     ConfigurazioneTesta,
     Job,
-    MppSyncQueue,
     TestaItem,
     TipoAttivita,
 )
@@ -239,9 +238,6 @@ class AddActivityFlowTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         att = Attivita.objects.get(activity="Qualifica")
         self.assertEqual(att.predecessors, prev.activity_id)
-        entry = MppSyncQueue.objects.get(operation="add_task")
-        payload = json.loads(entry.payload_json)
-        self.assertEqual(payload["predecessors"], prev.activity_id)
 
     def test_tp60_custom_flag_is_saved(self) -> None:
         """The wizard flag is persisted on the created activity."""

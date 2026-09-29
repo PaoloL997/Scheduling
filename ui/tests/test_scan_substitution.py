@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from unittest.mock import patch
 
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -13,22 +12,16 @@ from ui.models import (
     Attivita,
     MandrinoItem,
     MascheraItem,
-    MppSyncQueue,
     ProblemaAttivita,
     RisorsaAttivita,
     TestaItem,
 )
 from ui.services.bridge_write import BridgeWriteError
-from ui.services.importer import ImportStatus
 from ui.services.problem_detection import find_resource_overlaps
 from ui.services.scan_substitution import scan_resource
 from ui.tests.helpers import create_writer
 
 PLANT = "Valbrembo"
-
-
-def _ready_status():
-    return ImportStatus.READY
 
 
 def _pairs(att) -> set[tuple[str, str]]:
@@ -156,7 +149,6 @@ class Case1FreeTest(ScanBase):
             result["messaggio"], "Stai usando M117 al posto di M102, va bene?"
         )
         self.assertIn(("mandrino", "M102"), _pairs(self.att))
-        self.assertFalse(MppSyncQueue.objects.exists())
 
     def test_confirmation_updates_planning_and_keeps_other_categories(self) -> None:
         result = scan_resource(
@@ -169,10 +161,6 @@ class Case1FreeTest(ScanBase):
             {("testa", "T1"), ("mandrino", "M117"), ("maschera", "MA1")},
         )
         self.assertEqual(result["resources_by_tipo"]["mandrino"], ["M117"])
-        payload = json.loads(
-            MppSyncQueue.objects.get(operation="update_task").payload_json
-        )
-        self.assertEqual(sorted(payload["resources"]), ["M117", "MA1", "T1"])
         note = ProblemaAttivita.objects.get(attivita=self.att, tipo="sostituzione")
         self.assertTrue(note.risolto)
         self.assertIn("M117", note.descrizione)
@@ -216,7 +204,6 @@ class Case2InUseTest(ScanBase):
         self.assertEqual(ctx.exception.conflicts[0]["attivita_id"], other.pk)
         self.assertIn(("mandrino", "M102"), _pairs(self.att))
         self.assertIn(("mandrino", "M117"), _pairs(other))
-        self.assertFalse(MppSyncQueue.objects.exists())
 
 
 class Case3PlannedOverlapTest(ScanBase):
@@ -306,7 +293,6 @@ class Case3PlannedOverlapTest(ScanBase):
         self.assertIn(("mandrino", "M117"), _pairs(self.att))
 
 
-@patch("ui.views_bridge.get_status", side_effect=_ready_status)
 class BridgeScanEndpointTest(ScanBase):
     def setUp(self) -> None:
         super().setUp()
@@ -321,7 +307,7 @@ class BridgeScanEndpointTest(ScanBase):
             content_type="application/json",
         )
 
-    def test_scan_requires_confirmation_then_applies(self, _mock) -> None:
+    def test_scan_requires_confirmation_then_applies(self) -> None:
         resp = self._post({"tipo": "mandrino", "codice": "M117"})
         self.assertEqual(resp.status_code, 200)
         data = resp.json()["data"]
@@ -333,14 +319,14 @@ class BridgeScanEndpointTest(ScanBase):
         self.assertTrue(resp.json()["data"]["applicata"])
         self.assertIn(("mandrino", "M117"), _pairs(self.att))
 
-    def test_refusal_carries_motivo(self, _mock) -> None:
+    def test_refusal_carries_motivo(self) -> None:
         resp = self._post({"tipo": "mandrino", "codice": "M130"})
         self.assertEqual(resp.status_code, 409)
         body = resp.json()
         self.assertFalse(body["ok"])
         self.assertEqual(body["motivo"], "non_compatibile")
 
-    def test_in_use_refusal_carries_conflicts(self, _mock) -> None:
+    def test_in_use_refusal_carries_conflicts(self) -> None:
         self._other("M117", actual_start=date(2026, 6, 2))
         resp = self._post({"tipo": "mandrino", "codice": "M117", "conferma": True})
         self.assertEqual(resp.status_code, 409)
@@ -348,6 +334,6 @@ class BridgeScanEndpointTest(ScanBase):
         self.assertEqual(body["motivo"], "occupata")
         self.assertEqual(len(body["conflicts"]), 1)
 
-    def test_invalid_tipo_is_400(self, _mock) -> None:
+    def test_invalid_tipo_is_400(self) -> None:
         resp = self._post({"tipo": "pinza", "codice": "X"})
         self.assertEqual(resp.status_code, 400)

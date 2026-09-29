@@ -8,8 +8,8 @@ assigned item at all (``acquisto``).
 Problems are detected at activity-creation time and stored as
 :class:`~ui.models.ProblemaAttivita` rows so that planners can track and
 resolve them through the UI.  :class:`~ui.models.RisoluzioneProblema` provides
-a persistent mirror of resolved notes that survives the dataset reset+reimport
-cycle so that resolution history is never lost.
+a persistent mirror of resolved notes that is kept even when the activity is
+deleted, so that resolution history is never lost.
 
 Resource overlaps caused by a late start are detected by
 :func:`find_resource_overlaps` and auto-resolved when a compatible
@@ -273,8 +273,8 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
     description when needed, and missing ones are created.  Creation is
     idempotent against **open** signatures only, so a condition that returns
     after an auto-resolve can raise a new open note.  Auto-resolves are not
-    mirrored to :class:`~ui.models.RisoluzioneProblema`, so a re-import can
-    surface the issue again if it returns.
+    mirrored to :class:`~ui.models.RisoluzioneProblema`, so the issue
+    surfaces again if it returns.
 
     Args:
         attivita: The :class:`~ui.models.Attivita` instance.
@@ -691,7 +691,7 @@ def sync_overdue_problems(
 def detect_for_all_activities() -> int:
     """Run problem detection for every activity in the database.
 
-    Called after a dataset re-import and on Pianificazione page load so that
+    Called on Pianificazione page load so that
     open ``acquisto`` / ``spostamento`` notes stay aligned with current
     assignments.  Stale open notes are auto-resolved; new conditions create
     fresh rows.  Delay overlaps are auto-swapped when possible; remaining
@@ -719,10 +719,10 @@ def detect_for_all_activities() -> int:
 
 
 def restore_resolved_notes() -> int:
-    """Re-apply persistent resolution notes to freshly imported problems.
+    """Re-apply persistent resolution notes to re-created problems.
 
-    After a dataset reset+reimport, :class:`~ui.models.ProblemaAttivita` rows
-    are re-created by :func:`detect_for_all_activities`.  Manual resolutions
+    When :class:`~ui.models.ProblemaAttivita` rows are re-created by
+    :func:`detect_for_all_activities`, the notes are matched back.  Manual resolutions
     of ``acquisto`` / ``spostamento`` are no longer restored: those notes
     close only when the underlying condition is gone.
 

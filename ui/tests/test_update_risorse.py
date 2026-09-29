@@ -14,7 +14,6 @@ from ui.models import (
     GeneratoreItem,
     MandrinoItem,
     MascheraItem,
-    MppSyncQueue,
     ProblemaAttivita,
     RisorsaAttivita,
     TastatoreItem,
@@ -85,9 +84,6 @@ class UpdateAttivitaRisorseTest(TestCase):
         self.assertEqual(
             rows, {("testa", "T001"), ("mandrino", "M2"), ("tastatore", "TA1")}
         )
-        entry = MppSyncQueue.objects.get(operation="update_task")
-        payload = json.loads(entry.payload_json)
-        self.assertEqual(sorted(payload["resources"]), ["M2", "T001", "TA1"])
         self.assertFalse(
             ProblemaAttivita.objects.filter(
                 attivita=self.att, tipo="acquisto", risorsa_tipo="testa"
@@ -106,7 +102,7 @@ class UpdateAttivitaRisorseTest(TestCase):
         )
         self.assertEqual(rows, {("testa", "T001")})
 
-    def test_update_risorse_enqueues_resources_for_mpp_writeback(self) -> None:
+    def test_update_risorse_replaces_all_categories(self) -> None:
         update_attivita(
             self.att.pk,
             {
@@ -119,11 +115,14 @@ class UpdateAttivitaRisorseTest(TestCase):
                 }
             },
         )
-        entry = MppSyncQueue.objects.get(operation="update_task")
-        payload = json.loads(entry.payload_json)
-        self.assertEqual(payload["resources"], ["T002", "M1"])
+        rows = set(
+            RisorsaAttivita.objects.filter(attivita_id=self.att.pk).values_list(
+                "tipo", "risorsa_id"
+            )
+        )
+        self.assertEqual(rows, {("testa", "T002"), ("mandrino", "M1")})
 
-    def test_update_predecessors_enqueued_for_mpp_writeback(self) -> None:
+    def test_update_predecessors_is_saved(self) -> None:
         pred = Attivita.objects.create(
             commessa="C100",
             item=2,
@@ -137,9 +136,6 @@ class UpdateAttivitaRisorseTest(TestCase):
         )
         self.att.refresh_from_db()
         self.assertEqual(self.att.predecessors, pred.activity_id)
-        entry = MppSyncQueue.objects.get(operation="update_task")
-        payload = json.loads(entry.payload_json)
-        self.assertEqual(payload["predecessors"], pred.activity_id)
 
     def test_update_risorse_conflict_raises(self) -> None:
         other = Attivita.objects.create(

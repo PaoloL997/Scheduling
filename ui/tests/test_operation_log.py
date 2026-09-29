@@ -18,7 +18,6 @@ from ui.models import (
     Stabilimento,
     TestaItem,
 )
-from ui.services.importer import ImportStatus
 from ui.services.inventory import patch_resource
 from ui.services.operation_log import record_operation
 from ui.services.overlap_reassign import auto_resolve_resource_overlaps
@@ -37,10 +36,6 @@ from ui.views import (
     api_tasks_update,
 )
 from ui.views_attivita import api_salva_attivita
-
-
-def _ready_status():
-    return ImportStatus.READY
 
 
 class RecordOperationTest(TestCase):
@@ -149,7 +144,6 @@ class ActivityLogTest(TestCase):
         self.assertEqual(entry.source, OperationLog.SOURCE_WEB)
 
 
-@patch("ui.views_bridge.get_status", side_effect=_ready_status)
 class BridgeActivityLogTest(TestCase):
     """Tablet-side (bridge) activity operations, including delegated ones."""
 
@@ -165,7 +159,7 @@ class BridgeActivityLogTest(TestCase):
             data_fine=date(2026, 6, 5),
         )
 
-    def test_bridge_update_logs_tablet_source(self, _mock_status) -> None:
+    def test_bridge_update_logs_tablet_source(self) -> None:
         assign_minimum_kit(self.att)
         resp = self.client.put(
             reverse("api_bridge_attivita_update", kwargs={"pk": self.att.pk}),
@@ -176,7 +170,7 @@ class BridgeActivityLogTest(TestCase):
         entry = OperationLog.objects.get(azione="attivita_modifica")
         self.assertEqual(entry.source, OperationLog.SOURCE_TABLET)
 
-    def test_bridge_delete_logs_tablet_source(self, _mock_status) -> None:
+    def test_bridge_delete_logs_tablet_source(self) -> None:
         resp = self.client.delete(
             reverse("api_bridge_attivita_delete", kwargs={"pk": self.att.pk})
         )
@@ -184,9 +178,7 @@ class BridgeActivityLogTest(TestCase):
         entry = OperationLog.objects.get(azione="attivita_elimina")
         self.assertEqual(entry.source, OperationLog.SOURCE_TABLET)
 
-    def test_bridge_create_delegated_view_logs_tablet_source(
-        self, _mock_status
-    ) -> None:
+    def test_bridge_create_delegated_view_logs_tablet_source(self) -> None:
         """api_salva_attivita is shared; the delegated bridge path must still
         attribute the log entry to the tablet, proving path-derived source
         works through delegation."""
@@ -240,8 +232,7 @@ class ScanSubstitutionLogTest(TestCase):
             attivita=self.att, tipo="mandrino", risorsa_id="M102"
         )
 
-    @patch("ui.views_bridge.get_status", side_effect=_ready_status)
-    def test_confirmed_scan_logs_tablet_entry(self, _mock_status) -> None:
+    def test_confirmed_scan_logs_tablet_entry(self) -> None:
         create_writer("scanner", password="pass")
         client = Client()
         client.login(username="scanner", password="pass")
@@ -388,10 +379,7 @@ class JobsInventarioAnagraficheLogTest(TestCase):
         entry = OperationLog.objects.get(azione="commessa_crea")
         self.assertEqual(entry.source, OperationLog.SOURCE_WEB)
 
-    @patch("ui.views_bridge.get_status", side_effect=_ready_status)
-    def test_jobs_create_delegated_bridge_logs_tablet_source(
-        self, _mock_status
-    ) -> None:
+    def test_jobs_create_delegated_bridge_logs_tablet_source(self) -> None:
         client = Client()
         client.login(username=self.user.username, password="pass")
         resp = client.post(

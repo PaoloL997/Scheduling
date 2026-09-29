@@ -10,13 +10,8 @@ class Attivita(models.Model):
     """An activity planned for production scheduling.
 
     This is the single source of truth for all activity data.  Records are
-    created in two ways: by :func:`src.data.import.import_from_mpp` during
-    the initial import (``imported_from_mpp=True``) and through the
-    multi-step add-activity wizard (``imported_from_mpp=False``).
-
-    All CRUD operations during a web-app session target this table.
-    When the last user logs out, pending changes are written back to the
-    ``.mpp`` file via :class:`MppSyncQueue`.
+    created through the multi-step add-activity wizard and edited from the
+    web app and the tablet bridge.
 
     Resource assignments are stored in the related :class:`RisorsaAttivita`
     model.
@@ -59,8 +54,6 @@ class Attivita(models.Model):
     # must not raise an "acquisto" problem — such jobs may not need them.
     tp60_custom = models.BooleanField(default=False)
 
-    synced_to_mpp = models.BooleanField(default=False)
-    imported_from_mpp = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -297,7 +290,7 @@ class Job(models.Model):
 
 
 class TestaItem(models.Model):
-    """A Testa measurement head resource imported from the MS Project file."""
+    """A Testa measurement head resource in the inventory."""
 
     uid = models.CharField(max_length=100, primary_key=True)
     model = models.CharField(max_length=200, null=True, blank=True)
@@ -313,7 +306,7 @@ class TestaItem(models.Model):
 
 
 class MandrinoItem(models.Model):
-    """A Mandrino spindle resource imported from the MS Project file."""
+    """A Mandrino spindle resource in the inventory."""
 
     uid = models.CharField(max_length=100, primary_key=True)
     diameter = models.CharField(max_length=50, null=True, blank=True)
@@ -328,7 +321,7 @@ class MandrinoItem(models.Model):
 
 
 class TastatoreItem(models.Model):
-    """A Tastatore probe resource imported from the MS Project file."""
+    """A Tastatore probe resource in the inventory."""
 
     uid = models.CharField(max_length=100, primary_key=True)
     diameter = models.CharField(max_length=50, null=True, blank=True)
@@ -343,7 +336,7 @@ class TastatoreItem(models.Model):
 
 
 class MascheraItem(models.Model):
-    """A Maschera fixture resource imported from the MS Project file."""
+    """A Maschera fixture resource in the inventory."""
 
     uid = models.CharField(max_length=100, primary_key=True)
     pitch = models.CharField(max_length=50, null=True, blank=True)
@@ -358,7 +351,7 @@ class MascheraItem(models.Model):
 
 
 class GeneratoreItem(models.Model):
-    """A Generatore power-supply resource imported from the MS Project file."""
+    """A Generatore power-supply resource in the inventory."""
 
     uid = models.CharField(max_length=100, primary_key=True)
     model = models.CharField(max_length=200, null=True, blank=True)
@@ -373,84 +366,8 @@ class GeneratoreItem(models.Model):
         return self.uid
 
 
-class MppSyncQueue(models.Model):
-    """A pending change to be written back to the MS Project file.
-
-    Each entry represents one atomic operation (add task, add resource, or
-    delete resource) that was performed via the web app and has not yet been
-    applied to the ``.mpp`` source file.  Entries are processed in creation
-    order by the write-back service when the last user logs out.
-    """
-
-    OPERATION_CHOICES = [
-        ("add_task", "Add Task"),
-        ("update_task", "Update Task"),
-        ("delete_task", "Delete Task"),
-        ("add_resource", "Add Resource"),
-        ("update_resource", "Update Resource"),
-        ("delete_resource", "Delete Resource"),
-        ("add_job", "Add Job"),
-        ("update_job", "Update Job"),
-        ("delete_job", "Delete Job"),
-    ]
-
-    operation = models.CharField(max_length=30, choices=OPERATION_CHOICES)
-    payload_json = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        """Table metadata for MppSyncQueue."""
-
-        db_table = "mpp_sync_queue"
-        ordering = ["created_at"]
-
-    def __str__(self) -> str:
-        """Return a short description of this queue entry.
-
-        Returns:
-            str: Operation type and creation timestamp.
-        """
-        return f"{self.operation} @ {self.created_at}"
-
-
-class SyncSessionState(models.Model):
-    """Singleton row that persists the import/write-back phase across restarts.
-
-    Survives process restarts so a non-empty working copy is never mistaken for
-    a fresh session and wiped before changes are flushed to ``.mpp`` / ``.xlsx``.
-    """
-
-    PHASE_IDLE = "idle"
-    PHASE_LOADING = "loading"
-    PHASE_READY = "ready"
-    PHASE_WRITING = "writing"
-    PHASE_DIRTY = "dirty"
-
-    PHASE_CHOICES = [
-        (PHASE_IDLE, "Idle"),
-        (PHASE_LOADING, "Loading"),
-        (PHASE_READY, "Ready"),
-        (PHASE_WRITING, "Writing"),
-        (PHASE_DIRTY, "Dirty"),
-    ]
-
-    singleton_id = models.PositiveSmallIntegerField(primary_key=True, default=1)
-    phase = models.CharField(max_length=20, choices=PHASE_CHOICES, default=PHASE_IDLE)
-    last_error = models.TextField(blank=True, default="")
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = "sync_session_state"
-
-    def __str__(self) -> str:
-        return f"SyncSessionState({self.phase})"
-
-
 class ConfigurazioneTesta(models.Model):
-    """Per-testa-model configuration: resource minimums and compatible generators.
-
-    Persistent data — not cleared by reset_app_dataset().
-    """
+    """Per-testa-model configuration: resource minimums and compatible generators."""
 
     modello_testa = models.CharField(max_length=100, unique=True)
     min_mandrini = models.PositiveIntegerField(default=1)
@@ -559,14 +476,13 @@ class ProblemaAttivita(models.Model):
 
 
 class RisoluzioneProblema(models.Model):
-    """Persistent resolved-problem note that survives dataset resets.
+    """Resolved-problem note kept independently of the activity rows.
 
     Unlike :class:`ProblemaAttivita`, this record is NOT linked to an
-    :class:`Attivita` foreign-key, so it is not cascade-deleted when the
-    activity table is wiped during a re-import cycle.  After each import
-    the resolution notes are matched back to the newly created
-    :class:`ProblemaAttivita` rows by activity identity
-    (commessa + item + activity) and problem signature
+    :class:`Attivita` foreign-key, so it is not cascade-deleted with the
+    activity.  :func:`ui.services.problem_detection.restore_resolved_notes`
+    matches the notes back to :class:`ProblemaAttivita` rows by activity
+    identity (commessa + item + activity) and problem signature
     (tipo + risorsa_tipo + risorsa_uid).
     """
 
@@ -614,10 +530,10 @@ class OperationLog(models.Model):
     every human-facing mutating endpoint (web and tablet) and from the
     automatic problem-detection / auto-resolution / auto-reassignment
     services.  Never carries a foreign key to :class:`Attivita` or any
-    inventory row: those tables are periodically wiped and reimported, and
-    the log must survive that cycle, so identity is stored as plain text
-    in ``riferimento`` (commessa/item/activity or resource uid), exactly
-    like :class:`RisoluzioneProblema`.
+    inventory row: the log must outlive deleted activities and resources,
+    so identity is stored as plain text in ``riferimento``
+    (commessa/item/activity or resource uid), exactly like
+    :class:`RisoluzioneProblema`.
     """
 
     SOURCE_WEB = "web"

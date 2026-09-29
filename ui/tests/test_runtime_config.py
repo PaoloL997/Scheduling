@@ -7,18 +7,17 @@ from ui.services.runtime_config import load_runtime_config
 
 
 class RuntimeConfigTest(TestCase):
-    @override_settings(
-        HEARTBEAT_INTERVAL_SECONDS="1",
-        HEARTBEAT_TIMEOUT_SECONDS="2",
-        MSP_DISPATCH_RETRY_INTERVAL_SECONDS="0.01",
-        MSP_DISPATCH_RETRY_MAX_WAIT_SECONDS="0.02",
-    )
-    def test_load_runtime_config_applies_safety_bounds(self) -> None:
+    @override_settings(PENALE_MAX="-3", SOLVER_TIME_LIMIT="0.2")
+    def test_load_runtime_config_applies_lower_bounds(self) -> None:
         cfg = load_runtime_config()
-        self.assertEqual(cfg.heartbeat_interval_seconds, 5)
-        self.assertEqual(cfg.heartbeat_timeout_seconds, 10)
-        self.assertEqual(cfg.msp_dispatch_retry_interval_seconds, 0.1)
-        self.assertEqual(cfg.msp_dispatch_retry_max_wait_seconds, 0.1)
+        self.assertEqual(cfg.penale_max, 0.0)
+        self.assertEqual(cfg.solver_time_limit, 1.0)
+
+    @override_settings(PENALE_MAX="250", SOLVER_TIME_LIMIT="9000")
+    def test_load_runtime_config_applies_upper_bounds(self) -> None:
+        cfg = load_runtime_config()
+        self.assertEqual(cfg.penale_max, 100.0)
+        self.assertEqual(cfg.solver_time_limit, 600.0)
 
     @override_settings(OPENAI_WPS_MODEL="")
     def test_empty_wps_model_falls_back_to_default(self) -> None:

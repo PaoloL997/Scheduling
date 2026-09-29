@@ -37,7 +37,6 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "ui.middleware.SessionTrackingMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
 ]
 
@@ -111,11 +110,6 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "filters": {
-        "suppress_status_endpoint": {
-            "()": "config.logging_filters.SuppressStatusEndpoint",
-        },
-    },
     "formatters": {
         "verbose": {
             "format": "{levelname} {asctime} {name} — {message}",
@@ -126,7 +120,6 @@ LOGGING = {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
-            "filters": ["suppress_status_endpoint"],
         },
     },
     "loggers": {
@@ -154,24 +147,12 @@ LOGGING = {
 }
 
 # ---------------------------------------------------------------------------
-# Application-specific paths
+# Application runtime settings
 # ---------------------------------------------------------------------------
 
-SERVER_DIR = os.getenv("SERVER_DIR", "")
-MPP_PATH = os.getenv("MPP_PATH", str(BASE_DIR / "dataset.mpp"))
-XLSX_PATH = os.getenv("XLSX_PATH", str(BASE_DIR / "jobs.xlsx"))
 PENALE_MAX = os.getenv("PENALE_MAX", "5")
 SOLVER_TIME_LIMIT = os.getenv("SOLVER_TIME_LIMIT", "10")
-HEARTBEAT_INTERVAL_SECONDS = os.getenv("HEARTBEAT_INTERVAL_SECONDS", "30")
-HEARTBEAT_TIMEOUT_SECONDS = os.getenv("HEARTBEAT_TIMEOUT_SECONDS", "90")
-MSP_DISPATCH_RETRY_INTERVAL_SECONDS = os.getenv(
-    "MSP_DISPATCH_RETRY_INTERVAL_SECONDS", "0.5"
-)
-MSP_DISPATCH_RETRY_MAX_WAIT_SECONDS = os.getenv(
-    "MSP_DISPATCH_RETRY_MAX_WAIT_SECONDS", "5.0"
-)
 OPENAI_WPS_MODEL = os.getenv("OPENAI_WPS_MODEL", "gpt-5.6-sol")
-AUTO_IMPORT_ON_STARTUP = os.getenv("AUTO_IMPORT_ON_STARTUP", "true")
 
 # ---------------------------------------------------------------------------
 # Media files (WPS PDF uploads)

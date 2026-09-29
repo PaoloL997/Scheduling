@@ -1,4 +1,4 @@
-"""JSON bridge API for external devices (tablets) over SQLite."""
+"""JSON bridge API for external devices (tablets)."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from ui.permissions import (
     has_write_access,
     is_admin_user,
 )
-from ui.services.bridge_import import request_import
 from ui.services.bridge_serializers import (
     serialize_app_settings,
     serialize_attivita,
@@ -35,7 +34,6 @@ from ui.services.bridge_serializers import (
 from ui.services.bridge_write import BridgeWriteError, delete_attivita, update_attivita
 from ui.services.scan_substitution import scan_resource
 from ui.views_auth import user_stabilimento_name
-from ui.services.importer import ImportStatus, get_error_detail, get_status
 from ui import views
 from ui import views_attivita
 
@@ -77,27 +75,21 @@ def _parse_json(request: HttpRequest) -> dict | JsonResponse:
 
 
 def bridge_read_guard(view):
-    """Require authenticated user and READY import status for read endpoints."""
+    """Require an authenticated user for read endpoints."""
 
     @wraps(view)
     @login_required
     def wrapper(request: HttpRequest, *args, **kwargs):
-        status = get_status()
-        if status == ImportStatus.WRITING:
-            return _err("Write-back in corso.", status=409)
-        if status != ImportStatus.READY:
-            return _err("Dataset non pronto.", status=503)
         return view(request, *args, **kwargs)
 
     return wrapper
 
 
 def bridge_write_guard(view):
-    """Require write permission and READY import status for mutating endpoints.
+    """Require write permission for mutating endpoints.
 
-    Read-only accounts (``lettura`` layer) are refused with HTTP 403 before
-    the dataset status is even considered, so the tablet can show a clear
-    "sola lettura" message.
+    Read-only accounts (``lettura`` layer) are refused with HTTP 403 so the
+    tablet can show a clear "sola lettura" message.
     """
 
     @wraps(view)
@@ -106,11 +98,6 @@ def bridge_write_guard(view):
     def wrapper(request: HttpRequest, *args, **kwargs):
         if not has_write_access(request.user):
             return _err(WRITE_DENIED_MESSAGE, status=403)
-        status = get_status()
-        if status == ImportStatus.WRITING:
-            return _err("Write-back in corso.", status=409)
-        if status != ImportStatus.READY:
-            return _err("Dataset non pronto.", status=503)
         return view(request, *args, **kwargs)
 
     return wrapper
@@ -167,12 +154,7 @@ def api_bridge_auth_login(request: HttpRequest) -> JsonResponse:
 @login_required
 def api_bridge_auth_logout(request: HttpRequest) -> JsonResponse:
     """End the current session."""
-    session_key = request.session.session_key
     logout(request)
-    if session_key:
-        from ui.services.project_session import project_session
-
-        project_session.unregister_session(session_key)
     return _ok()
 
 
@@ -190,21 +172,18 @@ def api_bridge_auth_me(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET"])
 @login_required
 def api_bridge_status(request: HttpRequest) -> JsonResponse:
-    """Return import pipeline status for tablet polling."""
-    from ui.services.sync_state import get_last_error, get_phase, pending_queue_count
+    """Return the dataset status for tablet polling.
 
-    status = get_status()
-    detail = ""
-    if status == ImportStatus.ERROR:
-        detail = get_error_detail()
-    elif get_phase() == "dirty" or get_last_error():
-        detail = get_last_error() or get_error_detail()
+    The data live in the database, so the dataset is always ready.  The
+    response keeps the fields of the former import pipeline so existing
+    tablet clients keep working.
+    """
     return _ok(
         {
-            "status": status.value,
-            "detail": detail,
-            "pending_queue_count": pending_queue_count(),
-            "sync_phase": get_phase(),
+            "status": "ready",
+            "detail": "",
+            "pending_queue_count": 0,
+            "sync_phase": "ready",
         }
     )
 
@@ -213,23 +192,22 @@ def api_bridge_status(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST"])
 @login_required
 def api_bridge_import(request: HttpRequest) -> JsonResponse:
-    """Trigger a fresh MPP/XLSX import.
+    """Refuse the former MS Project / Excel import with HTTP 410.
 
-    Re-importing replaces the working dataset, so it is reserved to accounts
-    with write permission.
+    The data live in the database, so there is nothing to import.  The route
+    is kept so older tablet clients get an explicit answer.
     """
-    if not has_write_access(request.user):
-        return _err(WRITE_DENIED_MESSAGE, status=403)
-
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-
-    force = bool(parsed.get("force", False))
-    result = request_import(force=force)
-    if not result["accepted"]:
-        return JsonResponse({"ok": False, **result}, status=409)
-    return JsonResponse({"ok": True, **result}, status=202)
+    return JsonResponse(
+        {
+            "ok": False,
+            "accepted": False,
+            "status": "ready",
+            "message": (
+                "Import da MS Project/Excel dismesso: i dati risiedono nel database."
+            ),
+        },
+        status=410,
+    )
 
 
 # ── Read ──────────────────────────────────────────────────────────────────────

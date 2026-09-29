@@ -26,16 +26,7 @@ def open_problems(request: HttpRequest) -> dict:
         dict: ``{"global_open_problems": int}`` — unresolved problems
             (acquisto, spostamento, and overlap without a substitute).
     """
-    from ui.services.runtime_config import load_runtime_config
-
-    runtime = load_runtime_config()
-    total = _count_open_problems()
-
-    return {
-        "global_open_problems": total,
-        "heartbeat_interval_ms": runtime.heartbeat_interval_seconds * 1000,
-        "heartbeat_timeout_ms": runtime.heartbeat_timeout_seconds * 1000,
-    }
+    return {"global_open_problems": _count_open_problems()}
 
 
 def user_permissions(request: HttpRequest) -> dict:
