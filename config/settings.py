@@ -63,10 +63,26 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+_missing_db_keys = [
+    key for key in ("DB_NAME", "DB_USER", "DB_PASSWORD") if not os.getenv(key)
+]
+if _missing_db_keys:
+    raise RuntimeError(
+        "Configurazione PostgreSQL incompleta: impostare "
+        f"{', '.join(_missing_db_keys)} nel file .env o come variabili d'ambiente."
+    )
+
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.getenv("DB_NAME"),
+        "USER": os.getenv("DB_USER"),
+        "PASSWORD": os.getenv("DB_PASSWORD"),
+        "HOST": os.getenv("DB_HOST", "localhost"),
+        "PORT": os.getenv("DB_PORT", "5432"),
+        "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
+        "CONN_HEALTH_CHECKS": True,
+        "OPTIONS": {"connect_timeout": 5},
     }
 }
 

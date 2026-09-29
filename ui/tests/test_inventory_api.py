@@ -42,6 +42,17 @@ class InventoryApiTest(TestCase):
         self.assertTrue(GeneratoreItem.objects.filter(uid="G200").exists())
         self.assertTrue(MppSyncQueue.objects.filter(operation="add_resource").exists())
 
+    def test_add_duplicate_uid_keeps_transaction_usable(self) -> None:
+        resp = self.client.post(
+            reverse("api_inventario_add", kwargs={"table": "Generatore"}),
+            data=json.dumps({"uid": "G100", "model": "g9"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn("già presente", resp.json()["error"])
+        # PostgreSQL aborts the whole transaction on an unguarded IntegrityError.
+        self.assertEqual(GeneratoreItem.objects.get(uid="G100").model, "g1")
+
     def test_patch_single_field(self) -> None:
         resp = self.client.patch(
             reverse(

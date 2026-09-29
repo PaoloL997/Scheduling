@@ -83,6 +83,20 @@ class UserProfileRuoloTest(TestCase):
         user = create_writer("stabile")
         self.assertFalse(sync_user_flags(user.profile))
 
+    def test_fixture_user_gets_no_automatic_profile(self) -> None:
+        # ``loaddata`` saves with raw=True and brings its own profiles.
+        User(username="da-fixture", password="!").save_base(raw=True)
+        self.assertFalse(
+            UserProfile.objects.filter(user__username="da-fixture").exists()
+        )
+
+    def test_fixture_profile_keeps_dumped_flags(self) -> None:
+        user = create_writer("staff-storico")
+        User.objects.filter(pk=user.pk).update(is_staff=True)
+        user.profile.save_base(raw=True)
+        user.refresh_from_db()
+        self.assertTrue(user.is_staff)
+
 
 class ReadOnlyApiAccessTest(TestCase):
     """A ``lettura`` account may read but never mutate."""

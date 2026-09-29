@@ -10,7 +10,7 @@ added to :class:`~ui.models.MppSyncQueue` so the change is written back to the
 
 import json
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 
 _ALLOWED_TABLES = {"Generatore", "Mandrino", "Maschera", "Tastatore", "Testa"}
 
@@ -124,7 +124,8 @@ def insert_resource(table: str, data: dict) -> None:
         row["in_manutenzione"] = maintenance
 
     try:
-        model_class.objects.create(**row)
+        with transaction.atomic():
+            model_class.objects.create(**row)
     except IntegrityError as exc:
         raise ValueError(f"uid '{data.get('uid')}' già presente in {table}.") from exc
 
@@ -218,7 +219,8 @@ def patch_resource(table: str, original_uid: str, data: dict) -> str:
     )
 
     try:
-        model_class.objects.filter(uid=original_uid).update(**updates)
+        with transaction.atomic():
+            model_class.objects.filter(uid=original_uid).update(**updates)
     except IntegrityError as exc:
         new_uid = updates.get("uid", original_uid)
         raise ValueError(f"uid '{new_uid}' già presente in {table}.") from exc
@@ -270,7 +272,8 @@ def update_resource(table: str, original_uid: str, data: dict) -> None:
         obj.in_manutenzione = False
         maintenance = False
     try:
-        obj.save()
+        with transaction.atomic():
+            obj.save()
     except IntegrityError as exc:
         raise ValueError(f"uid '{data.get('uid')}' già presente in {table}.") from exc
 

@@ -70,7 +70,8 @@ def on_user_saved(sender, instance, created, **kwargs) -> None:
         instance: The user that was just saved.
         created: Whether the row was inserted rather than updated.
     """
-    if not created:
+    # Fixture loading (``loaddata``) brings its own profiles along.
+    if not created or kwargs.get("raw"):
         return
 
     from ui.permissions import get_or_create_profile
@@ -89,6 +90,10 @@ def on_profile_saved(sender, instance, **kwargs) -> None:
         sender: The :class:`~ui.models.UserProfile` model class.
         instance: The profile that was just saved.
     """
+    # Fixture loading (``loaddata``) restores the flags exactly as dumped.
+    if kwargs.get("raw"):
+        return
+
     from ui.permissions import sync_user_flags
 
     sync_user_flags(instance)

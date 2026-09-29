@@ -6,7 +6,7 @@ from datetime import date, timedelta
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
@@ -366,7 +366,7 @@ def _fetch_tasks() -> list[dict]:
 
     activities = list(
         Attivita.objects.prefetch_related("risorse", "problemi").order_by(
-            "job_id", "data_inizio", "activity_id"
+            "job_id", F("data_inizio").asc(nulls_first=True), "activity_id"
         )
     )
     id_to_name = {normalize_activity_id(a.activity_id): a.activity for a in activities}
@@ -1242,7 +1242,7 @@ def api_jobs_check(request: HttpRequest) -> JsonResponse:
     )
     # Any activity of the same commessa can be chosen as predecessor.
     predecessor_qs = Attivita.objects.filter(commessa=commessa).order_by(
-        "item", "data_inizio", "id"
+        "item", F("data_inizio").asc(nulls_first=True), "id"
     )
     predecessors = [
         {
