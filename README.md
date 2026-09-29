@@ -1,46 +1,32 @@
 # Production Scheduling
 
-A Django web application for managing and visualising a production schedule stored in an MS Project (`.mpp`) file.
+A Django web application for planning and tracking a production schedule, backed by a PostgreSQL database.
 
 ## Overview
 
-The app bridges MS Project and a browser-based UI. It imports tasks and resources from a `.mpp` file at session start, lets users view and edit the schedule through the web interface, and writes all changes back to the `.mpp` file when the last user logs out.
+Activities, commesse, resource assignments and the inventory live in PostgreSQL. Planners work in the browser, operators on tablets through the JSON bridge API, and every change is written straight to the database: nothing is imported from or written back to external files.
 
 ## Key concepts
 
-### Data sources
-| File | Role |
-|------|------|
-| `dataset.mpp` | MS Project file — primary source for tasks, resources, and assignments |
-| `jobs.xlsx` | Excel file — job metadata (cost, penalty, delivery date) |
+### Data
+| Table | Content |
+|------|---------|
+| `attivita`, `risorse_attivita` | Activities and the resources assigned to them |
+| `job` | Commesse: cost, penalty, delivery date |
+| `testa_item`, `mandrino_item`, `tastatore_item`, `maschera_item`, `generatore_item` | Inventory |
+| `configurazione_testa`, `generatore_compatibile` | Per-testa requirements and compatible generators |
+| `problema_attivita`, `operation_log` | Operational problems and audit trail |
 
-Both files live outside version control and are managed by the application at runtime.
-
-### Session lifecycle
-1. **Server start** — file paths are configured; no files are touched.
-2. **First login** — the `.mpp` and `.xlsx` are imported into the Django ORM; the `.mpp` is then held open via the MS Project COM API, locking it at the OS level.
-3. **Active session** — changes made through the UI are persisted in `db.sqlite3` and queued in `MppSyncQueue`.
-4. **Last logout** — queued changes are written back to the `.mpp` via COM, the file is saved, and the lock is released.
-
-> The COM lock is in-process. Use a **single-worker** server (e.g. `waitress` or `runserver`); multi-process deployments are not supported.
+See [docs/dataset.md](docs/dataset.md) for the data lifecycle.
 
 ### Architecture
 ```
-dataset.mpp ─┐
-             ├─► src/data/import.py ──► Django ORM (db.sqlite3)
-jobs.xlsx   ─┘                              │
-                                            ▼
-                                    ui/ (views, templates)
-                                            │
-                                    MppSyncQueue
-                                            │
-                                            ▼
-                                   src/data/project.py
-                                   (MS Project COM API)
-                                            │
-                                            ▼
-                                      dataset.mpp (write-back)
+browser ──┐
+          ├─► Django (ui/: views, services, bridge API) ──► PostgreSQL
+tablet  ──┘
 ```
+
+The "Importa da Excel" button in Inventario bulk-loads resources from an `.xlsx` file into the database; it is an upload tool, not a data source.
 
 ### WPS integration
 Activities can have a WPS (Welding Procedure Specification) PDF attached. The app sends it to the **OpenAI Responses API** (`gpt-5.6-sol` by default, set `OPENAI_WPS_MODEL` in `.env` to change it) to extract bore dimensions and tube pitch, pre-filling the resource selection step of the activity wizard. The answer is constrained by a strict JSON schema, and the extraction is best-effort: when it fails the wizard says why and the planner types the measurements by hand.
@@ -102,7 +88,7 @@ definition of the rule; `/api/tasks/update/` and the tablet bridge both reach it
 through `update_attivita` and answer **400** with the two dates spelled out.
 
 Only a *new* value is checked, so an activity that already carries a future
-`actual_start` — imported from the `.mpp` before the rule existed — stays
+`actual_start` — imported from MS Project before the rule existed — stays
 editable, and correcting it to today or to a past date always works. Planned
 dates (`start` / `finish`) are unaffected: planning ahead is the point.
 
@@ -210,18 +196,51 @@ python manage.py seed_optimization_demo --clear
 
 `--reschedule` creates commesse **R301** (late Saldatura) and **R305** (blocked Montaggio + Collaudo/Imballo chain, independent Documentazione). Open Planning → R305 → Notes to accept or reject.
 
+The seeds write to the configured database and stay there until removed with `--clear`: run them only against a development database.
+
 ## Requirements
 
-- Windows (MS Project COM API)
-- MS Project installed
 - Python 3.13+
 - Poetry
+- PostgreSQL 14+
 
 ## Setup
 
+Create the database role and the database (the role needs `CREATEDB` to run the tests):
+
+```sql
+CREATE ROLE scheduling LOGIN CREATEDB PASSWORD '<password>';
+CREATE DATABASE scheduling OWNER scheduling ENCODING 'UTF8' TEMPLATE template0;
+```
+
+Then:
+
 ```bash
 poetry install
-cp .env.example .env   # add OPENAI_API_KEY
+cp .env.example .env   # set DB_PASSWORD (and DB_* if not local), OPENAI_API_KEY
 python manage.py migrate
+python manage.py createsuperuser
 python manage.py runserver
+```
+
+| `.env` key | Default | Meaning |
+|------------|---------|---------|
+| `DB_NAME`, `DB_USER`, `DB_PASSWORD` | — (required) | Database, role and password |
+| `DB_HOST`, `DB_PORT` | `localhost`, `5432` | Server address |
+| `DB_CONN_MAX_AGE` | `60` | Seconds a connection is reused (0 = one per request) |
+
+Tests run against the same server, on a `test_<DB_NAME>` database:
+
+```bash
+python manage.py test ui
+pytest src/optimization/tests
+```
+
+### Backups
+
+The database is the only copy of the data. Back it up regularly, for example:
+
+```bash
+pg_dump -Fc -U scheduling -d scheduling -f scheduling-YYYYMMDD.dump
+pg_restore -U scheduling -d scheduling --clean scheduling-YYYYMMDD.dump
 ```
