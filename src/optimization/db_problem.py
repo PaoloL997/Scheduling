@@ -1,9 +1,11 @@
-"""Build realistic scheduling problems from the local SQLite application DB.
+"""Build realistic scheduling problems from a SQLite snapshot of the app tables.
 
-The Django app already stores the two inputs the solver needs: operational
-activities in ``attivita`` and physical inventory in the ``*_item`` tables.
-This module converts those rows into the pure optimization data model, without
-depending on Django settings or ORM startup.
+The snapshot (for example the one built by ``mockup_db.py``) holds the two
+inputs the solver needs: operational activities in ``attivita`` and physical
+inventory in the ``*_item`` tables.  This module converts those rows into the
+pure optimization data model, without depending on Django settings or ORM
+startup.  The web app itself builds its problems through the ORM in
+:mod:`ui.services.optimization_problem`.
 """
 
 from __future__ import annotations
@@ -29,7 +31,6 @@ from src.optimization.data_model import (
     SchedulingProblem,
 )
 
-DEFAULT_DB_PATH = Path("db.sqlite3")
 MINUTES_PER_WORKING_DAY = 8 * 60
 
 
@@ -375,7 +376,7 @@ def _build_jobs(
 
 
 def load_scheduling_problem_from_sqlite(
-    db_path: str | Path = DEFAULT_DB_PATH,
+    db_path: str | Path,
     *,
     horizon_start: date | None = None,
     horizon_days: int | None = None,
@@ -383,7 +384,7 @@ def load_scheduling_problem_from_sqlite(
     clone_spacing_days: int = 3,
     due_date_tightening_days: int = 0,
 ) -> SchedulingProblem:
-    """Load a ``SchedulingProblem`` from the application SQLite database.
+    """Load a ``SchedulingProblem`` from a SQLite snapshot of the app tables.
 
     ``amplify_factor`` deterministically clones the real commesse to create a
     larger benchmark while preserving durations, requirements and due-date
@@ -446,9 +447,9 @@ def _summary(problem: SchedulingProblem) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build a SchedulingProblem from db.sqlite3."
+        description="Build a SchedulingProblem from a SQLite snapshot."
     )
-    parser.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    parser.add_argument("--db", required=True, help="Path of the SQLite snapshot.")
     parser.add_argument("--amplify-factor", type=int, default=1)
     parser.add_argument("--clone-spacing-days", type=int, default=3)
     parser.add_argument("--due-date-tightening-days", type=int, default=0)

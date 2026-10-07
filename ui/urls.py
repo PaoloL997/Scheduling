@@ -57,7 +57,6 @@ urlpatterns = [
         views_ottimizzazione.api_ottimizzazione_accetta,
         name="api_ottimizzazione_accetta",
     ),
-    path("api/status/", views.api_status, name="api_status"),
     path(
         "api/bridge/auth/login/",
         views_bridge.api_bridge_auth_login,
@@ -209,7 +208,6 @@ urlpatterns = [
         views_bridge.api_bridge_config_testa,
         name="api_bridge_config_testa",
     ),
-    path("api/heartbeat/", views.api_heartbeat, name="api_heartbeat"),
     path(
         "api/inventario/import-excel/",
         views_import.api_inventario_import_excel,

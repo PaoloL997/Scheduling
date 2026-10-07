@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import date
 from typing import Any
 
@@ -13,7 +12,6 @@ from ui.models import (
     GeneratoreItem,
     MandrinoItem,
     MascheraItem,
-    MppSyncQueue,
     RisorsaAttivita,
     TastatoreItem,
     TestaItem,
@@ -162,10 +160,6 @@ def apply_optimization_result(result_payload: dict[str, Any]) -> int:
     with transaction.atomic():
         updated = 0
         for att, start, finish, pairs in updates:
-            old_commessa = att.commessa
-            old_item = att.item
-            old_activity = att.activity
-
             att.data_inizio = start
             att.data_fine = finish
             att.save(
@@ -181,34 +175,6 @@ def apply_optimization_result(result_payload: dict[str, Any]) -> int:
                     ]
                 )
 
-            MppSyncQueue.objects.create(
-                operation="update_task",
-                payload_json=json.dumps(
-                    {
-                        "attivita_id": att.pk,
-                        "commessa": att.commessa,
-                        "item": att.item,
-                        "activity": att.activity,
-                        "old_commessa": old_commessa,
-                        "old_item": old_item,
-                        "old_activity": old_activity,
-                        "start": att.data_inizio.isoformat(),
-                        "finish": att.data_fine.isoformat(),
-                        "actual_start": att.actual_start.isoformat()
-                        if att.actual_start
-                        else None,
-                        "actual_finish": att.actual_finish.isoformat()
-                        if att.actual_finish
-                        else None,
-                        "plant": att.stabilimento or None,
-                        "responsible": att.responsabile or None,
-                        # Always sent, empty list included: the assignments
-                        # above were just rewritten, and the write-back only
-                        # touches the .mpp resources when the key is present.
-                        "resources": [rid for _, rid in pairs],
-                    }
-                ),
-            )
             updated += 1
 
         # Validate against the fully-applied state: a proposal moves many

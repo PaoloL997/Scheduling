@@ -1,6 +1,5 @@
 """Tests for overlap auto-reassignment and persisted notes/problems."""
 
-import json
 from datetime import date, timedelta
 
 from django.test import Client, TestCase
@@ -12,7 +11,6 @@ from ui.models import (
     GeneratoreItem,
     Job,
     MandrinoItem,
-    MppSyncQueue,
     ProblemaAttivita,
     RisorsaAttivita,
     TestaItem,
@@ -226,7 +224,9 @@ class RescheduleProposalTest(TestCase):
             min_generatori=0,
         )
         TestaItem.objects.create(uid="OV-T1", model="TP60", plant="Valbrembo")
-        Job.objects.create(commessa="C205", delivery_date=date(2026, 9, 30))
+        Job.objects.create(
+            commessa="C205", delivery_date=localdate() + timedelta(days=90)
+        )
         self.late = Attivita.objects.create(
             commessa="C101",
             item=1,
@@ -413,8 +413,8 @@ class OverdueRescheduleProposalTest(TestCase):
         self.assertEqual(row.proposta_json.get("status"), "proposed")
 
 
-class RescheduleWriteBackTest(TestCase):
-    """Accepting a reschedule must reach the .mpp with the resources too."""
+class RescheduleResourcesTest(TestCase):
+    """Accepting a reschedule keeps the resource assignment."""
 
     def setUp(self) -> None:
         ConfigurazioneTesta.objects.create(
@@ -458,7 +458,7 @@ class RescheduleWriteBackTest(TestCase):
                 attivita=self.blocked, tipo=tipo, risorsa_id=uid
             )
 
-    def test_accepting_queues_the_resources_for_the_mpp(self) -> None:
+    def test_accepting_keeps_the_resources(self) -> None:
         auto_resolve_resource_overlaps()
         self.assertEqual(
             compute_reschedule_proposal(self.blocked.pk).get("status"), "proposed"
@@ -466,13 +466,8 @@ class RescheduleWriteBackTest(TestCase):
 
         apply_reschedule(self.blocked.pk)
 
-        payloads = [
-            json.loads(e.payload_json)
-            for e in MppSyncQueue.objects.filter(operation="update_task")
-        ]
-        mine = [p for p in payloads if p.get("attivita_id") == self.blocked.pk]
-        self.assertTrue(mine, "nessuna voce di coda per l'attivita' ripianificata")
-        # Absent key = the write-back skips set_task_resources and the .mpp
-        # keeps the previous assignment while the database has the new one.
-        self.assertIn("resources", mine[0])
-        self.assertEqual(sorted(mine[0]["resources"]), ["G1", "M1", "OV-T1"])
+        resources = RisorsaAttivita.objects.filter(attivita=self.blocked)
+        self.assertEqual(
+            sorted(resources.values_list("risorsa_id", flat=True)),
+            ["G1", "M1", "OV-T1"],
+        )

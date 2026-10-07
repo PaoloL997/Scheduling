@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from django.test import Client, RequestFactory, TestCase
 
-from ui.models import Attivita, Job, MppSyncQueue, RisorsaAttivita, TipoAttivita
+from ui.models import Attivita, Job, RisorsaAttivita, TipoAttivita
 
 from ui.services.resource_conflicts import (
     ResourceAssignment,
@@ -248,12 +248,6 @@ class ApiTasksUpdateConflictTest(TestCase):
         api_tasks_update(req)
         self.a.refresh_from_db()
         self.assertEqual(self.a.data_fine.isoformat(), "2026-06-10")
-
-    def test_conflict_does_not_enqueue(self) -> None:
-        MppSyncQueue.objects.all().delete()
-        req = self._put({"orm_id": self.a.pk, "finish": "2026-06-22"})
-        api_tasks_update(req)
-        self.assertEqual(MppSyncQueue.objects.count(), 0)
 
     def test_safe_date_change_succeeds(self) -> None:
         req = self._put({"orm_id": self.a.pk, "finish": "2026-06-12"})

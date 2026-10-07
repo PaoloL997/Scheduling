@@ -154,15 +154,7 @@ def serialize_app_settings() -> dict:
     return {
         "penale_max": cfg.penale_max,
         "solver_time_limit": cfg.solver_time_limit,
-        "mpp_path": cfg.mpp_path,
-        "xlsx_path": cfg.xlsx_path,
-        "server_dir": cfg.server_dir,
-        "heartbeat_interval_seconds": cfg.heartbeat_interval_seconds,
-        "heartbeat_timeout_seconds": cfg.heartbeat_timeout_seconds,
-        "msp_dispatch_retry_interval_seconds": cfg.msp_dispatch_retry_interval_seconds,
-        "msp_dispatch_retry_max_wait_seconds": cfg.msp_dispatch_retry_max_wait_seconds,
         "openai_wps_model": cfg.openai_wps_model,
-        "auto_import_on_startup": cfg.auto_import_on_startup,
     }
 
 

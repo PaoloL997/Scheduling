@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import datetime
-import json
 import logging
 
 from django.db import transaction
 from django.utils.timezone import localdate
 
-from ui.models import Attivita, MppSyncQueue, RisorsaAttivita
+from ui.models import Attivita, RisorsaAttivita
 from ui.services.resource_conflicts import (
     ResourceConflictError,
     find_conflicts,
@@ -174,7 +173,7 @@ def validate_actual_start_not_future(
 
 
 def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -> dict:
-    """Update a single :class:`~ui.models.Attivita` and enqueue write-back.
+    """Update a single :class:`~ui.models.Attivita`.
 
     Args:
         orm_id: Primary key of the activity.
@@ -240,7 +239,7 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
         a.actual_start = _parse_date(data["actual_start"], "Inizio effettivo")
         # Only a *new* value is checked: the pianificazione panel echoes the
         # field back untouched, so an activity already carrying a future start
-        # (imported from the .mpp before the rule existed) stays editable.
+        # (imported from MS Project before the rule existed) stays editable.
         if a.actual_start != old_actual_start:
             validate_actual_start_not_future(a.actual_start)
     if "actual_finish" in data:
@@ -390,31 +389,6 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
 
         refresh_problems_for_attivita(a)
 
-    mpp_payload: dict = {
-        "attivita_id": orm_id,
-        "commessa": a.commessa,
-        "item": a.item,
-        "activity": a.activity,
-        "old_commessa": old_commessa,
-        "old_item": old_item,
-        "old_activity": old_activity,
-        "start": a.data_inizio.isoformat() if a.data_inizio else None,
-        "finish": a.data_fine.isoformat() if a.data_fine else None,
-        "actual_start": a.actual_start.isoformat() if a.actual_start else None,
-        "actual_finish": a.actual_finish.isoformat() if a.actual_finish else None,
-        "plant": a.stabilimento or None,
-        "responsible": a.responsabile or None,
-    }
-    if "predecessors" in data:
-        mpp_payload["predecessors"] = a.predecessors or ""
-    if new_risorse_pairs is not None:
-        mpp_payload["resources"] = [rid for _, rid in new_risorse_pairs]
-
-    MppSyncQueue.objects.create(
-        operation="update_task",
-        payload_json=json.dumps(mpp_payload),
-    )
-
     result = {
         "item": a.item,
         "job_id": a.job_id,
@@ -452,35 +426,8 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
     return result
 
 
-def cancel_pending_task_ops(attivita_id: int) -> None:
-    """Remove pending add/update queue entries for an activity."""
-    for entry in MppSyncQueue.objects.filter(operation__in=["add_task", "update_task"]):
-        try:
-            payload = json.loads(entry.payload_json)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if payload.get("attivita_id") == attivita_id:
-            entry.delete()
-
-
-def reconcile_delete(attivita: Attivita) -> None:
-    """Reconcile MppSyncQueue before deleting an activity."""
-    cancel_pending_task_ops(attivita.pk)
-    if attivita.synced_to_mpp:
-        MppSyncQueue.objects.create(
-            operation="delete_task",
-            payload_json=json.dumps(
-                {
-                    "commessa": attivita.commessa,
-                    "item": attivita.item,
-                    "activity": attivita.activity,
-                }
-            ),
-        )
-
-
 def delete_attivita(orm_id: int) -> None:
-    """Delete an activity and reconcile the MppSyncQueue.
+    """Delete an activity together with its resources and problems.
 
     Args:
         orm_id: Primary key of the activity.
@@ -493,6 +440,4 @@ def delete_attivita(orm_id: int) -> None:
     except Attivita.DoesNotExist as exc:
         raise BridgeWriteError("Attività non trovata.", status_code=404) from exc
 
-    with transaction.atomic():
-        reconcile_delete(a)
-        a.delete()
+    a.delete()

@@ -13,7 +13,6 @@ import shutil
 import subprocess
 from datetime import date
 from pathlib import Path
-from unittest.mock import patch
 
 from django.test import Client, RequestFactory, TestCase
 from django.urls import reverse
@@ -25,7 +24,6 @@ from ui.models import (
     RisorsaAttivita,
 )
 from ui.services.bridge_write import BridgeWriteError, update_attivita
-from ui.services.importer import ImportStatus
 from ui.services.problem_detection import (
     format_missing_minimum_message,
     missing_minimum_resources,
@@ -33,10 +31,6 @@ from ui.services.problem_detection import (
 )
 from ui.tests.helpers import assign_minimum_kit, create_writer, write_user
 from ui.views import _attivita_to_task_dict, api_tasks_update
-
-
-def _ready_status():
-    return ImportStatus.READY
 
 
 def _activity(commessa: str = "C900", **kwargs) -> Attivita:
@@ -317,7 +311,6 @@ class AvvioApiTest(TestCase):
         self.assertEqual(self.att.actual_start, date(2026, 6, 1))
 
 
-@patch("ui.views_bridge.get_status", side_effect=_ready_status)
 class AvvioBridgeApiTest(TestCase):
     def setUp(self) -> None:
         create_writer("tablet-writer", password="pass")
@@ -332,7 +325,7 @@ class AvvioBridgeApiTest(TestCase):
             content_type="application/json",
         )
 
-    def test_bridge_refuses_the_start(self, _mock_status) -> None:
+    def test_bridge_refuses_the_start(self) -> None:
         resp = self._put()
 
         self.assertEqual(resp.status_code, 409)
@@ -343,7 +336,7 @@ class AvvioBridgeApiTest(TestCase):
         self.att.refresh_from_db()
         self.assertIsNone(self.att.actual_start)
 
-    def test_bridge_accepts_an_equipped_activity(self, _mock_status) -> None:
+    def test_bridge_accepts_an_equipped_activity(self) -> None:
         assign_minimum_kit(self.att)
 
         resp = self._put()

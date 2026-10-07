@@ -32,13 +32,14 @@ class Migration(migrations.Migration):
         ("ui", "0011_remove_attivita_costo_and_more"),
     ]
 
+    # attivita.activity_id and job.job_id are added without db_index because
+    # the AlterFields below make them unique: on PostgreSQL a db_index field
+    # altered to unique recreates the same "_like" index and fails.
     operations = [
         migrations.AddField(
             model_name="attivita",
             name="activity_id",
-            field=models.CharField(
-                blank=True, db_index=True, default="", max_length=500
-            ),
+            field=models.CharField(blank=True, default="", max_length=500),
         ),
         migrations.AddField(
             model_name="attivita",
@@ -55,9 +56,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="job",
             name="job_id",
-            field=models.CharField(
-                blank=True, db_index=True, default="", max_length=250
-            ),
+            field=models.CharField(blank=True, default="", max_length=250),
         ),
         migrations.RunPython(_backfill_identifiers, migrations.RunPython.noop),
         migrations.AlterField(

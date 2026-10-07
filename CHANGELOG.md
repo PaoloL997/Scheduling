@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-09-29
+
+### Changed
+
+- **PostgreSQL e' il database di riferimento.** Attivita', commesse,
+  assegnazioni, inventario e configurazioni vivono in PostgreSQL, configurato
+  dalle chiavi `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` e
+  `DB_CONN_MAX_AGE` del file `.env`. I dati restano dopo logout e riavvii e gli
+  id delle attivita' sono stabili. Il server puo' girare anche con piu' worker.
+- **L'app non dipende piu' da MS Project ed Excel.** `dataset.mpp` e `jobs.xlsx`
+  non vengono piu' importati al primo login ne' riscritti all'ultimo logout.
+  I dati sono stati migrati una sola volta (vedi `docs/dataset.md`).
+
+### Removed
+
+- Import e write-back di `.mpp`/`.xlsx`, con la coda `MppSyncQueue`, lo stato
+  `SyncSessionState` e i campi `synced_to_mpp` / `imported_from_mpp`
+  (migrazione `0033`).
+- Gli endpoint `/api/status/` e `/api/heartbeat/`, il banner di stato e
+  l'overlay «Scrittura file in corso».
+- Il comando `flush_to_sources`.
+- Le chiavi `.env` `SERVER_DIR`, `MPP_PATH`, `XLSX_PATH`, `HEARTBEAT_*`,
+  `MSP_DISPATCH_RETRY_*` e `AUTO_IMPORT_ON_STARTUP`.
+- Le dipendenze `pywin32` e `tqdm`.
+
+### Compatibilita' tablet
+
+- `/api/bridge/status/` risponde sempre `status: "ready"`, con gli stessi campi
+  di prima.
+- `/api/bridge/import/` risponde **410**.
+- `/api/bridge/app-settings/` non restituisce piu' percorsi file, heartbeat e
+  parametri MS Project.
+
+### Unchanged
+
+- «Importa da Excel» in Inventario resta: carica le risorse direttamente nel
+  database.
+
 ## 2026-09-25
 
 ### Changed

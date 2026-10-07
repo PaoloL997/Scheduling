@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 from datetime import date
-from unittest.mock import MagicMock
 
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from src.data.models import Resource
 from ui.models import (
     Attivita,
     ConfigurazioneTesta,
     GeneratoreItem,
     MandrinoItem,
-    MppSyncQueue,
     ProblemaAttivita,
     RisorsaAttivita,
     TestaItem,
@@ -24,10 +20,7 @@ from ui.models import (
 from ui.services.activity_inventory import get_available_resources
 from ui.services.inventory import patch_resource
 from ui.services.optimization_problem import _fetch_inventory, reservations_for_excluded
-from ui.services.writeback import _apply_add_resource, _apply_update_resource
 from ui.tests.helpers import create_writer
-
-_data_import = importlib.import_module("src.data.import")
 
 
 class MaintenanceApiTest(TestCase):
@@ -40,7 +33,7 @@ class MaintenanceApiTest(TestCase):
         TestaItem.objects.create(uid="T100", model="TP60", plant="Valbrembo")
         MandrinoItem.objects.create(uid="M100", diameter="15", plant="Valbrembo")
 
-    def test_patch_sets_flag_and_enqueues_mpp(self) -> None:
+    def test_patch_sets_flag(self) -> None:
         resp = self.client.patch(
             reverse(
                 "api_inventario_detail",
@@ -52,11 +45,7 @@ class MaintenanceApiTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         item = GeneratoreItem.objects.get(uid="G100")
         self.assertTrue(item.in_manutenzione)
-        entry = MppSyncQueue.objects.get(operation="update_resource")
-        payload = json.loads(entry.payload_json)
-        self.assertEqual(payload["original_uid"], "G100")
-        self.assertTrue(payload["in_manutenzione"])
-        self.assertNotIn("plant", payload)
+        self.assertEqual(item.plant, "Valbrembo")
 
     def test_patch_rejected_on_mandrino(self) -> None:
         resp = self.client.patch(
@@ -203,54 +192,3 @@ class MaintenanceReassignTest(TestCase):
         self.assertEqual(
             RisorsaAttivita.objects.get(attivita=self.open_att).risorsa_id, "OV-T2"
         )
-
-
-class MaintenanceMppMappingTest(TestCase):
-    def test_resource_converters_copy_flag(self) -> None:
-        resource = Resource(
-            name="T1",
-            measure="TP60",
-            plant="Valbrembo",
-            category="Testa",
-            in_manutenzione=True,
-        )
-        self.assertTrue(_data_import._resource_to_testa(resource).in_manutenzione)
-        gen = Resource(
-            name="G1",
-            measure="P6",
-            plant="Valbrembo",
-            category="Generatore",
-            in_manutenzione=True,
-        )
-        self.assertTrue(_data_import._resource_to_generatore(gen).in_manutenzione)
-
-    def test_add_resource_writes_flag1(self) -> None:
-        wrapper = MagicMock()
-        wrapper._find_resource_or_none.return_value = None
-        _apply_add_resource(
-            wrapper,
-            {
-                "uid": "T1",
-                "table": "Testa",
-                "measure": "TP60",
-                "plant": "Valbrembo",
-                "in_manutenzione": True,
-            },
-        )
-        wrapper.add_resource.assert_called_once()
-        added = wrapper.add_resource.call_args[0][0]
-        self.assertTrue(added.in_manutenzione)
-
-    def test_update_resource_writes_flag1(self) -> None:
-        wrapper = MagicMock()
-        _apply_update_resource(
-            wrapper,
-            {
-                "original_uid": "T1",
-                "table": "Testa",
-                "in_manutenzione": True,
-            },
-        )
-        kwargs = wrapper.update_resource.call_args.kwargs
-        self.assertTrue(kwargs["in_manutenzione"])
-        self.assertIsNone(kwargs["plant"])

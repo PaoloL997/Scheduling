@@ -63,8 +63,6 @@ _PRIORITY_ACTIVITY = {
     "actual_start": None,
     "actual_finish": None,
     "predecessors": "",
-    "imported_from_mpp": False,
-    "synced_to_mpp": False,
 }
 
 # Group B: bore around 22.0 only -> mandrino+tastatore, no testa/maschera.
@@ -80,8 +78,6 @@ _BALANCE_ACTIVITY = {
     "actual_start": None,
     "actual_finish": None,
     "predecessors": "",
-    "imported_from_mpp": False,
-    "synced_to_mpp": False,
 }
 
 

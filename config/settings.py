@@ -37,7 +37,6 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "ui.middleware.SessionTrackingMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
 ]
 
@@ -63,10 +62,26 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+_missing_db_keys = [
+    key for key in ("DB_NAME", "DB_USER", "DB_PASSWORD") if not os.getenv(key)
+]
+if _missing_db_keys:
+    raise RuntimeError(
+        "Configurazione PostgreSQL incompleta: impostare "
+        f"{', '.join(_missing_db_keys)} nel file .env o come variabili d'ambiente."
+    )
+
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.getenv("DB_NAME"),
+        "USER": os.getenv("DB_USER"),
+        "PASSWORD": os.getenv("DB_PASSWORD"),
+        "HOST": os.getenv("DB_HOST", "localhost"),
+        "PORT": os.getenv("DB_PORT", "5432"),
+        "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
+        "CONN_HEALTH_CHECKS": True,
+        "OPTIONS": {"connect_timeout": 5},
     }
 }
 
@@ -95,11 +110,6 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "filters": {
-        "suppress_status_endpoint": {
-            "()": "config.logging_filters.SuppressStatusEndpoint",
-        },
-    },
     "formatters": {
         "verbose": {
             "format": "{levelname} {asctime} {name} — {message}",
@@ -110,7 +120,6 @@ LOGGING = {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
-            "filters": ["suppress_status_endpoint"],
         },
     },
     "loggers": {
@@ -138,24 +147,12 @@ LOGGING = {
 }
 
 # ---------------------------------------------------------------------------
-# Application-specific paths
+# Application runtime settings
 # ---------------------------------------------------------------------------
 
-SERVER_DIR = os.getenv("SERVER_DIR", "")
-MPP_PATH = os.getenv("MPP_PATH", str(BASE_DIR / "dataset.mpp"))
-XLSX_PATH = os.getenv("XLSX_PATH", str(BASE_DIR / "jobs.xlsx"))
 PENALE_MAX = os.getenv("PENALE_MAX", "5")
 SOLVER_TIME_LIMIT = os.getenv("SOLVER_TIME_LIMIT", "10")
-HEARTBEAT_INTERVAL_SECONDS = os.getenv("HEARTBEAT_INTERVAL_SECONDS", "30")
-HEARTBEAT_TIMEOUT_SECONDS = os.getenv("HEARTBEAT_TIMEOUT_SECONDS", "90")
-MSP_DISPATCH_RETRY_INTERVAL_SECONDS = os.getenv(
-    "MSP_DISPATCH_RETRY_INTERVAL_SECONDS", "0.5"
-)
-MSP_DISPATCH_RETRY_MAX_WAIT_SECONDS = os.getenv(
-    "MSP_DISPATCH_RETRY_MAX_WAIT_SECONDS", "5.0"
-)
 OPENAI_WPS_MODEL = os.getenv("OPENAI_WPS_MODEL", "gpt-5.6-sol")
-AUTO_IMPORT_ON_STARTUP = os.getenv("AUTO_IMPORT_ON_STARTUP", "true")
 
 # ---------------------------------------------------------------------------
 # Media files (WPS PDF uploads)

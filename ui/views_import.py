@@ -6,10 +6,6 @@ determines which inventory table it belongs to.  Delegates parsing and
 validation to :mod:`ui.services.excel_importer` and persists valid rows via
 the ORM.
 
-Each successfully inserted row is individually enqueued in
-:class:`~ui.models.MppSyncQueue` so that the COM write-back service writes
-every new resource to the ``.mpp`` file at session end.
-
 Response schema (success)::
 
     {"ok": true, "imported": N, "skipped": M, "errors": ["Riga 3: …", …]}
@@ -28,12 +24,7 @@ from django.views.decorators.http import require_http_methods
 
 from ui.permissions import write_required
 from ui.services.excel_importer import parse_inventory_excel_generic
-from ui.services.inventory import (
-    _TABLE_COLUMNS,
-    _TABLE_MEASURE_COL,
-    _get_model,
-    _enqueue_add_resource,
-)
+from ui.services.inventory import _TABLE_COLUMNS, _get_model
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +40,6 @@ def api_inventario_import_excel(request: HttpRequest) -> JsonResponse:
     determines the target inventory table.  Rows that fail validation are
     reported in ``errors`` but do not block valid rows.  Duplicate ``uid``
     values within a category are skipped and counted as ``skipped``.
-
-    Each successfully inserted row is enqueued individually in
-    ``MppSyncQueue`` so the COM session write-back writes it to the ``.mpp``
-    file at session end, making it durable across resets.
 
     Args:
         request: The incoming POST request.
@@ -98,7 +85,6 @@ def api_inventario_import_excel(request: HttpRequest) -> JsonResponse:
                 model_class.objects.create(**obj_kwargs)
             imported += 1
             details[table] = details.get(table, 0) + 1
-            _enqueue_add_resource(table, row, _TABLE_MEASURE_COL.get(table))
         except IntegrityError:
             logger.warning(
                 "import-excel: uid '%s' già presente in %s — saltato",
@@ -107,12 +93,7 @@ def api_inventario_import_excel(request: HttpRequest) -> JsonResponse:
             )
             skipped += 1
 
-    logger.info(
-        "import-excel: importate %d righe, saltate %d — %d voci accodate per .mpp",
-        imported,
-        skipped,
-        imported,
-    )
+    logger.info("import-excel: importate %d righe, saltate %d", imported, skipped)
     return JsonResponse(
         {
             "ok": True,

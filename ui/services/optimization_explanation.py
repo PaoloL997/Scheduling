@@ -331,7 +331,7 @@ def build_result_payload_from_schedule(
     if not attivita:
         raise ValueError(
             f"Nessuna attività nel database per job_ids={unique_job_ids!r}. "
-            "Verifica commesse e che Django punti al db.sqlite3 corretto."
+            "Verifica commesse e che Django punti al database corretto."
         )
 
     tasks_before_all = activities_to_gantt_tasks(attivita, colors)
@@ -361,9 +361,9 @@ def build_result_payload_from_schedule(
         ]
         raise ValueError(
             "tasks_after vuoto: activity_id del solver non collegati ad attività nel DB "
-            f"(es. {missing[:5]}). Se usi load_scheduling_problem_from_sqlite, passa "
-            "job_ids come commesse del problem (es. [j.job_id for j in problem.jobs]) "
-            "e assicurati che Django usi lo stesso db.sqlite3."
+            f"(es. {missing[:5]}). Passa job_ids come commesse del problem "
+            "(es. [j.job_id for j in problem.jobs]) e assicurati che il problem "
+            "sia stato costruito dallo stesso database usato da Django."
         )
     deadlines = deadlines_for_jobs(unique_job_ids)
     metrics_before = schedule_metrics_from_tasks(tasks_before_all, unique_job_ids)

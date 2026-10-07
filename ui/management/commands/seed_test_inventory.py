@@ -2,7 +2,7 @@
 
 This command provides a predictable resource pool that allows manually testing
 the add-activity wizard and the resource conflict prevention rules without
-relying on an external Microsoft Project import.  It is idempotent: re-running
+touching the real inventory.  It is idempotent: re-running
 it updates existing rows in place rather than creating duplicates.
 """
 
