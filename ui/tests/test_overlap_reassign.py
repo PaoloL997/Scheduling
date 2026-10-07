@@ -224,7 +224,9 @@ class RescheduleProposalTest(TestCase):
             min_generatori=0,
         )
         TestaItem.objects.create(uid="OV-T1", model="TP60", plant="Valbrembo")
-        Job.objects.create(commessa="C205", delivery_date=date(2026, 9, 30))
+        Job.objects.create(
+            commessa="C205", delivery_date=localdate() + timedelta(days=90)
+        )
         self.late = Attivita.objects.create(
             commessa="C101",
             item=1,
