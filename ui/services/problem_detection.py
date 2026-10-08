@@ -260,7 +260,14 @@ def _lookup_plants(categoria: str, uids: list[str]) -> dict[str, str | None]:
     return dict(model.objects.filter(uid__in=uids).values_list("uid", "plant"))
 
 
-def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> int:
+def detect_and_save_problems(
+    attivita,
+    risorse_dict: dict[str, list[str]],
+    *,
+    plants: dict[tuple[str, str], str | None] | None = None,
+    open_problems: list | None = None,
+    configs: dict[str, object] | None = None,
+) -> int:
     """Detect operational problems for an activity and sync open notes.
 
     Two types of problem are detected:
@@ -288,6 +295,12 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
             e.g. ``{"teste": ["T1"], "mandrini": ["M1", "M2"], ...}``.
             Accepted keys: ``teste``, ``mandrini``, ``tastatori``,
             ``maschere``, ``generatori``.
+        plants: Preloaded ``(categoria, uid) -> plant`` from
+            :func:`_load_plants`; queried per category when omitted.
+        open_problems: Preloaded open ``acquisto`` / ``spostamento`` rows
+            of *attivita*; queried when omitted.
+        configs: Preloaded testa configurations from
+            :func:`~ui.services.activity_inventory.load_testa_configs`.
 
     Returns:
         int: The number of new :class:`~ui.models.ProblemaAttivita` rows created.
@@ -295,12 +308,26 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
     from django.utils import timezone
     from ui.models import ProblemaAttivita
 
+    open_types = (
+        ProblemaAttivita.TIPO_ACQUISTO,
+        ProblemaAttivita.TIPO_SPOSTAMENTO,
+    )
+    if open_problems is None:
+        open_problems = list(
+            ProblemaAttivita.objects.filter(
+                attivita=attivita,
+                tipo__in=open_types,
+                risolto=False,
+            )
+        )
+
     shortfalls = {
         s["categoria"]: s
         for s in resource_shortfalls(
             attivita.modello_testa,
             {key: len(risorse_dict.get(key) or []) for key in _CAT_KEYS},
             tp60_custom=bool(getattr(attivita, "tp60_custom", False)),
+            configs=configs,
         )
     }
 
@@ -324,9 +351,12 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
                 )
             )
 
-        plants = _lookup_plants(categoria, uids)
+        if plants is None:
+            plant_of = _lookup_plants(categoria, uids)
+        else:
+            plant_of = {uid: plants.get((categoria, uid)) for uid in uids}
         for uid in uids:
-            plant = plants.get(uid)
+            plant = plant_of.get(uid)
             if (
                 plant
                 and stabilimento_attivita
@@ -351,15 +381,8 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
     }
     current_sigs = set(current_by_sig)
 
-    open_types = (
-        ProblemaAttivita.TIPO_ACQUISTO,
-        ProblemaAttivita.TIPO_SPOSTAMENTO,
-    )
-    for problema in ProblemaAttivita.objects.filter(
-        attivita=attivita,
-        tipo__in=open_types,
-        risolto=False,
-    ):
+    open_sigs: set[tuple[str, str, str]] = set()
+    for problema in open_problems:
         sig = (problema.tipo, problema.risorsa_tipo, problema.risorsa_uid)
         if sig not in current_sigs:
             still_assigned = False
@@ -387,6 +410,7 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
             )
             continue
 
+        open_sigs.add(sig)
         desired = current_by_sig[sig]
         updates: list[str] = []
         if problema.descrizione != desired.descrizione:
@@ -401,13 +425,6 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
         if updates:
             problema.save(update_fields=updates)
 
-    open_sigs: set[tuple[str, str, str]] = set(
-        ProblemaAttivita.objects.filter(
-            attivita=attivita,
-            tipo__in=open_types,
-            risolto=False,
-        ).values_list("tipo", "risorsa_tipo", "risorsa_uid")
-    )
     new_problems = [
         p for p in problems if (p.tipo, p.risorsa_tipo, p.risorsa_uid) not in open_sigs
     ]
@@ -428,9 +445,86 @@ def _risorse_dict_for_attivita(attivita) -> dict[str, list[str]]:
     return risorse_dict
 
 
-def refresh_problems_for_attivita(attivita) -> int:
-    """Re-run problem detection from the activity's current assignments."""
-    return detect_and_save_problems(attivita, _risorse_dict_for_attivita(attivita))
+def refresh_problems_for_attivita(attivita, **preloaded) -> int:
+    """Re-run problem detection from the activity's current assignments.
+
+    Args:
+        attivita: The :class:`~ui.models.Attivita` instance.
+        **preloaded: ``plants`` / ``open_problems`` / ``configs`` forwarded
+            to :func:`detect_and_save_problems`.
+    """
+    return detect_and_save_problems(
+        attivita, _risorse_dict_for_attivita(attivita), **preloaded
+    )
+
+
+def _load_plants(activities) -> dict[tuple[str, str], str | None]:
+    """Return the plant of every resource assigned to *activities*.
+
+    One query per resource category instead of one per activity.
+
+    Args:
+        activities: :class:`~ui.models.Attivita` instances with ``risorse``
+            prefetched.
+
+    Returns:
+        dict: ``(categoria, uid)`` → ``plant``; UIDs missing from the
+            inventory are absent.
+    """
+    uids_by_categoria: dict[str, set[str]] = {}
+    for attivita in activities:
+        for r in attivita.risorse.all():
+            if r.tipo in _TIPO_TO_CAT and r.risorsa_id:
+                uids_by_categoria.setdefault(r.tipo, set()).add(r.risorsa_id)
+
+    plants: dict[tuple[str, str], str | None] = {}
+    for categoria, uids in uids_by_categoria.items():
+        for uid, plant in _lookup_plants(categoria, sorted(uids)).items():
+            plants[(categoria, uid)] = plant
+    return plants
+
+
+def refresh_problems_for_activities(activities) -> int:
+    """Refresh ``acquisto`` / ``spostamento`` for many activities at once.
+
+    Testa configurations, resource plants and open notes are loaded in a
+    handful of queries, whatever the number of activities.
+
+    Args:
+        activities: :class:`~ui.models.Attivita` instances with ``risorse``
+            prefetched.
+
+    Returns:
+        int: Number of new :class:`~ui.models.ProblemaAttivita` rows created.
+    """
+    from ui.models import ProblemaAttivita
+    from ui.services.activity_inventory import load_testa_configs
+
+    activities = list(activities)
+    if not activities:
+        return 0
+    configs = load_testa_configs()
+    plants = _load_plants(activities)
+    open_by_attivita: dict[int, list] = {}
+    for problema in ProblemaAttivita.objects.filter(
+        attivita__in=[a.pk for a in activities],
+        tipo__in=(
+            ProblemaAttivita.TIPO_ACQUISTO,
+            ProblemaAttivita.TIPO_SPOSTAMENTO,
+        ),
+        risolto=False,
+    ):
+        open_by_attivita.setdefault(problema.attivita_id, []).append(problema)
+
+    total = 0
+    for a in activities:
+        total += refresh_problems_for_attivita(
+            a,
+            plants=plants,
+            open_problems=open_by_attivita.get(a.pk, []),
+            configs=configs,
+        )
+    return total
 
 
 def refresh_problems_for_resource(tipo: str, *uids: str) -> int:
@@ -727,10 +821,9 @@ def detect_for_all_activities() -> int:
 
     auto_resolve_resource_overlaps()
 
-    total = 0
-    activitas = list(Attivita.objects.prefetch_related("risorse").all())
-    for a in activitas:
-        total += refresh_problems_for_attivita(a)
+    total = refresh_problems_for_activities(
+        Attivita.objects.prefetch_related("risorse").all()
+    )
 
     logger.info("detect_for_all_activities: %d nuovi problemi rilevati.", total)
     return total

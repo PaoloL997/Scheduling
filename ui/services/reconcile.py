@@ -44,7 +44,7 @@ def reconcile(attivita_ids: Iterable[int] | None = None) -> dict:
     """
     from ui.models import Attivita
     from ui.services.overlap_reassign import auto_resolve_resource_overlaps
-    from ui.services.problem_detection import refresh_problems_for_attivita
+    from ui.services.problem_detection import refresh_problems_for_activities
 
     result = auto_resolve_resource_overlaps()
 
@@ -54,9 +54,7 @@ def reconcile(attivita_ids: Iterable[int] | None = None) -> dict:
         if not ids:
             return result
         qs = qs.filter(pk__in=ids)
-    created = 0
-    for att in qs:
-        created += refresh_problems_for_attivita(att)
+    created = refresh_problems_for_activities(qs)
     if created:
         logger.info("reconcile: %d nuovi problemi rilevati.", created)
     return result
