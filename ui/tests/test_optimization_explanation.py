@@ -15,11 +15,10 @@ from ui.models import Job
 from ui.services.optimization_problem import build_scheduling_problem
 from ui.services.optimization_explanation import (
     build_result_payload_from_schedule,
+    current_plan_payload,
     format_optimization_result_for_llm,
-    format_optimization_result_for_llm_json,
     format_schedule_result_for_llm_json,
     generate_optimization_explanation,
-    resolve_llm_payload,
 )
 from ui.views_ottimizzazione import SESSION_EXPLANATION_KEY, SESSION_RESULT_KEY
 from ui.tests.test_optimization import _make_activity, _seed_inventory
@@ -152,11 +151,6 @@ class OptimizationExplanationFormatTest(TestCase):
         self.assertEqual(data["attivita_invariate"]["attivita_modificate_omesse"], 1)
         self.assertEqual(data["sintesi"]["attivita_con_cambiamento"], 1)
 
-    def test_json_wrapper_roundtrip(self) -> None:
-        raw = format_optimization_result_for_llm_json(_sample_payload())
-        parsed = json.loads(raw)
-        self.assertTrue(parsed["meta"]["ok"])
-
     def test_incomplete_payload(self) -> None:
         data = format_optimization_result_for_llm({"tasks_before": []})
         self.assertFalse(data["meta"]["ok"])
@@ -188,17 +182,6 @@ class OptimizationExplanationFormatTest(TestCase):
             "J1-00-done",
         )
 
-    def test_resolve_rejects_inner_result_dict(self) -> None:
-        with self.assertRaises(TypeError) as ctx:
-            resolve_llm_payload(
-                {
-                    "total_penalty": 0.0,
-                    "num_late_jobs": 0,
-                    "jobs": [],
-                }
-            )
-        self.assertIn("format_schedule_result_for_llm_json", str(ctx.exception))
-
     def test_build_payload_from_schedule(self) -> None:
         _seed_inventory()
         Job.objects.create(commessa="T001", delivery_date="2026-12-31")
@@ -214,6 +197,11 @@ class OptimizationExplanationFormatTest(TestCase):
         )
         self.assertTrue(payload["tasks_before"])
         self.assertTrue(payload["tasks_after"])
+        # No builder scratch keys leak into the session payload.
+        self.assertFalse([k for k in payload if k.startswith("_")])
+        before = current_plan_payload([att.job_id])
+        self.assertEqual(before["tasks_before"], payload["tasks_before"])
+        self.assertEqual(before["deadlines"], payload["deadlines"])
 
         llm_json = format_schedule_result_for_llm_json(
             [att.job_id],

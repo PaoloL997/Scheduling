@@ -24,23 +24,19 @@ from ui.services.parsing import parse_iso_day, parse_json_body
 from ui.services.runtime_config import load_runtime_config
 from ui.services.optimization_problem import (
     OptimizationProblemError,
-    activities_for_job_ids,
-    activities_to_gantt_tasks,
     build_scheduling_problem,
-    deadlines_for_jobs,
     filter_job_ids_with_activities,
-    filter_plannable_gantt_tasks,
-    fixed_activities_for_llm,
     hydrate_gantt_tasks_resources,
-    is_attivita_fixed,
-    schedule_metrics_from_tasks,
-    schedule_result_to_gantt_tasks,
 )
 from ui.services.optimization_apply import (
     OptimizationApplyError,
     apply_optimization_result,
 )
-from ui.services.optimization_explanation import generate_optimization_explanation
+from ui.services.optimization_explanation import (
+    build_result_payload_from_schedule,
+    current_plan_payload,
+    generate_optimization_explanation,
+)
 from ui.services.resource_conflicts import (
     ResourceConflictError,
     format_conflict_message,
@@ -220,95 +216,35 @@ def _run_optimization(
     except OptimizationProblemError as exc:
         return {"ok": False, "feasible": False, "error": str(exc)}
 
-    time_limit = load_runtime_config().solver_time_limit
-    feasibility = check_feasibility(problem)
     colors = _plant_colors()
-    attivita = activities_for_job_ids(job_ids)
-    attivita_by_id = {a.activity_id: a for a in attivita}
-    tasks_before_all = activities_to_gantt_tasks(attivita, colors)
-    tasks_before = filter_plannable_gantt_tasks(tasks_before_all, attivita)
-    fixed_activities = fixed_activities_for_llm(attivita, colors)
-    deadlines = deadlines_for_jobs(job_ids)
 
+    def infeasible(error: str) -> dict[str, Any]:
+        before = current_plan_payload(job_ids, plant_colors=colors)
+        return {
+            "ok": True,
+            "feasible": False,
+            "error": error,
+            "tasks_before": before["tasks_before"],
+            "fixed_activities": before["fixed_activities"],
+            "deadlines": before["deadlines"],
+        }
+
+    feasibility = check_feasibility(problem)
     if not feasibility.feasible:
-        return {
-            "ok": True,
-            "feasible": False,
-            "error": "; ".join(i.detail for i in feasibility.issues),
-            "tasks_before": tasks_before,
-            "fixed_activities": fixed_activities,
-            "deadlines": deadlines,
-        }
+        return infeasible("; ".join(i.detail for i in feasibility.issues))
 
-    result, diagnoses = schedule(problem, time_limit=time_limit)
+    result, diagnoses = schedule(
+        problem, time_limit=load_runtime_config().solver_time_limit
+    )
     if result is None:
-        return {
-            "ok": True,
-            "feasible": False,
-            "error": "Il solver non ha trovato una soluzione fattibile.",
-            "tasks_before": tasks_before,
-            "fixed_activities": fixed_activities,
-            "deadlines": deadlines,
-        }
+        return infeasible("Il solver non ha trovato una soluzione fattibile.")
 
-    tasks_after_all = schedule_result_to_gantt_tasks(
-        result,
-        attivita_by_id,
-        colors,
-        attivita=attivita,
-    )
-    tasks_after = filter_plannable_gantt_tasks(tasks_after_all, attivita)
-    fixed_tasks = activities_to_gantt_tasks(
-        [a for a in attivita if is_attivita_fixed(a)],
-        colors,
-    )
-    metrics_before = schedule_metrics_from_tasks(tasks_before_all, job_ids)
-    metrics_after_from_tasks = schedule_metrics_from_tasks(
-        tasks_after + fixed_tasks,
-        job_ids,
-    )
     return {
         "ok": True,
         "feasible": True,
-        "result_payload": {
-            "tasks_before": tasks_before,
-            "tasks_after": tasks_after,
-            "fixed_activities": fixed_activities,
-            "deadlines": deadlines,
-            "job_ids": job_ids,
-            "metrics_before": metrics_before,
-            "metrics_after": {
-                "total_penalty": result.total_penalty,
-                "num_late_jobs": result.num_late_jobs,
-                "num_late_activities": metrics_after_from_tasks["num_late_activities"],
-                "n_activities": metrics_after_from_tasks["n_activities"],
-            },
-            "result": {
-                "total_penalty": result.total_penalty,
-                "num_late_jobs": result.num_late_jobs,
-                "jobs": [
-                    {
-                        "job_id": jr.job_id,
-                        "due_date": jr.due_date.isoformat(),
-                        "completion_date": jr.completion_date.isoformat(),
-                        "delay_days": jr.delay_days,
-                        "delay_weeks": jr.delay_weeks,
-                        "penalty": jr.penalty,
-                    }
-                    for jr in result.jobs
-                ],
-            },
-            "diagnoses": [
-                {
-                    "job_id": d.job_id,
-                    "late": d.late,
-                    "delay_days": d.delay_days,
-                    "primary_cause": d.primary_cause,
-                    "detail": d.detail,
-                }
-                for d in diagnoses
-            ],
-        },
+        "result_payload": build_result_payload_from_schedule(
+            job_ids, result, diagnoses, plant_colors=colors
+        ),
     }
 
 

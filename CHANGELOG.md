@@ -138,6 +138,14 @@
   riga, risposta di scrittura e payload del Gantt: la regola non e' piu'
   ricalcolata in due copie JavaScript.
 
+- **`optimization_explanation.py` sfoltito.** Il payload di sessione del
+  wizard di ottimizzazione e' costruito in un solo posto
+  (`current_plan_payload` + `build_result_payload_from_schedule`): la view
+  `_run_optimization` ne aveva una copia di 90 righe. Delle quattro funzioni
+  `format_*` ne restano due, il dizionario per l'LLM e la scorciatoia JSON
+  per i notebook; `resolve_llm_payload` e i suoi messaggi guida sono spariti.
+  La spiegazione viene formattata una volta sola invece di due.
+
 ### Removed
 
 - Codice morto: `ui/forms.py` e i template del vecchio wizard a pagine
