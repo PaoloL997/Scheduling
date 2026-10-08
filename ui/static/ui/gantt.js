@@ -206,10 +206,8 @@
       consider(s);
       consider(f);
       if (!isNaN(s) && !isNaN(f)) {
-        const durMs = f - s;
         const actS = t.actual_start ? parseDate(t.actual_start) : null;
-        const actEnd = t.actual_finish ? parseDate(t.actual_finish)
-          : (actS ? new Date(actS.getTime() + durMs) : null);
+        const actEnd = executionEndDate(t, f);
         if (actS) consider(actS);
         if (actEnd) consider(actEnd);
       }
@@ -253,38 +251,26 @@
     return !!(t && t.actual_finish);
   }
 
-  /** Same late/overdue rules as the home ``updateStats`` counters. */
-  function taskIsLate(t, today) {
-    if (!t) return false;
-    const actS = t.actual_start ? new Date(t.actual_start + 'T00:00:00') : null;
-    const actF = t.actual_finish ? new Date(t.actual_finish + 'T00:00:00') : null;
-    const planS = t.start ? new Date(t.start + 'T00:00:00') : null;
-    const planF = t.finish ? new Date(t.finish + 'T00:00:00') : null;
-    if (actS && actF) return false;
-    const startedLate = !!(actS && planS && actS > planS);
-    // Server uses ``today >= data_inizio`` (ui/views.py); keep both in step.
-    const overdue = !!(!actS && planS && today >= planS);
-    // Still open past the planned finish, however punctual the start was.
-    const pastDue = !!(!actF && planF && today > planF);
-    return startedLate || overdue || pastDue;
+  /** Day the execution of a started activity ends: ``actual_finish`` when
+   *  done, else the server's working-day estimate ``effective_finish``
+   *  (ui/services/problem_detection.py). Null when not started; the planned
+   *  finish when the payload carries no estimate. */
+  function executionEndDate(t, planF) {
+    if (!t || !t.actual_start) return null;
+    if (t.actual_finish) return parseDate(t.actual_finish);
+    if (t.effective_finish) return parseDate(t.effective_finish);
+    return planF;
   }
 
-  /** Calendar days an activity is behind plan; 0 exactly when ``taskIsLate``
-   *  is false. The largest of: days lost by a late start, days waiting to
-   *  start counting today (so the planned start day is already +1), and days
-   *  still open past the planned finish. */
-  function taskDelayDays(t, today) {
-    if (!taskIsLate(t, today)) return 0;
-    const DAY = 86400000;
-    const days = (a, b) => Math.round((a - b) / DAY);
-    const planS = parseDate(t.start);
-    const planF = parseDate(t.finish);
-    const actS = t.actual_start ? parseDate(t.actual_start) : null;
-    let delay = 0;
-    if (actS && !isNaN(planS) && actS > planS) delay = Math.max(delay, days(actS, planS));
-    if (!actS && !isNaN(planS) && today >= planS) delay = Math.max(delay, days(today, planS) + 1);
-    if (!t.actual_finish && !isNaN(planF) && today > planF) delay = Math.max(delay, days(today, planF));
-    return Math.max(delay, 1);
+  /** Lateness and delay are computed server-side
+   *  (ui/services/planning_read.py) and travel on every task of
+   *  ``/api/gantt/`` as ``state_key`` and ``delay_days``. */
+  function taskIsLate(t) {
+    return !!(t && t.state_key === 'in_ritardo');
+  }
+
+  function taskDelayDays(t) {
+    return t && t.delay_days ? (Number(t.delay_days) || 0) : 0;
   }
 
   /** Home filter bar, shared by the Gantt and the kanban:
@@ -358,48 +344,33 @@
     return { done: Math.min(total, worked), total };
   }
 
-  function summarizeCommessaTasks(tasks, deadlineStr) {
+  const JOB_STATUS_LABELS = {
+    rischio_penale: 'Rischio penale',
+    in_ritardo: 'In ritardo',
+    in_tempo: 'In tempo',
+    pianificata: 'Pianificata',
+    non_pianificata: 'Non pianificata',
+  };
+
+  /** Counters for a commessa label. The status is the server's aggregate
+   *  (``jobs[job_id]`` of ``/api/gantt/``); charts fed without that payload
+   *  (optimisation previews) show no status. */
+  function summarizeCommessaTasks(tasks, jobInfo) {
     const list = tasks || [];
     const total = list.length;
     let completed = 0;
     let wip = 0;
     let workDone = 0;
     let workTotal = 0;
-    let anyLate = false;
-    let anyPenaltyRisk = false;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const deadline = parseIsoNoon(deadlineStr) || parseDate(deadlineStr);
-    const hasDeadline = deadline && !isNaN(deadline.getTime());
-
     list.forEach(t => {
       if (taskIsCompleted(t)) completed += 1;
       else if (taskIsWip(t)) wip += 1;
       const progress = activityWorkProgress(t);
       workDone += progress.done;
       workTotal += progress.total;
-
-      const planS = parseDate(t.start);
-      const planF = parseDate(t.finish);
-      const actS = t.actual_start ? parseDate(t.actual_start) : null;
-      const actF = t.actual_finish ? parseDate(t.actual_finish) : null;
-      // Same rule as the home "In ritardo" filter, so the label and the filter agree.
-      if (taskIsLate(t, today)) anyLate = true;
-
-      if (hasDeadline && !isNaN(planS) && !isNaN(planF)) {
-        const durMs = planF - planS;
-        let end = null;
-        if (actF && !isNaN(actF)) end = actF;
-        else if (actS && !isNaN(actS)) end = new Date(actS.getTime() + durMs);
-        if (end && end > deadline) anyPenaltyRisk = true;
-      }
     });
-
     const pct = workTotal ? Math.round(workDone / workTotal * 100) : 0;
-    let status = 'Pianificata';
-    if (anyPenaltyRisk) status = 'Rischio penale';
-    else if (anyLate) status = 'In ritardo';
-    else if (wip > 0 || completed > 0) status = 'In tempo';
+    const status = jobInfo && jobInfo.status ? (JOB_STATUS_LABELS[jobInfo.status] || jobInfo.status) : '';
     return { total, completed, wip, pct, status, workDone, workTotal };
   }
 
@@ -492,6 +463,7 @@
       this.offset = 0;
       this.tasks = [];
       this.deadlines = {};
+      this.jobs = {};
       this.enableStats = !!options.enableStats;
       this.enableDeadlineEditor = !!options.enableDeadlineEditor;
       this.enableWarningNav = !!options.enableWarningNav;
@@ -753,9 +725,10 @@
       );
     }
 
-    setData(tasks, deadlines) {
+    setData(tasks, deadlines, jobs) {
       this.tasks = tasks || [];
       this.deadlines = deadlines || {};
+      this.jobs = jobs || {};
       if (!this._fitLocked) {
         const visible = this.displayTasks();
         const basis = visible.length ? visible : this.tasks;
@@ -862,10 +835,7 @@
     }
 
     _executionEndDate(row, planS, planF) {
-      if (!row.actual_start) return null;
-      const actS = parseDate(row.actual_start);
-      if (row.actual_finish) return parseDate(row.actual_finish);
-      return new Date(actS.getTime() + (planF - planS));
+      return executionEndDate(row, planF);
     }
 
     _overrunEndDate(row, executionEnd, today) {
@@ -1029,10 +999,8 @@
           }
           const s = parseDate(t.start), f = parseDate(t.finish);
           if (isNaN(s) || isNaN(f)) return null;
-          const durMs = f - s;
           const barStart = t.actual_start ? parseDate(t.actual_start) : s;
-          const barEnd = t.actual_finish ? parseDate(t.actual_finish)
-            : (t.actual_start ? new Date(barStart.getTime() + durMs) : f);
+          const barEnd = executionEndDate(t, f) || f;
           const visStart = new Date(Math.min(s, barStart));
           const visEnd = new Date(Math.max(f, barEnd));
           if (visStart >= maxD || visEnd <= minD) return null;
@@ -1050,12 +1018,8 @@
               if (this.compareMode) {
                 allFinish.push(ext.finish);
               } else {
-                const s = ext.start;
                 const f = ext.finish;
-                const durMs = f - s;
-                const actS = task.actual_start ? parseDate(task.actual_start) : null;
-                const actEnd = task.actual_finish ? parseDate(task.actual_finish)
-                  : (actS ? new Date(actS.getTime() + durMs) : f);
+                const actEnd = executionEndDate(task, f) || f;
                 allFinish.push(new Date(Math.max(f.getTime(), actEnd.getTime())));
               }
             }
@@ -1227,8 +1191,8 @@
           lbl.appendChild(nameSpan);
           // Home (collapsible) shows count / progress / status; compare/opt charts keep the name only.
           if (self.collapsibleGroups) {
-            const dlForStats = (g.job_ids || [g.job_id]).map(jid => self.deadlines[jid]).filter(Boolean).sort().pop();
-            const stats = summarizeCommessaTasks(g.allTasks || [], dlForStats);
+            const jobInfo = (g.job_ids || [g.job_id]).map(jid => self.jobs[jid]).filter(Boolean)[0] || null;
+            const stats = summarizeCommessaTasks(g.allTasks || [], jobInfo);
             const attLabel = stats.total === 1 ? '1 att.' : (stats.total + ' att.');
             const metaSpan = document.createElementNS(NS, 'tspan');
             metaSpan.setAttribute('fill', theme.metaText);
@@ -1237,16 +1201,18 @@
             metaSpan.setAttribute('letter-spacing', '0.01em');
             metaSpan.textContent = '  ·  ' + attLabel + '  ·  ' + stats.pct + '%';
             lbl.appendChild(metaSpan);
-            const statusSpan = document.createElementNS(NS, 'tspan');
-            statusSpan.setAttribute(
-              'fill',
-              (theme.statusColors && theme.statusColors[stats.status]) || theme.metaText
-            );
-            statusSpan.setAttribute('font-size', '13');
-            statusSpan.setAttribute('font-weight', '650');
-            statusSpan.setAttribute('letter-spacing', '0.01em');
-            statusSpan.textContent = '  ·  ' + stats.status;
-            lbl.appendChild(statusSpan);
+            if (stats.status) {
+              const statusSpan = document.createElementNS(NS, 'tspan');
+              statusSpan.setAttribute(
+                'fill',
+                (theme.statusColors && theme.statusColors[stats.status]) || theme.metaText
+              );
+              statusSpan.setAttribute('font-size', '13');
+              statusSpan.setAttribute('font-weight', '650');
+              statusSpan.setAttribute('letter-spacing', '0.01em');
+              statusSpan.textContent = '  ·  ' + stats.status;
+              lbl.appendChild(statusSpan);
+            }
           }
           barsSvg.appendChild(lbl);
 
@@ -1821,7 +1787,7 @@
       return fetch(url, { cache: 'no-store' })
         .then(r => r.json())
         .then(data => {
-          self.setData(data.tasks || [], data.deadlines || {});
+          self.setData(data.tasks || [], data.deadlines || {}, data.jobs || {});
         });
     }
   }

@@ -71,11 +71,15 @@ const late = renderTask(makeChart(), {
   ...base,
   actual_start: '2026-06-10',
   actual_finish: '2026-06-28',
+  state_key: 'completata',
+  delay_days: 0,
 });
 const early = renderTask(makeChart(), {
   ...base,
   actual_start: '2026-06-10',
   actual_finish: '2026-06-15',
+  state_key: 'completata',
+  delay_days: 0,
 });
 if (late.badgeCount !== 0 || early.badgeCount !== 0) {
   throw new Error(`completed activities must carry no badge (late=${late.badgeCount}, early=${early.badgeCount})`);
@@ -87,7 +91,10 @@ const inProgress = renderTask(makeChart(), {
   start: '2026-06-03',
   finish: '2026-07-03',
   actual_start: '2026-06-08',
+  effective_finish: '2026-07-08',
   actual_finish: null,
+  state_key: 'in_ritardo',
+  delay_days: 5,
 });
 if (inProgress.tailRight <= inProgress.plannedRight) {
   throw new Error('expected estimated actual tail past planned end');

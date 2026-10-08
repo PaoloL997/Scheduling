@@ -11,7 +11,8 @@ from django.urls import reverse
 from django.utils.timezone import localdate
 
 from ui.models import Attivita, Job, ProblemaAttivita, RisorsaAttivita, TestaItem
-from ui.views import _count_job_open_problems, _fetch_grouped
+from ui.services.planning_read import count_job_open_problems, fetch_grouped
+from ui.services.problem_detection import detect_for_all_activities
 
 
 class PianificazioneProgressBarTests(TestCase):
@@ -114,10 +115,12 @@ class PianificazioneProgressBarTests(TestCase):
                 attivita=att, tipo="testa", risorsa_id="OV-T1"
             )
         TestaItem.objects.create(uid="OV-T1", model="TP60", plant="Valbrembo")
-        Job.objects.create(commessa="C101", job_id="C101")
-        Job.objects.create(commessa="C205", job_id="C205")
+        # The activities above already created their Job rows.
+        self.assertTrue(Job.objects.filter(commessa__in=["C101", "C205"]).count() == 2)
 
-        grouped = {g["job"]["commessa"]: g for g in _fetch_grouped()}
+        # Reading never writes: reconcile explicitly, as the write paths do.
+        detect_for_all_activities()
+        grouped = {g["job"]["commessa"]: g for g in fetch_grouped()}
 
         # Job headers still sum every unresolved problem into warning_count.
         for commessa in ("C101", "C205"):
@@ -144,7 +147,7 @@ class PianificazioneProgressBarTests(TestCase):
 
     def test_count_job_open_problems_sums_warning_count(self) -> None:
         self.assertEqual(
-            _count_job_open_problems(
+            count_job_open_problems(
                 [
                     {"orm_id": 1, "warning_count": 2},
                     {"orm_id": 2, "warning_count": 1},

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from ui.models import (
-    Attivita,
     ConfigurazioneTesta,
     GeneratoreItem,
     MandrinoItem,
@@ -15,31 +14,22 @@ from ui.models import (
     TestaItem,
 )
 from ui.services.runtime_config import load_runtime_config
-from ui.views import _attivita_to_task_dict, _fetch_jobs
+from ui.services.planning_read import fetch_jobs, fetch_tasks, load_task_dict
 
 
 def serialize_attivita_list(stabilimento: str | None = None) -> list[dict]:
-    """Return activities with prefetched relations, optionally filtered by plant."""
-    qs = Attivita.objects.prefetch_related("risorse", "problemi").order_by(
-        "commessa", "item", "activity"
-    )
-    if stabilimento and stabilimento.strip():
-        qs = qs.filter(stabilimento__iexact=stabilimento.strip())
-    return [_attivita_to_task_dict(a) for a in qs]
+    """Return activities as planning row dicts, optionally filtered by plant."""
+    return fetch_tasks(stabilimento)
 
 
 def serialize_attivita(pk: int) -> dict | None:
     """Return a single activity dict, or ``None`` if not found."""
-    try:
-        att = Attivita.objects.prefetch_related("risorse", "problemi").get(pk=pk)
-    except Attivita.DoesNotExist:
-        return None
-    return _attivita_to_task_dict(att)
+    return load_task_dict(pk)
 
 
 def serialize_jobs() -> list[dict]:
     """Return all commesse with activity counts."""
-    return _fetch_jobs()
+    return fetch_jobs()
 
 
 def _inventory_rows(table: str, model, fields: list[str]) -> list[dict]:

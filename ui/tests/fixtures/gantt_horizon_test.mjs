@@ -32,11 +32,12 @@ assert(typeof GanttChart.computeHorizonViewport === 'function', 'computeHorizonV
 assert(typeof GanttChart.summarizeCommessaTasks === 'function', 'summarizeCommessaTasks missing');
 
 {
-  // Use a far-future window so "today" cannot mark planned tasks as late.
+  // Counters come from the tasks; the status is the server's aggregate
+  // (``jobs[job_id]`` of /api/gantt/), passed as the second argument.
   const s0 = GanttChart.summarizeCommessaTasks([
     { start: '2099-06-01', finish: '2099-06-05' },
     { start: '2099-06-08', finish: '2099-06-12' },
-  ]);
+  ], { status: 'pianificata' });
   assert(s0.total === 2 && s0.pct === 0 && s0.status === 'Pianificata', `planned summary got ${s0.status}`);
 
   // Mon–Fri 2099-06-01..05 = 5 working days; completed → 100% of that activity.
@@ -44,29 +45,24 @@ assert(typeof GanttChart.summarizeCommessaTasks === 'function', 'summarizeCommes
   const s1 = GanttChart.summarizeCommessaTasks([
     { start: '2099-06-01', finish: '2099-06-05', actual_start: '2099-06-01', actual_finish: '2099-06-05' },
     { start: '2099-06-08', finish: '2099-06-12' },
-  ]);
+  ], { status: 'in_tempo' });
   assert(s1.total === 2 && s1.pct === 50 && s1.status === 'In tempo', `pct/status got pct=${s1.pct} status=${s1.status}`);
 
-  const sWip = GanttChart.summarizeCommessaTasks([
-    { start: '2099-06-01', finish: '2099-06-05', actual_start: '2099-06-01', actual_finish: null },
-  ]);
-  assert(sWip.status === 'In tempo', `started on time should be In tempo, got ${sWip.status}`);
+  const s2 = GanttChart.summarizeCommessaTasks([{ start: '2099-06-01', finish: '2099-06-05' }], { status: 'in_ritardo' });
+  assert(s2.status === 'In ritardo', `late job should read In ritardo, got ${s2.status}`);
+  const s3 = GanttChart.summarizeCommessaTasks([{ start: '2099-06-01', finish: '2099-06-05' }], { status: 'rischio_penale' });
+  assert(s3.status === 'Rischio penale', `penalty risk got ${s3.status}`);
+  // Charts fed without the jobs payload (optimisation previews) show no status.
+  const sNone = GanttChart.summarizeCommessaTasks([{ start: '2099-06-01', finish: '2099-06-05' }]);
+  assert(sNone.status === '', `no job payload should give no status, got "${sNone.status}"`);
 
-  const s2 = GanttChart.summarizeCommessaTasks([
-    { start: '2099-06-01', finish: '2099-06-05', actual_start: '2099-06-03', actual_finish: null },
-  ]);
-  assert(s2.status === 'In ritardo', `late start should be In ritardo, got ${s2.status}`);
-
-  // Delay badge days: late start, waiting to start (planned start day = +1),
-  // open past finish; closed or on-time activities are 0.
+  // Delay badge days and lateness are read from the task, never recomputed.
   const d = GanttChart.taskDelayDays;
   const today = new Date(2026, 8, 25);
-  assert(d({ start: '2026-09-20', finish: '2026-10-20', actual_start: '2026-09-23' }, today) === 3, 'late start +3');
-  assert(d({ start: '2026-09-25', finish: '2026-10-20' }, today) === 1, 'not started on start day +1');
-  assert(d({ start: '2026-09-20', finish: '2026-10-20' }, today) === 6, 'not started 5 days after start +6');
-  assert(d({ start: '2026-09-01', finish: '2026-09-15', actual_start: '2026-09-01' }, today) === 10, 'open past finish +10');
-  assert(d({ start: '2026-09-01', finish: '2026-09-15', actual_start: '2026-09-05', actual_finish: '2026-09-20' }, today) === 0, 'closed is 0');
-  assert(d({ start: '2026-10-01', finish: '2026-10-15' }, today) === 0, 'future is 0');
+  assert(d({ state_key: 'in_ritardo', delay_days: 3 }) === 3, 'delay from payload');
+  assert(d({ state_key: 'in_ritardo', delay_days: '10' }) === 10, 'numeric string delay');
+  assert(d({ state_key: 'completata', delay_days: 0 }) === 0, 'closed is 0');
+  assert(d({ start: '2026-09-20', finish: '2026-10-20' }, today) === 0, 'no payload field is 0');
 
   // Home filter: a commessa with every activity completed is hidden unless
   // asked for, or picked by name; an open commessa keeps its completed ones.
@@ -83,19 +79,6 @@ assert(typeof GanttChart.summarizeCommessaTasks === 'function', 'summarizeCommes
     assert(keys({ commessa: 'DONE' }) === 'DONE', 'picking the completed commessa must show it');
     assert(ft(list, null, today).length === 3, 'no filter object (other pages) keeps every task');
   }
-
-  // Started late but already completed: not late, same as the home "In ritardo" filter.
-  const sDoneLate = GanttChart.summarizeCommessaTasks([
-    { start: '2099-06-01', finish: '2099-06-05', actual_start: '2099-06-03', actual_finish: '2099-06-04' },
-    { start: '2099-06-08', finish: '2099-06-12' },
-  ]);
-  assert(sDoneLate.status === 'In tempo', `completed late start should be In tempo, got ${sDoneLate.status}`);
-
-  // Duration 4 calendar days; actual start 01/06 → projected end 05/06 > deadline 04/06.
-  const s3 = GanttChart.summarizeCommessaTasks([
-    { start: '2099-06-01', finish: '2099-06-05', actual_start: '2099-06-01' },
-  ], '2099-06-04');
-  assert(s3.status === 'Rischio penale', `penalty risk got ${s3.status}`);
 }
 
 const tasks = [
@@ -110,6 +93,7 @@ const tasks = [
     item: '1', activity: 'wip',
     start: '2026-03-01', finish: '2026-03-20',
     actual_start: '2026-03-05',
+    effective_finish: '2026-03-25',
   },
   {
     commessa: 'C', job_id: 'C', activity_id: 'c1',

@@ -44,7 +44,7 @@ from ui.services.resource_conflicts import (
     ResourceConflictError,
     format_conflict_message,
 )
-from ui.views import _fetch_grouped, _has_plannable_activities
+from ui.services.planning_read import fetch_grouped, has_plannable_activities
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +168,7 @@ def _complete_optimization_session(
         logger.warning("Spiegazione ottimizzazione non disponibile: %s", exc)
         explanation = _fallback_explanation(str(exc))
         warning = str(exc)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("Errore imprevisto durante la generazione della spiegazione")
         explanation = _fallback_explanation(
             "Errore durante la generazione della spiegazione."
@@ -187,7 +187,7 @@ def _clear_wizard_session(request: HttpRequest) -> None:
 
 def _optimization_groups() -> list[dict]:
     """Return grouped commesse that have at least one plannable activity."""
-    return [g for g in _fetch_grouped() if _has_plannable_activities(g["activities"])]
+    return [g for g in fetch_grouped() if has_plannable_activities(g["activities"])]
 
 
 def _sanitize_draft(draft: dict) -> dict:
@@ -198,8 +198,8 @@ def _sanitize_draft(draft: dict) -> dict:
     resolved = filter_job_ids_with_activities(job_ids)
     unplannable_ids = {
         g["job"]["job_id"]
-        for g in _fetch_grouped()
-        if g["job"].get("job_id") and not _has_plannable_activities(g["activities"])
+        for g in fetch_grouped()
+        if g["job"].get("job_id") and not has_plannable_activities(g["activities"])
     }
     resolved = [jid for jid in resolved if jid not in unplannable_ids]
     if not resolved:

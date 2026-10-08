@@ -21,7 +21,8 @@ from ui.services.problem_detection import (
 )
 from ui.services.resource_conflicts import occupation_window
 from ui.tests.helpers import write_user
-from ui.views import _compute_activity_status, api_tasks_update
+from ui.services.planning_read import compute_activity_status
+from ui.views import api_tasks_update
 
 TODAY = date(2026, 9, 4)
 
@@ -103,7 +104,7 @@ class OverdueStatusPillTest(TestCase):
     """The status pill tells "not started yet" from "not started and stale"."""
 
     def test_expired_pill(self) -> None:
-        pills = _compute_activity_status(
+        pills = compute_activity_status(
             date(2026, 8, 25), date(2026, 9, 1), None, None, TODAY
         )
         keys = [p["key"] for p in pills]
@@ -112,7 +113,7 @@ class OverdueStatusPillTest(TestCase):
         self.assertNotIn("da_iniziare", keys)
 
     def test_plain_overdue_pill_before_planned_finish(self) -> None:
-        pills = _compute_activity_status(
+        pills = compute_activity_status(
             date(2026, 9, 1), date(2026, 9, 10), None, None, TODAY
         )
         keys = [p["key"] for p in pills]
@@ -120,14 +121,14 @@ class OverdueStatusPillTest(TestCase):
         self.assertNotIn("scaduta", keys)
 
     def test_started_activity_is_not_expired(self) -> None:
-        pills = _compute_activity_status(
+        pills = compute_activity_status(
             date(2026, 8, 25), date(2026, 9, 1), date(2026, 8, 26), None, TODAY
         )
         self.assertNotIn("scaduta", [p["key"] for p in pills])
 
     def test_open_activity_past_planned_finish_is_late(self) -> None:
         """Started on time but still running past the planned finish."""
-        pills = _compute_activity_status(
+        pills = compute_activity_status(
             date(2026, 8, 25), date(2026, 9, 1), date(2026, 8, 25), None, TODAY
         )
         keys = [p["key"] for p in pills]
@@ -136,7 +137,7 @@ class OverdueStatusPillTest(TestCase):
         self.assertNotIn("scaduta", keys)
 
     def test_open_activity_inside_planned_window_is_not_late(self) -> None:
-        pills = _compute_activity_status(
+        pills = compute_activity_status(
             date(2026, 9, 1), date(2026, 9, 20), date(2026, 9, 1), None, TODAY
         )
         keys = [p["key"] for p in pills]
@@ -144,7 +145,7 @@ class OverdueStatusPillTest(TestCase):
         self.assertIn("in_lavorazione", keys)
 
     def test_activity_closed_after_planned_finish_stays_completed(self) -> None:
-        pills = _compute_activity_status(
+        pills = compute_activity_status(
             date(2026, 8, 25),
             date(2026, 9, 1),
             date(2026, 8, 25),

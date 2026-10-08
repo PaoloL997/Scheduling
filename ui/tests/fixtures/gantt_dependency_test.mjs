@@ -43,6 +43,7 @@ const qualifica = {
   start: '2026-07-22',
   finish: '2026-08-17',
   actual_start: '2026-07-22',
+  effective_finish: '2026-08-17',
   warning_count: 0,
 };
 

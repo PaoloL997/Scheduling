@@ -236,8 +236,32 @@ def find_modello_testa_in_db(modello_testa: str) -> str | None:
     return partial
 
 
+def load_testa_configs() -> dict[str, object]:
+    """Load every :class:`~ui.models.ConfigurazioneTesta` in one query.
+
+    Pass the result as ``configs`` to :func:`get_testa_min_requirements` when
+    resolving the minimums of many activities, so the lookup does not cost
+    one query per activity.
+
+    Returns:
+        dict[str, ConfigurazioneTesta]: Rows keyed by ``modello_testa``, with
+            ``generatori_compatibili`` prefetched.
+    """
+    from ui.models import ConfigurazioneTesta
+
+    return {
+        cfg.modello_testa: cfg
+        for cfg in ConfigurazioneTesta.objects.prefetch_related(
+            "generatori_compatibili"
+        )
+    }
+
+
 def get_testa_min_requirements(
-    modello_testa: str | None, tp60_custom: bool = False
+    modello_testa: str | None,
+    tp60_custom: bool = False,
+    *,
+    configs: dict[str, object] | None = None,
 ) -> dict[str, int]:
     """Return minimum resource counts for a testa model configuration.
 
@@ -247,6 +271,8 @@ def get_testa_min_requirements(
             Tubo-Piastra) job: the consumable minimums are the fixed ones in
             :data:`TP60_CUSTOM_REQUIREMENTS` (2 mandrini, 1 maschera, no
             tastatore) instead of the configured ones.
+        configs: Preloaded rows from :func:`load_testa_configs`; when given,
+            no query is issued.
 
     Returns:
         dict[str, int]: Keys ``teste``, ``mandrini``, ``tastatori``,
@@ -254,7 +280,7 @@ def get_testa_min_requirements(
             Defaults to ``1`` for each category when no configuration exists.
     """
     min_mandrini, min_tastatori, min_maschere, min_generatori, _ = _get_testa_config(
-        modello_testa
+        modello_testa, configs=configs
     )
     requirements = {
         "teste": 1,
@@ -268,7 +294,9 @@ def get_testa_min_requirements(
     return requirements
 
 
-def _get_testa_config(modello_testa: str | None) -> tuple[int, int, int, int, set[str]]:
+def _get_testa_config(
+    modello_testa: str | None, configs: dict[str, object] | None = None
+) -> tuple[int, int, int, int, set[str]]:
     """Fetch per-testa-model configuration from the ORM.
 
     Looks up :class:`~ui.models.ConfigurazioneTesta` for the given model name
@@ -278,6 +306,8 @@ def _get_testa_config(modello_testa: str | None) -> tuple[int, int, int, int, se
 
     Args:
         modello_testa: Testa model name to look up (e.g. ``"IRIS"``).
+        configs: Preloaded rows from :func:`load_testa_configs`; when given,
+            the lookup is a dict access instead of a query.
 
     Returns:
         tuple: ``(min_mandrini, min_tastatori, min_maschere, min_generatori,
@@ -288,14 +318,19 @@ def _get_testa_config(modello_testa: str | None) -> tuple[int, int, int, int, se
     if not modello_testa:
         return 1, 1, 1, 1, set()
 
-    from ui.models import ConfigurazioneTesta
+    if configs is not None:
+        cfg = configs.get(modello_testa)
+        if cfg is None:
+            return 1, 1, 1, 1, set()
+    else:
+        from ui.models import ConfigurazioneTesta
 
-    try:
-        cfg = ConfigurazioneTesta.objects.prefetch_related(
-            "generatori_compatibili"
-        ).get(modello_testa=modello_testa)
-    except ConfigurazioneTesta.DoesNotExist:
-        return 1, 1, 1, 1, set()
+        try:
+            cfg = ConfigurazioneTesta.objects.prefetch_related(
+                "generatori_compatibili"
+            ).get(modello_testa=modello_testa)
+        except ConfigurazioneTesta.DoesNotExist:
+            return 1, 1, 1, 1, set()
 
     gen_models = {
         g.modello_generatore

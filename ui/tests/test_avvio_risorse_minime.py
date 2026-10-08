@@ -30,7 +30,8 @@ from ui.services.problem_detection import (
     resource_shortfalls,
 )
 from ui.tests.helpers import assign_minimum_kit, create_writer, write_user
-from ui.views import _attivita_to_task_dict, api_tasks_update
+from ui.services.planning_read import attivita_to_task_dict
+from ui.views import api_tasks_update
 
 
 def _activity(commessa: str = "C900", **kwargs) -> Attivita:
@@ -351,7 +352,7 @@ class TaskDictStartReadinessTest(TestCase):
 
     def test_can_start_is_false_without_the_minimum_kit(self) -> None:
         att = _activity()
-        task = _attivita_to_task_dict(att)
+        task = attivita_to_task_dict(att)
 
         self.assertFalse(task["can_start"])
         self.assertEqual(task["min_requirements"]["teste"], 1)
@@ -364,7 +365,7 @@ class TaskDictStartReadinessTest(TestCase):
         att = _activity()
         assign_minimum_kit(att)
 
-        task = _attivita_to_task_dict(att)
+        task = attivita_to_task_dict(att)
 
         self.assertTrue(task["can_start"])
         self.assertEqual(task["missing_minimum"], [])
@@ -373,7 +374,7 @@ class TaskDictStartReadinessTest(TestCase):
         ConfigurazioneTesta.objects.create(modello_testa="HT200", min_mandrini=3)
         att = _activity()
 
-        task = _attivita_to_task_dict(att)
+        task = attivita_to_task_dict(att)
 
         self.assertEqual(task["min_requirements"]["mandrini"], 3)
 

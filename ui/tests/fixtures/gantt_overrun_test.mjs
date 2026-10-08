@@ -48,6 +48,27 @@ function shiftDays(days) {
   return d;
 }
 
+// The server's working-day estimate of the end of a started activity.
+function effectiveFinish(start, finish, actualStart) {
+  const wd = (a, b) => {
+    let n = 0;
+    for (const d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) {
+      if (d.getDay() >= 1 && d.getDay() <= 5) n += 1;
+    }
+    return Math.max(1, n);
+  };
+  const duration = wd(start, finish);
+  const d = new Date(actualStart);
+  let left = duration;
+  while (true) {
+    if (d.getDay() >= 1 && d.getDay() <= 5) {
+      left -= 1;
+      if (left === 0) return iso(d);
+    }
+    d.setDate(d.getDate() + 1);
+  }
+}
+
 function render(task) {
   const chart = makeChart();
   chart.tasks = [task];
@@ -85,6 +106,9 @@ const over = render({
   finish: iso(shiftDays(-30)),
   actual_start: iso(shiftDays(-40)),
   actual_finish: null,
+  effective_finish: effectiveFinish(shiftDays(-40), shiftDays(-30), shiftDays(-40)),
+  state_key: 'in_ritardo',
+  delay_days: 30,
 });
 if (over.dashes.length !== 1) {
   throw new Error(`expected one dashed overrun tail, got ${over.dashes.length}`);
@@ -121,6 +145,9 @@ const within = render({
   finish: iso(shiftDays(25)),
   actual_start: iso(shiftDays(-5)),
   actual_finish: null,
+  effective_finish: effectiveFinish(shiftDays(-5), shiftDays(25), shiftDays(-5)),
+  state_key: 'in_lavorazione',
+  delay_days: 0,
 });
 if (within.dashes.length !== 0) {
   throw new Error('unexpected overrun tail for an activity inside its estimate');
@@ -139,6 +166,8 @@ const closed = render({
   finish: iso(shiftDays(-30)),
   actual_start: iso(shiftDays(-40)),
   actual_finish: iso(shiftDays(-20)),
+  state_key: 'completata',
+  delay_days: 0,
 });
 if (closed.dashes.length !== 0) {
   throw new Error('unexpected overrun tail for a completed activity');

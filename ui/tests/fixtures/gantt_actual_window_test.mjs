@@ -37,6 +37,7 @@ const tasks = [
     start: '2026-06-10',
     finish: '2026-06-20',
     actual_start: '2026-06-10',
+    effective_finish: '2026-06-19',
   },
 ];
 

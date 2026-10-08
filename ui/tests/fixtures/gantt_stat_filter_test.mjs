@@ -48,6 +48,7 @@ const tasks = [
     commessa: 'C1', job_id: 'C1', activity_id: 'C1-planned',
     item: '1', activity: 'planned',
     start: '2099-06-01', finish: '2099-06-10',
+    state_key: 'pianificata', delay_days: 0,
   },
   {
     // started on time, planned finish still ahead → wip only
@@ -55,12 +56,14 @@ const tasks = [
     item: '1', activity: 'wip',
     start: '2020-01-01', finish: '2099-01-10',
     actual_start: '2020-01-01',
+    state_key: 'in_lavorazione', delay_days: 0,
   },
   {
     // never started, plan already past → late only
     commessa: 'C2', job_id: 'C2', activity_id: 'C2-late',
     item: '1', activity: 'late',
     start: '2020-02-01', finish: '2020-02-10',
+    state_key: 'in_ritardo', delay_days: 2400,
   },
   {
     // started late, still open → late + wip
@@ -68,6 +71,7 @@ const tasks = [
     item: '1', activity: 'late-wip',
     start: '2020-03-01', finish: '2020-03-10',
     actual_start: '2020-03-05',
+    state_key: 'in_ritardo', delay_days: 2400,
   },
   {
     // started on time but still open past the planned finish → late + wip
@@ -75,6 +79,7 @@ const tasks = [
     item: '1', activity: 'overrun',
     start: '2020-04-01', finish: '2020-04-10',
     actual_start: '2020-04-01',
+    state_key: 'in_ritardo', delay_days: 2400,
   },
 ];
 

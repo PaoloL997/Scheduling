@@ -45,6 +45,7 @@
                     data-total-cost="{{ group.job.total_cost|default:'' }}"
                     data-penalty="{{ group.job.penalty|default:'' }}"
                     data-delivery-date="{{ group.job.delivery_date|default:'' }}"
+                    data-job-status="{{ group.job.status }}"
                     data-n-activities="{{ group.job.n_activities }}">
               <div class="pian-head-identity">
                 <span class="pian-job-name">{{ group.job.commessa }}</span>
@@ -54,7 +55,7 @@
                     <path d="M8.5 1.5a1.414 1.414 0 0 1 2 2L4 10H1.5V7.5L8.5 1.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
                   </svg>
                 </button>
-                <span class="pian-job-state status-pill status-pill--non_pianificata">NON PIANIFICATA</span>
+                <span class="pian-job-state status-pill status-pill--{{ group.job.status }}">{{ group.job.status_label }}</span>
               </div>
               <span class="pian-head-sep" aria-hidden="true"></span>
               <div class="pian-head-meta">
@@ -117,6 +118,8 @@
                    data-orm-id="{{ task.orm_id|default:'' }}"
                    data-warning-count="{{ task.warning_count|default:0 }}"
                    data-note-count="{{ task.note_count|default:0 }}"
+                   data-state-key="{{ task.state_key }}"
+                   data-delay-days="{{ task.delay_days }}"
                    data-activity-id="{{ task.activity_id }}"
                    data-job-id="{{ task.job_id }}"
                    data-commessa="{{ task.commessa }}"
@@ -862,6 +865,8 @@ function _applyActivityUpdates(json) {
     const u = updates[id] || {};
     if (u.warning_count != null) row.dataset.warningCount = String(u.warning_count);
     if (u.note_count != null) row.dataset.noteCount = String(u.note_count);
+    if (u.state_key) row.dataset.stateKey = u.state_key;
+    if (u.delay_days != null) row.dataset.delayDays = String(u.delay_days);
     if (u.resources_by_tipo) {
       row.dataset.resources = u.resources || '';
       row.dataset.resourcesTyped = JSON.stringify(u.resources_by_tipo);
@@ -940,6 +945,7 @@ function _pianGroupHeadHtml(job) {
            data-total-cost="${esc(job.total_cost || '')}"
            data-penalty="${esc(job.penalty || '')}"
            data-delivery-date="${esc(job.delivery_date || '')}"
+           data-job-status="${esc(job.status || 'non_pianificata')}"
            data-n-activities="${nAct}">
         <div class="pian-head-identity">
           <span class="pian-job-name">${commessa}</span>
@@ -971,14 +977,11 @@ function _pianVisibleRowsForCommessa(commessa) {
   return _pianRowsForCommessa(commessa).filter(row => row.dataset.searchHidden !== '1');
 }
 
+// Activity and commessa states are computed once, server-side
+// (ui/services/planning_read.py), rendered into data-* attributes and refreshed
+// from every write response. Nothing in this page recomputes them.
 function _pianActivityState(row) {
-  const ds = row.dataset;
-  const pills = _computeActivityStatus(ds.start, ds.finish, ds.actualStart, ds.actualFinish).map(p => p.key);
-  if (pills.includes('in_ritardo')) return 'in_ritardo';
-  if (pills.includes('in_lavorazione') || pills.includes('in_lavorazione_ritardo')) return 'in_lavorazione';
-  if (pills.includes('completata')) return 'completata';
-  if (pills.includes('pianificata')) return 'pianificata';
-  return 'non_pianificata';
+  return row.dataset.stateKey || 'non_pianificata';
 }
 
 function _pianParseIsoDay(raw) {
@@ -1023,9 +1026,6 @@ function _activityWorkProgress(row) {
 
 function _pianJobStats(commessa) {
   const rows = _pianRowsForCommessa(commessa);
-  const group = _pianGroupByCommessa(commessa);
-  const card = group ? _pianCardFromGroup(group) : null;
-  const deadline = _pianParseIsoDay(card ? (card.dataset.deliveryDate || '') : '');
   const stats = {
     total: rows.length,
     completed: 0,
@@ -1034,7 +1034,6 @@ function _pianJobStats(commessa) {
     working: 0,
     planned: 0,
     started: 0,
-    penaltyRisk: false,
     workDone: 0,
     workTotal: 0,
     progressPct: 0,
@@ -1051,20 +1050,6 @@ function _pianJobStats(commessa) {
     const progress = _activityWorkProgress(row);
     stats.workDone += progress.done;
     stats.workTotal += progress.total;
-
-    if (deadline) {
-      const planS = _pianParseIsoDay(row.dataset.start);
-      const planF = _pianParseIsoDay(row.dataset.finish);
-      const actS = _pianParseIsoDay(row.dataset.actualStart);
-      const actF = _pianParseIsoDay(row.dataset.actualFinish);
-      if (planS && planF) {
-        const durMs = planF - planS;
-        let end = null;
-        if (actF) end = actF;
-        else if (actS) end = new Date(actS.getTime() + durMs);
-        if (end && end > deadline) stats.penaltyRisk = true;
-      }
-    }
   });
   stats.progressPct = stats.workTotal
     ? Math.round(stats.workDone / stats.workTotal * 100)
@@ -1072,12 +1057,26 @@ function _pianJobStats(commessa) {
   return stats;
 }
 
-function _pianAggregateStatus(stats) {
-  if (!stats.total) return { key: 'non_pianificata', label: 'NON PIANIFICATA' };
-  if (stats.penaltyRisk) return { key: 'rischio_penale', label: 'RISCHIO PENALE' };
-  if (stats.late > 0) return { key: 'in_ritardo', label: 'IN RITARDO' };
-  if (stats.started > 0) return { key: 'in_tempo', label: 'IN TEMPO' };
-  return { key: 'pianificata', label: 'PIANIFICATA' };
+const _PIAN_JOB_STATUS_LABELS = {
+  rischio_penale: 'RISCHIO PENALE',
+  in_ritardo: 'IN RITARDO',
+  in_tempo: 'IN TEMPO',
+  pianificata: 'PIANIFICATA',
+  non_pianificata: 'NON PIANIFICATA',
+};
+
+function _pianJobStatus(group) {
+  const card = group ? _pianCardFromGroup(group) : null;
+  const key = (card && card.dataset.jobStatus) || 'non_pianificata';
+  return { key, label: _PIAN_JOB_STATUS_LABELS[key] || key.toUpperCase() };
+}
+
+// Store the `job` payload a write response carries on the commessa card.
+function _pianSetJobStatus(commessa, job) {
+  if (!job || typeof job !== 'object' || !job.status) return;
+  const group = _pianGroupByCommessa(commessa || job.commessa || '');
+  const card = group ? _pianCardFromGroup(group) : null;
+  if (card) card.dataset.jobStatus = job.status;
 }
 
 const _PIAN_STATUS_SORT_ORDER = {
@@ -1089,9 +1088,7 @@ const _PIAN_STATUS_SORT_ORDER = {
 };
 
 function _pianGroupStatusKey(group) {
-  const commessa = group.dataset.commessa || '';
-  const stats = _pianJobStats(commessa);
-  return _pianAggregateStatus(stats).key;
+  return _pianJobStatus(group).key;
 }
 
 function _pianEarliestStartMs(commessa) {
@@ -1204,7 +1201,7 @@ function _refreshPianJobCard(group) {
   const card = _pianCardFromGroup(group);
   if (!card) return;
   const stats = _pianJobStats(group.dataset.commessa || '');
-  const status = _pianAggregateStatus(stats);
+  const status = _pianJobStatus(group);
   card.dataset.nActivities = stats.total;
   const stateEl = group.querySelector('.pian-job-state');
   if (stateEl) {
@@ -2966,7 +2963,7 @@ async function step6Save() {
     if (data.ok) {
       closeAddModal();
       _wizToast(`✓ Attività ${buildActivityId(WIZ.commessa, WIZ.item, WIZ.attivita)} aggiunta con successo.`);
-      _wizAppendRow(data.id || '', data.warning_count || 0, data.note_count || 0);
+      _wizAppendRow(data.id || '', data.warning_count || 0, data.note_count || 0, data.task || null, data.job || null);
     } else {
       const errEl = document.getElementById('s6-error');
       errEl.textContent = data.error || 'Errore nel salvataggio.';
@@ -2997,54 +2994,6 @@ function _wizToast(msg) {
   setTimeout(() => { t.style.display = 'none'; }, 5000);
 }
 
-function _computeActivityStatus(start, finish, actualStart, actualFinish) {
-  if (!start || !finish) return [{ key: 'non_pianificata', label: 'NON PIANIFICATA' }];
-  const today = new Date(); today.setHours(0,0,0,0);
-  const planS = new Date(start);
-  const planF = new Date(finish);
-  const actS  = actualStart  ? new Date(actualStart)  : null;
-  const actF  = actualFinish ? new Date(actualFinish) : null;
-  const isCompleted = !!(actS && actF);
-  const isStarted   = !!(actS && !actF);
-  const isLate      = !!(actS && actS > planS);
-  const isOverdue   = !actS && today >= planS;
-  // Mirrors _compute_activity_status in ui/views.py.
-  const isPastDue   = !actF && today > planF;
-  const isExpired   = !actS && isPastDue;
-  if (isCompleted) return [{ key: 'completata', label: 'COMPLETATA' }];
-  const pills = [];
-  if (isLate || isOverdue || isPastDue) pills.push({ key: 'in_ritardo', label: 'IN RITARDO' });
-  if (isStarted)           pills.push({ key: 'in_lavorazione', label: 'IN LAVORAZIONE' });
-  else if (isExpired)      pills.push({ key: 'scaduta', label: 'NON INIZIATA · SCADUTA' });
-  else if (isOverdue)      pills.push({ key: 'da_iniziare', label: 'DA INIZIARE' });
-  else                     pills.push({ key: 'pianificata', label: 'PIANIFICATA' });
-  return pills;
-}
-
-// Same rules as taskIsLate / taskDelayDays in gantt.js: calendar days behind
-// plan, the largest of a late start, days waiting to start (the planned start
-// day already counts +1) and days still open past the planned finish.
-function _pianDelayDays(ds) {
-  const day = s => {
-    const [y, m, d] = String(s || '').slice(0, 10).split('-').map(Number);
-    return y && m && d ? new Date(y, m - 1, d) : null;
-  };
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const planS = day(ds.start), planF = day(ds.finish);
-  const actS = day(ds.actualStart), actF = day(ds.actualFinish);
-  if (actS && actF) return 0;
-  const startedLate = !!(actS && planS && actS > planS);
-  const overdue = !!(!actS && planS && today >= planS);
-  const pastDue = !!(!actF && planF && today > planF);
-  if (!startedLate && !overdue && !pastDue) return 0;
-  const days = (a, b) => Math.round((a - b) / 86400000);
-  let delay = 0;
-  if (startedLate) delay = Math.max(delay, days(actS, planS));
-  if (overdue) delay = Math.max(delay, days(today, planS) + 1);
-  if (pastDue) delay = Math.max(delay, days(today, planF));
-  return Math.max(delay, 1);
-}
-
 // Delay column ("+N gg" in red, like the Gantt) and green row once completed.
 function _pianRenderRowState(row) {
   const ds = row.dataset;
@@ -3052,7 +3001,7 @@ function _pianRenderRowState(row) {
   row.classList.toggle('is-completed', completed);
   const cell = row.querySelector('.pian-col-delay');
   if (!cell) return;
-  const delay = completed ? 0 : _pianDelayDays(ds);
+  const delay = completed ? 0 : (parseInt(ds.delayDays || '0', 10) || 0);
   cell.textContent = delay > 0 ? `+${delay} gg` : '';
   cell.classList.toggle('is-late', delay > 0);
 }
@@ -3101,7 +3050,7 @@ function _refreshActivityRowCells(div) {
   _syncNavWarnBadge();
 }
 
-function _wizAppendRow(ormId, warningCount, noteCount) {
+function _wizAppendRow(ormId, warningCount, noteCount, task, job) {
   const r = WIZ;
   const fmt = v => v || '—';
   const resByTipo = {
@@ -3133,6 +3082,8 @@ function _wizAppendRow(ormId, warningCount, noteCount) {
   div.dataset.finish       = r.dataFine;
   div.dataset.actualStart  = '';
   div.dataset.actualFinish = '';
+  div.dataset.stateKey     = (task && task.state_key) || 'pianificata';
+  div.dataset.delayDays    = task ? String(task.delay_days ?? 0) : '0';
   div.dataset.plant        = r.stabilimento;
   div.dataset.responsible  = r.responsabile;
   div.dataset.resources      = allRes;
@@ -3178,6 +3129,7 @@ function _wizAppendRow(ormId, warningCount, noteCount) {
     host.appendChild(div);
     sortPianActivitiesInHost(host);
   }
+  _pianSetJobStatus(r.commessa, job);
   refreshPianSummary();
   sortPianGroupList();
   filterPianGroups(document.getElementById('pian-search').value);
@@ -3944,6 +3896,11 @@ async function saveEdit() {
       sortPianActivitiesInHost(tr.closest('.pian-activities'));
       if (json.warning_count != null) tr.dataset.warningCount = String(json.warning_count);
       if (json.note_count != null) tr.dataset.noteCount = String(json.note_count);
+      if (json.task) {
+        tr.dataset.stateKey = json.task.state_key || '';
+        tr.dataset.delayDays = String(json.task.delay_days ?? 0);
+      }
+      _pianSetJobStatus(newData.commessa, json.job);
       _applyActivityUpdates(json);
       _refreshActivityRowCells(tr);
       refreshPianSummary();
@@ -3953,6 +3910,7 @@ async function saveEdit() {
 
     // Visual refresh for job card meta after edit.
     if (entityType === 'job') {
+      _pianSetJobStatus(newData.commessa || originalData.commessa, json.job);
       _refreshJobCard(tr, newData);
       _selectedPianCommessa = newData.commessa;
       _renderSelectedPianJob();

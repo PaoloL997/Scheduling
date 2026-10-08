@@ -62,6 +62,7 @@ const chart = new GanttChart({
 });
 chart.tasks = tasks;
 chart.deadlines = { C1: '2026-06-20', C2: '2026-07-15' };
+chart.jobs = { C1: { status: 'pianificata' }, C2: { status: 'pianificata' } };
 chart._dataMinD = new Date('2026-01-01T00:00:00');
 chart._dataMaxD = new Date('2026-12-31T00:00:00');
 chart.fitToData = true;

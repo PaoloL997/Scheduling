@@ -11,13 +11,13 @@ from django.urls import reverse
 from django.utils.timezone import localdate
 
 from ui.models import Attivita, Job
-from ui.views import (
-    _aggregate_job_status,
-    _fetch_grouped,
-    _has_plannable_activities,
-    _is_job_completed,
-    pianificazione,
+from ui.services.planning_read import (
+    aggregate_job_status,
+    fetch_grouped,
+    has_plannable_activities,
+    is_job_completed,
 )
+from ui.views import pianificazione
 from ui.views_ottimizzazione import (
     SESSION_DRAFT_KEY,
     _optimization_groups,
@@ -67,25 +67,25 @@ class JobStatusHelpersTest(TestCase):
             {"actual_start": "2026-01-01", "actual_finish": "2026-01-02"},
             {"actual_start": "2026-01-03", "actual_finish": "2026-01-04"},
         ]
-        self.assertTrue(_is_job_completed(tasks))
+        self.assertTrue(is_job_completed(tasks))
 
         tasks[1]["actual_finish"] = None
-        self.assertFalse(_is_job_completed(tasks))
-        self.assertFalse(_is_job_completed([]))
+        self.assertFalse(is_job_completed(tasks))
+        self.assertFalse(is_job_completed([]))
 
     def test_has_plannable_activities(self) -> None:
         today = localdate().isoformat()
         self.assertTrue(
-            _has_plannable_activities([{"actual_start": None, "actual_finish": None}])
+            has_plannable_activities([{"actual_start": None, "actual_finish": None}])
         )
         self.assertFalse(
-            _has_plannable_activities([{"actual_start": today, "actual_finish": None}])
+            has_plannable_activities([{"actual_start": today, "actual_finish": None}])
         )
         self.assertFalse(
-            _has_plannable_activities([{"actual_start": today, "actual_finish": today}])
+            has_plannable_activities([{"actual_start": today, "actual_finish": today}])
         )
         self.assertTrue(
-            _has_plannable_activities(
+            has_plannable_activities(
                 [
                     {"actual_start": today, "actual_finish": None},
                     {"actual_start": None, "actual_finish": None},
@@ -104,14 +104,14 @@ class JobStatusHelpersTest(TestCase):
                 "actual_finish": (today + timedelta(days=1)).isoformat(),
             }
         ]
-        self.assertEqual(_aggregate_job_status(tasks), "in_tempo")
+        self.assertEqual(aggregate_job_status(tasks), "in_tempo")
 
     def test_aggregate_job_status_late_over_planned(self) -> None:
         tasks = [
             {"status_pills": [{"key": "in_ritardo", "label": "IN RITARDO"}]},
             {"status_pills": [{"key": "pianificata", "label": "PIANIFICATA"}]},
         ]
-        self.assertEqual(_aggregate_job_status(tasks), "in_ritardo")
+        self.assertEqual(aggregate_job_status(tasks), "in_ritardo")
 
     def test_aggregate_job_status_in_tempo(self) -> None:
         today = localdate()
@@ -125,7 +125,7 @@ class JobStatusHelpersTest(TestCase):
             },
             {"status_pills": [{"key": "pianificata", "label": "PIANIFICATA"}]},
         ]
-        self.assertEqual(_aggregate_job_status(tasks), "in_tempo")
+        self.assertEqual(aggregate_job_status(tasks), "in_tempo")
 
     def test_aggregate_job_status_pianificata(self) -> None:
         future = localdate() + timedelta(days=30)
@@ -136,7 +136,7 @@ class JobStatusHelpersTest(TestCase):
                 "finish": (future + timedelta(days=5)).isoformat(),
             }
         ]
-        self.assertEqual(_aggregate_job_status(tasks), "pianificata")
+        self.assertEqual(aggregate_job_status(tasks), "pianificata")
 
     def test_aggregate_job_status_rischio_penale(self) -> None:
         start = localdate()
@@ -150,11 +150,11 @@ class JobStatusHelpersTest(TestCase):
             }
         ]
         deadline = (start + timedelta(days=2)).isoformat()
-        self.assertEqual(_aggregate_job_status(tasks, deadline), "rischio_penale")
+        self.assertEqual(aggregate_job_status(tasks, deadline), "rischio_penale")
 
 
 class FetchGroupedSortTest(TestCase):
-    """Ensure _fetch_grouped orders commesse by earliest start date."""
+    """Ensure fetch_grouped orders commesse by earliest start date."""
 
     def setUp(self) -> None:
         today = localdate()
@@ -187,7 +187,7 @@ class FetchGroupedSortTest(TestCase):
         _make_att("C_PLAN", di=future, df=future + timedelta(days=5))
 
     def test_fetch_grouped_sorts_by_earliest_start_then_name(self) -> None:
-        groups = _fetch_grouped()
+        groups = fetch_grouped()
         names = [g["job"]["commessa"] for g in groups]
         self.assertEqual(names, ["A_LATE", "B_WORK", "Z_DONE", "C_PLAN"])
 
@@ -208,7 +208,7 @@ class FetchGroupedSortTest(TestCase):
             di=today + timedelta(days=1),
             df=today + timedelta(days=5),
         )
-        groups = {g["job"]["commessa"]: g for g in _fetch_grouped()}
+        groups = {g["job"]["commessa"]: g for g in fetch_grouped()}
         acts = groups["MULTI"]["activities"]
         self.assertEqual(
             [a["activity"] for a in acts],

@@ -38,7 +38,10 @@ const tasks = [
     start: '2026-06-03',
     finish: '2026-07-03',
     actual_start: '2026-06-08',
+    effective_finish: '2026-07-08',
     actual_finish: null,
+    state_key: 'in_ritardo',
+    delay_days: 5,
     warning_count: 0,
   },
 ];
