@@ -4,23 +4,11 @@ from __future__ import annotations
 
 from typing import Iterable
 
-_TIPO_LABELS = {
-    "testa": "Testa",
-    "generatore": "Generatore",
-    "mandrino": "Mandrino",
-    "tastatore": "Tastatore",
-    "maschera": "Maschera",
-}
+from ui.services.resource_types import TIPI, TIPO_LABELS as _TIPO_LABELS
 
 
 def _group_by_tipo(risorse: Iterable) -> dict[str, list[str]]:
-    grouped: dict[str, list[str]] = {
-        "testa": [],
-        "generatore": [],
-        "mandrino": [],
-        "tastatore": [],
-        "maschera": [],
-    }
+    grouped: dict[str, list[str]] = {tipo: [] for tipo in TIPI}
     for r in risorse:
         tipo = getattr(r, "tipo", None) or r.get("tipo")  # type: ignore[union-attr]
         rid = getattr(r, "risorsa_id", None) or r.get("risorsa_id")  # type: ignore[union-attr]

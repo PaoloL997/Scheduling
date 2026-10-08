@@ -22,6 +22,8 @@ from django.db.models import Count, F
 from django.utils.timezone import localdate
 
 from ui.models import Attivita, Job, ProblemaAttivita, Stabilimento
+from ui.services.parsing import parse_iso_day  # noqa: F401  (re-exported)
+from ui.services.resource_types import DEFAULT_PLANT_COLOR
 from ui.services.activity_inventory import (
     get_testa_min_requirements,
     load_testa_configs,
@@ -42,18 +44,6 @@ _JOB_STATUS_LABELS = {
 
 
 # -- date helpers --------------------------------------------------------------
-
-
-def parse_iso_day(value) -> date | None:
-    """Parse ``YYYY-MM-DD`` (or a :class:`date`) into a date, else ``None``."""
-    if value is None or value == "":
-        return None
-    if isinstance(value, date):
-        return value
-    try:
-        return date.fromisoformat(str(value)[:10])
-    except ValueError:
-        return None
 
 
 # -- activity status -----------------------------------------------------------
@@ -514,7 +504,7 @@ def fetch_gantt() -> dict:
     tasks = fetch_tasks()
     tasks.sort(key=lambda t: (t["commessa"], t["item"], t["activity"] or ""))
     for task in tasks:
-        task["plant_color"] = plant_colors.get(task["plant"] or "", "#4a90e2")
+        task["plant_color"] = plant_colors.get(task["plant"] or "", DEFAULT_PLANT_COLOR)
 
     by_commessa: dict[str, list[dict]] = defaultdict(list)
     for task in tasks:

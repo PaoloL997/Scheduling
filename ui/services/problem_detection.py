@@ -23,27 +23,16 @@ from __future__ import annotations
 import logging
 from datetime import date
 
+from ui.services.resource_types import (
+    CATEGORIA_TO_TIPO as _CAT_TO_TIPO,
+    CATEGORIE as _CAT_KEYS,
+    TIPO_LABELS as _TIPO_LABELS,
+    TIPO_TO_CATEGORIA as _TIPO_TO_CAT,
+    model_for_tipo,
+    pairs_to_risorse_dict,
+)
+
 logger = logging.getLogger(__name__)
-
-_TIPO_LABELS: dict[str, str] = {
-    "testa": "Testa",
-    "mandrino": "Mandrino",
-    "tastatore": "Tastatore",
-    "maschera": "Maschera",
-    "generatore": "Generatore",
-}
-
-_CAT_KEYS = ("teste", "mandrini", "tastatori", "maschere", "generatori")
-
-_CAT_TO_TIPO: dict[str, str] = {
-    "teste": "testa",
-    "mandrini": "mandrino",
-    "tastatori": "tastatore",
-    "maschere": "maschera",
-    "generatori": "generatore",
-}
-
-_TIPO_TO_CAT: dict[str, str] = {tipo: cat for cat, tipo in _CAT_TO_TIPO.items()}
 
 _SPOSTAMENTO_RESOLVED_NOTE = "Risorsa spostata allo stabilimento di lavorazione."
 _STALE_CONDITION_NOTE = "Condizione non piu verificata dopo aggiornamento attivita."
@@ -209,39 +198,6 @@ def format_missing_minimum_message(
     )
 
 
-_RESOURCE_MODELS: dict[str, type] = {}
-
-
-def _get_resource_models() -> dict[str, type]:
-    """Return a mapping from resource category name to its ORM model class.
-
-    Imports are deferred to avoid circular imports at module load time.
-
-    Returns:
-        dict[str, type]: Keys are category names (testa, mandrino, …),
-            values are the corresponding ORM model classes.
-    """
-    if not _RESOURCE_MODELS:
-        from ui.models import (
-            GeneratoreItem,
-            MandrinoItem,
-            MascheraItem,
-            TastatoreItem,
-            TestaItem,
-        )
-
-        _RESOURCE_MODELS.update(
-            {
-                "testa": TestaItem,
-                "mandrino": MandrinoItem,
-                "tastatore": TastatoreItem,
-                "maschera": MascheraItem,
-                "generatore": GeneratoreItem,
-            }
-        )
-    return _RESOURCE_MODELS
-
-
 def _lookup_plants(categoria: str, uids: list[str]) -> dict[str, str | None]:
     """Return ``{uid: plant}`` for the given inventory UIDs in one query.
 
@@ -254,9 +210,9 @@ def _lookup_plants(categoria: str, uids: list[str]) -> dict[str, str | None]:
         dict[str, str | None]: Plant per UID; UIDs missing from the
             inventory are absent.
     """
-    model = _get_resource_models().get(categoria)
-    if model is None or not uids:
+    if categoria not in _TIPO_TO_CAT or not uids:
         return {}
+    model = model_for_tipo(categoria)
     return dict(model.objects.filter(uid__in=uids).values_list("uid", "plant"))
 
 
@@ -437,12 +393,7 @@ def detect_and_save_problems(
 
 def _risorse_dict_for_attivita(attivita) -> dict[str, list[str]]:
     """Build the wizard-style risorse mapping from assigned inventory rows."""
-    risorse_dict: dict[str, list[str]] = {}
-    for r in attivita.risorse.all():
-        cat = _TIPO_TO_CAT.get(r.tipo)
-        if cat:
-            risorse_dict.setdefault(cat, []).append(r.risorsa_id)
-    return risorse_dict
+    return pairs_to_risorse_dict((r.tipo, r.risorsa_id) for r in attivita.risorse.all())
 
 
 def refresh_problems_for_attivita(attivita, **preloaded) -> int:

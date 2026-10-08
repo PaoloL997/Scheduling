@@ -4,6 +4,7 @@ from django.db import models
 from django.db.models import UniqueConstraint
 
 from ui.services.identifiers import build_activity_id, build_job_id
+from ui.services.resource_types import TIPI, TIPO_LABELS
 
 
 class Attivita(models.Model):
@@ -259,13 +260,7 @@ class RisorsaAttivita(models.Model):
     scheduled date range.
     """
 
-    TIPO_CHOICES = [
-        ("testa", "Testa"),
-        ("mandrino", "Mandrino"),
-        ("tastatore", "Tastatore"),
-        ("maschera", "Maschera"),
-        ("generatore", "Generatore"),
-    ]
+    TIPO_CHOICES = [(tipo, TIPO_LABELS[tipo]) for tipo in TIPI]
 
     attivita = models.ForeignKey(
         Attivita,

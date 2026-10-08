@@ -14,31 +14,17 @@ from ui.services.resource_conflicts import (
     occupation_window,
     format_conflict_message,
 )
+from ui.services.resource_types import (
+    CATEGORIE,
+    pairs_to_risorse_dict,
+    risorse_dict_to_pairs,
+)
 from ui.services.resource_display import (
     format_activity_resources,
     format_activity_resources_html,
 )
 
 logger = logging.getLogger(__name__)
-
-
-_TIPO_KEYS: tuple[tuple[str, str], ...] = (
-    ("testa", "teste"),
-    ("mandrino", "mandrini"),
-    ("tastatore", "tastatori"),
-    ("maschera", "maschere"),
-    ("generatore", "generatori"),
-)
-
-
-def _risorse_to_pairs(risorse_data: dict) -> list[tuple[str, str]]:
-    """Convert wizard-style risorse dict to (tipo, risorsa_id) pairs."""
-    pairs: list[tuple[str, str]] = []
-    for tipo, key in _TIPO_KEYS:
-        for rid in risorse_data.get(key, []) or []:
-            if rid:
-                pairs.append((tipo, str(rid)))
-    return pairs
 
 
 def _merge_risorse_with_existing(attivita_id: int, risorse_data: dict) -> dict:
@@ -57,18 +43,14 @@ def _merge_risorse_with_existing(attivita_id: int, risorse_data: dict) -> dict:
     Returns:
         dict: Every category key present, merged with the stored assignments.
     """
-    existing: dict[str, list[str]] = {key: [] for _, key in _TIPO_KEYS}
-    key_by_tipo = dict(_TIPO_KEYS)
-    rows = RisorsaAttivita.objects.filter(attivita_id=attivita_id).values_list(
-        "tipo", "risorsa_id"
+    existing = pairs_to_risorse_dict(
+        RisorsaAttivita.objects.filter(attivita_id=attivita_id).values_list(
+            "tipo", "risorsa_id"
+        )
     )
-    for tipo, rid in rows:
-        key = key_by_tipo.get(tipo)
-        if key and rid:
-            existing[key].append(rid)
 
     merged: dict[str, list[str]] = {}
-    for _, key in _TIPO_KEYS:
+    for key in CATEGORIE:
         if key in risorse_data:
             merged[key] = [str(r) for r in (risorse_data.get(key) or []) if r]
         else:
@@ -283,7 +265,7 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
         if not isinstance(risorse_data, dict):
             raise BridgeWriteError("Formato risorse non valido.", status_code=400)
         risorse_data = _merge_risorse_with_existing(a.pk, risorse_data)
-        new_risorse_pairs = _risorse_to_pairs(risorse_data)
+        new_risorse_pairs = risorse_dict_to_pairs(risorse_data)
         if new_risorse_pairs and occupation_window(a) is None:
             raise BridgeWriteError(
                 "Per assegnare risorse servono data di inizio e fine.",

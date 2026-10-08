@@ -109,6 +109,18 @@
   il tablet riceve ora anche la riga aggiornata (`task`) e la commessa (`job`).
   Risposte, regole e log (`source: tablet`) sono identici sui due canali.
 
+- **Una sola definizione delle categorie di risorse e del parsing.**
+  `ui/services/resource_types.py` definisce i cinque tipi nelle tre
+  grafie (`tipo`, `categoria` del wizard, tabella Inventario), le etichette,
+  il modello ORM di ciascun tipo e le conversioni tra dizionario del wizard e
+  coppie `(tipo, uid)`; `RisorsaAttivita.TIPO_CHOICES` ne deriva. Prima la
+  stessa mappa era scritta sei volte, le etichette tre. `ui/services/parsing.py`
+  raccoglie la lettura del body JSON (sostituisce 18 blocchi `try/except`
+  nelle view), le date (quattro parser locali in meno) e gli importi delle
+  commesse; le misure restano in `measures.py`. Nessun cambio di comportamento,
+  tranne `/api/ottimizzazione/solve/` che con un body non valido risponde 400
+  invece di trattarlo come vuoto.
+
 ### Removed
 
 - Codice morto: `ui/forms.py` e i template del vecchio wizard a pagine

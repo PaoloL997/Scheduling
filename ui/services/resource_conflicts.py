@@ -23,21 +23,10 @@ from datetime import date
 
 from django.db.models import Q
 
-_TIPO_LABELS = {
-    "testa": "Testa",
-    "generatore": "Generatore",
-    "mandrino": "Mandrino",
-    "tastatore": "Tastatore",
-    "maschera": "Maschera",
-}
-
-_TIPO_WITH_ARTICLE = {
-    "testa": "la testa",
-    "generatore": "il generatore",
-    "mandrino": "il mandrino",
-    "tastatore": "il tastatore",
-    "maschera": "la maschera",
-}
+from ui.services.resource_types import (
+    TIPO_LABELS as _TIPO_LABELS,
+    TIPO_WITH_ARTICLE as _TIPO_WITH_ARTICLE,
+)
 
 
 def _format_date_it(iso: str | None) -> str:

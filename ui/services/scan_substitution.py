@@ -33,9 +33,9 @@ from ui.services.measures import (
     is_resource_compatible,
     parse_measure,
 )
+from ui.services.resource_types import pairs_to_risorse_dict
 from ui.services.overlap_reassign import (
     _item_snapshot,
-    _pairs_to_risorse,
     _paren_traits,
     _resource_name,
     pick_free_spare,
@@ -384,7 +384,7 @@ def _current_risorse(att, tipo: str, expected: str | None, scanned: str) -> dict
             pairs.append((res_tipo, uid))
     if not replaced:
         pairs.append((tipo, scanned))
-    return _pairs_to_risorse(pairs)
+    return pairs_to_risorse_dict(pairs)
 
 
 def _strip_piece(robbed, tipo: str, uid: str) -> None:
@@ -480,7 +480,7 @@ def _reequip_robbed(robbed, tipo: str, uid: str, current) -> dict:
     try:
         update_attivita(
             robbed.pk,
-            {"risorse": _pairs_to_risorse(pairs)},
+            {"risorse": pairs_to_risorse_dict(pairs)},
             resolve_overlaps=False,
         )
     except BridgeWriteError:

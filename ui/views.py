@@ -26,6 +26,8 @@ from ui.services.planning_read import (
     load_task_dict,
 )
 from ui.services.runtime_config import load_runtime_config
+from ui.services.parsing import parse_json_body, parse_money, parse_percent
+from ui.services.resource_types import TABLE_TO_TIPO, model_for_table
 from ui.services.inventory import (
     delete_resource,
     insert_resource,
@@ -38,68 +40,14 @@ from ui.models import (
     GeneratoreCompatibile,
     GeneratoreItem,
     Job,
-    MandrinoItem,
-    MascheraItem,
     Responsabile,
     Stabilimento,
-    TastatoreItem,
-    TestaItem,
     TipoAttivita,
 )
 
 logger = logging.getLogger(__name__)
 
 _INVENTORY_TABLES = {"Generatore", "Mandrino", "Maschera", "Tastatore", "Testa"}
-
-
-def _parse_job_money(value) -> float | None:
-    """Parse an optional monetary amount (e.g. job ``total_cost``).
-
-    Accepts plain numbers and Italian formatting such as ``200.000`` or
-    ``1.234,56``.
-    """
-    if value is None or value == "":
-        return None
-    if isinstance(value, int | float):
-        amount = float(value)
-        if amount < 0:
-            raise ValueError("negative")
-        return amount
-    text = str(value).strip().replace("\u00a0", "").replace(" ", "")
-    if not text:
-        return None
-    if "," in text:
-        text = text.replace(".", "").replace(",", ".")
-    elif text.count(".") == 1:
-        left, right = text.split(".", 1)
-        if len(right) == 3 and right.isdigit():
-            text = left + right
-    else:
-        text = text.replace(".", "")
-    try:
-        amount = float(text)
-    except ValueError as exc:
-        raise ValueError("invalid") from exc
-    if amount < 0:
-        raise ValueError("negative")
-    return amount
-
-
-def _parse_job_penalty(value) -> float | None:
-    """Parse an optional penalty percentage."""
-    if value is None or value == "":
-        return None
-    if isinstance(value, int | float):
-        penalty = float(value)
-    else:
-        text = str(value).strip().replace(",", ".")
-        try:
-            penalty = float(text)
-        except ValueError as exc:
-            raise ValueError("invalid") from exc
-    if penalty < 0:
-        raise ValueError("negative")
-    return penalty
 
 
 @login_required
@@ -237,17 +185,9 @@ def _fetch_inventory_table(table_name: str) -> list[dict]:
         list[dict]: One dict per row, keyed by field name.
             Returns an empty list if the table is empty or the name is invalid.
     """
-    _models = {
-        "Generatore": GeneratoreItem,
-        "Mandrino": MandrinoItem,
-        "Maschera": MascheraItem,
-        "Tastatore": TastatoreItem,
-        "Testa": TestaItem,
-    }
-    model_class = _models.get(table_name)
-    if model_class is None:
+    if table_name not in TABLE_TO_TIPO:
         return []
-    return list(model_class.objects.order_by("uid").values())
+    return list(model_for_table(table_name).objects.order_by("uid").values())
 
 
 @write_required
@@ -281,10 +221,9 @@ def api_inventario_add(request: HttpRequest, table: str) -> JsonResponse:
             {"ok": False, "error": f"Tabella non valida: {table}"}, status=400
         )
 
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     uid = (data.get("uid") or "").strip()
     if not uid:
@@ -373,10 +312,9 @@ def api_inventario_detail(request: HttpRequest, table: str, uid: str) -> JsonRes
 
         return JsonResponse({"ok": True})
 
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     if not isinstance(data, dict):
         return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
@@ -463,10 +401,9 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
     Returns:
         JsonResponse: 200 ``{"ok": true}`` on success; 400/404/500 on error.
     """
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     orm_id = data.get("orm_id")
     if not orm_id:
@@ -536,10 +473,9 @@ def api_jobs_create(request: HttpRequest) -> JsonResponse:
             400 for validation errors; 409 if the job already exists;
             500 on unexpected errors.
     """
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     commessa = (data.get("commessa") or "").strip()
     if not commessa:
@@ -557,14 +493,14 @@ def api_jobs_create(request: HttpRequest) -> JsonResponse:
         )
 
     try:
-        total_cost = _parse_job_money(data.get("total_cost"))
+        total_cost = parse_money(data.get("total_cost"))
     except ValueError:
         return JsonResponse(
             {"ok": False, "error": "Costo totale non valido."}, status=400
         )
 
     try:
-        penalty_val = _parse_job_penalty(data.get("penalty"))
+        penalty_val = parse_percent(data.get("penalty"))
     except ValueError:
         return JsonResponse(
             {"ok": False, "error": "Valore penale non valido."}, status=400
@@ -631,10 +567,9 @@ def api_jobs_update(request: HttpRequest) -> JsonResponse:
     Returns:
         JsonResponse: 200 ``{"ok": true}`` on success; 400/404/503 on error.
     """
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     commessa = (data.get("commessa") or "").strip()
     job_id = (data.get("job_id") or "").strip()
@@ -645,14 +580,14 @@ def api_jobs_update(request: HttpRequest) -> JsonResponse:
         )
 
     try:
-        total_cost = _parse_job_money(data.get("total_cost"))
+        total_cost = parse_money(data.get("total_cost"))
     except ValueError:
         return JsonResponse(
             {"ok": False, "error": "Costo totale non valido."}, status=400
         )
 
     try:
-        penalty_val = _parse_job_penalty(data.get("penalty"))
+        penalty_val = parse_percent(data.get("penalty"))
     except ValueError:
         return JsonResponse(
             {"ok": False, "error": "Valore penale non valido."}, status=400
@@ -794,10 +729,9 @@ def api_attivita_delete(request: HttpRequest) -> JsonResponse:
     Returns:
         JsonResponse: 200 ``{"ok": true}`` on success; 400/404/500 on error.
     """
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     orm_id = data.get("orm_id")
     if not orm_id:
@@ -846,10 +780,9 @@ def api_jobs_delete(request: HttpRequest) -> JsonResponse:
     Returns:
         JsonResponse: 200 ``{"ok": true}`` on success; 400/404/500 on error.
     """
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     commessa = (data.get("commessa") or "").strip()
     job_id = (data.get("job_id") or "").strip()
@@ -1117,10 +1050,9 @@ def api_stabilimenti_create(request: HttpRequest) -> JsonResponse:
         JsonResponse: 201 with ``{"ok": true, "id": <id>, "nome": "...", "colore": "..."}``
             on success; 400 on validation error; 409 on duplicate nome.
     """
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     nome = (data.get("nome") or "").strip()
     if not nome:
@@ -1185,10 +1117,9 @@ def api_stabilimenti_detail(request: HttpRequest, pk: int) -> JsonResponse:
         return JsonResponse({"ok": True})
 
     # PUT
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     nome = (data.get("nome") or "").strip()
     if not nome:
@@ -1229,10 +1160,9 @@ def api_responsabili_create(request: HttpRequest) -> JsonResponse:
         JsonResponse: 201 with ``{"ok": true, "id": <id>, "nome": "..."}``
             on success; 400 on validation error; 409 on duplicate nome.
     """
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     nome = (data.get("nome") or "").strip()
     if not nome:
@@ -1293,10 +1223,9 @@ def api_responsabili_detail(request: HttpRequest, pk: int) -> JsonResponse:
         return JsonResponse({"ok": True})
 
     # PUT
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     nome = (data.get("nome") or "").strip()
     if not nome:
@@ -1332,10 +1261,9 @@ def api_tipi_attivita_create(request: HttpRequest) -> JsonResponse:
         JsonResponse: 201 with ``{"ok": true, "id": <id>, "nome": "..."}``
             on success; 400 on validation error; 409 on duplicate nome.
     """
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     nome = (data.get("nome") or "").strip()
     if not nome:
@@ -1395,10 +1323,9 @@ def api_tipi_attivita_detail(request: HttpRequest, pk: int) -> JsonResponse:
         )
         return JsonResponse({"ok": True})
 
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     nome = (data.get("nome") or "").strip()
     if not nome:
@@ -1438,10 +1365,9 @@ def api_config_testa_create(request: HttpRequest) -> JsonResponse:
     Returns:
         JsonResponse: 201 with the created object on success; 400/409 on error.
     """
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     modello = (data.get("modello_testa") or "").strip()
     if not modello:
@@ -1524,10 +1450,9 @@ def api_config_testa_detail(request: HttpRequest, pk: int) -> JsonResponse:
         return JsonResponse({"ok": True})
 
     # PUT
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     def _pos_int(val, default):
         try:
@@ -1579,10 +1504,9 @@ def api_gen_compatibile_create(request: HttpRequest, config_pk: int) -> JsonResp
             {"ok": False, "error": "Configurazione non trovata."}, status=404
         )
 
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     modello_gen = (data.get("modello_generatore") or "").strip()
     if not modello_gen:

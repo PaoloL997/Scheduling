@@ -310,9 +310,9 @@ def resource_availability(table: str, uid: str, today: date | None = None) -> di
     Returns:
         dict: A descriptor as returned by :func:`availability_map`.
     """
-    from ui.models import GeneratoreItem, TestaItem
+    from ui.services.resource_types import model_for_table
 
-    model = {"Generatore": GeneratoreItem, "Testa": TestaItem}.get(table)
+    model = model_for_table(table) if table in ("Generatore", "Testa") else None
     in_manutenzione = bool(
         model and model.objects.filter(uid=uid, in_manutenzione=True).exists()
     )

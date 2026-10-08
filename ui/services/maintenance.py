@@ -31,7 +31,7 @@ def reassign_open_activities(tipo: str, uid: str) -> int:
 
     from ui.models import Attivita, RisorsaAttivita
     from ui.services.bridge_write import BridgeWriteError, update_attivita
-    from ui.services.overlap_reassign import _pairs_to_risorse
+    from ui.services.resource_types import pairs_to_risorse_dict
 
     activity_ids = list(
         RisorsaAttivita.objects.filter(tipo=tipo, risorsa_id=uid)
@@ -83,7 +83,7 @@ def reassign_open_activities(tipo: str, uid: str) -> int:
         try:
             update_attivita(
                 att.pk,
-                {"risorse": _pairs_to_risorse(new_pairs)},
+                {"risorse": pairs_to_risorse_dict(new_pairs)},
                 resolve_overlaps=True,
             )
         except BridgeWriteError:
@@ -98,7 +98,7 @@ def reassign_open_activities(tipo: str, uid: str) -> int:
             try:
                 update_attivita(
                     att.pk,
-                    {"risorse": _pairs_to_risorse(dropped)},
+                    {"risorse": pairs_to_risorse_dict(dropped)},
                     resolve_overlaps=True,
                 )
             except BridgeWriteError:

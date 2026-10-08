@@ -7,37 +7,37 @@ import json
 from django.test import Client, TestCase
 
 from ui.models import Attivita, Job
-from ui.views import _parse_job_money, _parse_job_penalty
+from ui.services.parsing import parse_money, parse_percent
 from ui.tests.helpers import create_writer
 
 
 class ParseJobMoneyTest(TestCase):
     def test_plain_integer(self) -> None:
-        self.assertEqual(_parse_job_money(200000), 200000.0)
-        self.assertEqual(_parse_job_money("200000"), 200000.0)
+        self.assertEqual(parse_money(200000), 200000.0)
+        self.assertEqual(parse_money("200000"), 200000.0)
 
     def test_italian_thousands_separator(self) -> None:
-        self.assertEqual(_parse_job_money("200.000"), 200000.0)
-        self.assertEqual(_parse_job_money("1.234.567"), 1234567.0)
+        self.assertEqual(parse_money("200.000"), 200000.0)
+        self.assertEqual(parse_money("1.234.567"), 1234567.0)
 
     def test_italian_decimal_comma(self) -> None:
-        self.assertEqual(_parse_job_money("1.234,56"), 1234.56)
+        self.assertEqual(parse_money("1.234,56"), 1234.56)
 
     def test_empty_is_none(self) -> None:
-        self.assertIsNone(_parse_job_money(None))
-        self.assertIsNone(_parse_job_money(""))
+        self.assertIsNone(parse_money(None))
+        self.assertIsNone(parse_money(""))
 
     def test_negative_rejected(self) -> None:
         with self.assertRaises(ValueError):
-            _parse_job_money(-1)
+            parse_money(-1)
 
 
 class ParseJobPenaltyTest(TestCase):
     def test_percent(self) -> None:
-        self.assertEqual(_parse_job_penalty("1.5"), 1.5)
+        self.assertEqual(parse_percent("1.5"), 1.5)
 
     def test_empty_is_none(self) -> None:
-        self.assertIsNone(_parse_job_penalty(""))
+        self.assertIsNone(parse_percent(""))
 
 
 class JobsUpdateApiTest(TestCase):

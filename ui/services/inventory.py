@@ -7,6 +7,8 @@ that operate on the Django ORM inventory models.
 
 from django.db import IntegrityError, transaction
 
+from ui.services.resource_types import model_for_table
+
 _ALLOWED_TABLES = {"Generatore", "Mandrino", "Maschera", "Tastatore", "Testa"}
 
 _TABLE_COLUMNS: dict[str, list[str]] = {
@@ -37,21 +39,8 @@ def _get_model(table: str):
     Returns:
         The Django model class.
     """
-    from ui.models import (
-        GeneratoreItem,
-        MandrinoItem,
-        MascheraItem,
-        TastatoreItem,
-        TestaItem,
-    )
 
-    return {
-        "Generatore": GeneratoreItem,
-        "Mandrino": MandrinoItem,
-        "Maschera": MascheraItem,
-        "Tastatore": TastatoreItem,
-        "Testa": TestaItem,
-    }[table]
+    return model_for_table(table)
 
 
 def _validated_table(table: str) -> str:

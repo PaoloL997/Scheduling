@@ -5,11 +5,9 @@ final POST to :func:`api_salva_attivita`.  The endpoints are called from the
 modal wizard embedded in the ``pianificazione`` page.
 """
 
-import json
 import logging
 import os
-from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from datetime import date, timedelta
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
@@ -27,6 +25,9 @@ from ui.services.activity_inventory import (
     lookup_resources,
     parse_resource_lookup_param,
 )
+from ui.services.measures import parse_measure
+from ui.services.parsing import parse_day_any_format, parse_decimal, parse_json_body
+from ui.services.resource_types import risorse_dict_to_pairs
 from ui.services.identifiers import build_job_id
 from ui.services.wps_ai import ReadWPS
 from ui.services.wps_parser import compute_bore, extract_tube_pitch, parse_wps_name
@@ -294,10 +295,9 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
         JsonResponse ``{"ok": True, "id": <pk>}`` on success or
         ``{"ok": False, "error": "..."}`` on validation/save failure.
     """
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, ValueError):
-        return JsonResponse({"ok": False, "error": "Body JSON non valido."}, status=400)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
 
     tmp_path = data.get("tmp_path", "")
     if tmp_path and not default_storage.exists(tmp_path):
@@ -305,30 +305,6 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
             {"ok": False, "error": "File temporaneo non trovato. Ricarica il WPS."},
             status=400,
         )
-
-    def _dec(val) -> Decimal | None:
-        if val is None or val == "":
-            return None
-        try:
-            return Decimal(str(val))
-        except InvalidOperation:
-            return None
-
-    def _float_or_none(val) -> float | None:
-        """Convert a value to float, returning None for empty or invalid input.
-
-        Args:
-            val: Any value to convert.
-
-        Returns:
-            float | None: The converted value or None.
-        """
-        if val is None or val == "":
-            return None
-        try:
-            return float(val)
-        except (ValueError, TypeError):
-            return None
 
     commessa = data.get("commessa", "").strip()
     if not commessa:
@@ -373,24 +349,9 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
 
     from ui.models import Job
 
-    def _parse_delivery_date(raw) -> str | None:
-        """Normalize delivery date to ISO ``YYYY-MM-DD``.
-
-        Accepts ISO and common Italian formats (``DD/MM/YYYY``, ``DD-MM-YYYY``).
-        """
-        if raw in (None, ""):
-            return None
-        text = str(raw).strip()
-        try:
-            return date.fromisoformat(text).isoformat()
-        except ValueError:
-            pass
-        for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y"):
-            try:
-                return datetime.strptime(text, fmt).date().isoformat()
-            except ValueError:
-                continue
-        return None
+    def _delivery_iso(raw) -> str | None:
+        parsed = parse_day_any_format(raw)
+        return parsed.isoformat() if parsed else None
 
     job_exists = Job.objects.filter(commessa=commessa).exists()
     new_job = data.get("new_job")
@@ -403,7 +364,7 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
                 },
                 status=400,
             )
-        delivery_date = _parse_delivery_date(new_job.get("delivery_date"))
+        delivery_date = _delivery_iso(new_job.get("delivery_date"))
         if not delivery_date:
             return JsonResponse(
                 {
@@ -414,26 +375,18 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
             )
         new_job = {**new_job, "delivery_date": delivery_date}
         raw_cost = new_job.get("total_cost")
-        if raw_cost not in (None, "") and _float_or_none(raw_cost) is None:
+        if raw_cost not in (None, "") and parse_measure(raw_cost) is None:
             return JsonResponse(
                 {"ok": False, "error": "Costo totale non valido."}, status=400
             )
         raw_penalty = new_job.get("penalty")
-        if raw_penalty not in (None, "") and _float_or_none(raw_penalty) is None:
+        if raw_penalty not in (None, "") and parse_measure(raw_penalty) is None:
             return JsonResponse(
                 {"ok": False, "error": "Penale non valida."}, status=400
             )
 
     risorse_data = data.get("risorse", {})
-    assignments_pairs = []
-    for tipo, ids in [
-        ("testa", risorse_data.get("teste", [])),
-        ("mandrino", risorse_data.get("mandrini", [])),
-        ("tastatore", risorse_data.get("tastatori", [])),
-        ("maschera", risorse_data.get("maschere", [])),
-        ("generatore", risorse_data.get("generatori", [])),
-    ]:
-        assignments_pairs.extend((tipo, r) for r in ids)
+    assignments_pairs = risorse_dict_to_pairs(risorse_data)
 
     from ui.services.resource_conflicts import (
         ResourceConflictError,
@@ -469,10 +422,10 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
             modello_testa=data.get("modello_testa", ""),
             data_inizio=data_inizio,
             data_fine=data_fine,
-            bore_min=_dec(bore.get("min")),
-            bore_max=_dec(bore.get("max")),
-            bore_mid=_dec(bore.get("mid")),
-            tube_pitch=_dec(bore.get("tube_pitch")),
+            bore_min=parse_decimal(bore.get("min")),
+            bore_max=parse_decimal(bore.get("max")),
+            bore_mid=parse_decimal(bore.get("mid")),
+            tube_pitch=parse_decimal(bore.get("tube_pitch")),
             tp60_custom=bool(data.get("tp60_custom")),
         )
 
@@ -488,8 +441,8 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
                     commessa=job_commessa,
                     defaults={
                         "job_id": build_job_id(job_commessa),
-                        "total_cost": _float_or_none(new_job.get("total_cost")),
-                        "penalty": _float_or_none(new_job.get("penalty")),
+                        "total_cost": parse_measure(new_job.get("total_cost")),
+                        "penalty": parse_measure(new_job.get("penalty")),
                         "delivery_date": new_job.get("delivery_date") or None,
                     },
                 )

@@ -31,6 +31,7 @@ from ui.models import (
 )
 from ui.services.identifiers import normalize_activity_id
 from ui.services.measures import parse_measure
+from ui.services.resource_types import CATEGORIA_TO_TIPO, DEFAULT_PLANT_COLOR
 
 MINUTES_PER_WORKING_DAY = 8 * 60
 
@@ -82,11 +83,6 @@ def _job_ids_query(job_ids: list[str]) -> Any:
     return Q(job_id__in=sorted(_canonical_job_ids(job_ids)))
 
 
-def _parse_float(value: Any) -> float | None:
-    """Culture-invariant float parsing shared with the planning picker."""
-    return parse_measure(value)
-
-
 def _plant(value: str | None) -> str:
     """Plant name as stored; descriptive only for the solver."""
     return (value or "").strip()
@@ -131,11 +127,7 @@ def _due_date(job: JobModel | None, activities: list[Attivita]) -> date:
 
 
 _CATEGORY_TO_TYPE = {
-    "teste": ResourceType.TESTA,
-    "mandrini": ResourceType.MANDRINO,
-    "tastatori": ResourceType.TASTATORE,
-    "maschere": ResourceType.MASCHERA,
-    "generatori": ResourceType.GENERATORE,
+    categoria: ResourceType(tipo) for categoria, tipo in CATEGORIA_TO_TIPO.items()
 }
 
 
@@ -175,7 +167,7 @@ def _fetch_inventory() -> list[Resource]:
     resources: list[Resource] = []
 
     for row in MandrinoItem.objects.all():
-        bore = _parse_float(row.diameter)
+        bore = parse_measure(row.diameter)
         if bore is not None and bore > 0:
             resources.append(
                 Resource(
@@ -187,7 +179,7 @@ def _fetch_inventory() -> list[Resource]:
             )
 
     for row in TastatoreItem.objects.all():
-        bore = _parse_float(row.diameter)
+        bore = parse_measure(row.diameter)
         if bore is not None and bore > 0:
             resources.append(
                 Resource(
@@ -199,7 +191,7 @@ def _fetch_inventory() -> list[Resource]:
             )
 
     for row in MascheraItem.objects.all():
-        pitch = _parse_float(row.pitch)
+        pitch = parse_measure(row.pitch)
         if pitch is not None and pitch > 0:
             resources.append(
                 Resource(
@@ -480,10 +472,10 @@ def _to_opt_activity(
         duration_days=_duration_days(att.duration_min, att.data_inizio, att.data_fine),
         earliest_start=earliest,
         predecessors=predecessors,
-        bore_min=_parse_float(att.bore_min),
-        bore_mid=_parse_float(att.bore_mid),
-        bore_max=_parse_float(att.bore_max),
-        tube_pitch=_parse_float(att.tube_pitch),
+        bore_min=parse_measure(att.bore_min),
+        bore_mid=parse_measure(att.bore_mid),
+        bore_max=parse_measure(att.bore_max),
+        tube_pitch=parse_measure(att.tube_pitch),
         head_model=head_model,
         required_quantities=quantities,
     )
@@ -884,7 +876,7 @@ def attivita_to_gantt_task(att: Attivita, plant_colors: dict[str, str]) -> dict:
         if att.baseline_finish
         else None,
         "plant": plant,
-        "plant_color": plant_colors.get(plant or "", "#4a90e2"),
+        "plant_color": plant_colors.get(plant or "", DEFAULT_PLANT_COLOR),
         "responsible": att.responsabile or None,
         "resources": None,
         "assigned_resources": [],

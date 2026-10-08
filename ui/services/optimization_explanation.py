@@ -8,6 +8,7 @@ from datetime import date
 from typing import Any
 
 from src.optimization.calendar import WorkingCalendar
+from ui.services.parsing import parse_iso_day
 from src.optimization.diagnostics import JobDiagnosis
 from src.optimization.output_model import ScheduleResult
 
@@ -44,13 +45,7 @@ def _iso_day(value: Any) -> str | None:
 
 
 def _parse_day(value: Any) -> date | None:
-    raw = _iso_day(value)
-    if not raw:
-        return None
-    try:
-        return date.fromisoformat(raw)
-    except ValueError:
-        return None
+    return parse_iso_day(value)
 
 
 def _strip_resource_code(resource_id: str) -> str:

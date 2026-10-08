@@ -16,6 +16,8 @@ from ui.models import (
     TastatoreItem,
     TestaItem,
 )
+from ui.services.parsing import parse_iso_day
+from ui.services.resource_types import TIPI
 from ui.services.optimization_problem import (
     activities_for_job_ids,
     is_attivita_fixed,
@@ -23,20 +25,11 @@ from ui.services.optimization_problem import (
 )
 from ui.services.resource_conflicts import validate_no_conflicts
 
-_VALID_TIPOS = frozenset(dict(RisorsaAttivita.TIPO_CHOICES).keys())
+_VALID_TIPOS = frozenset(TIPI)
 
 
 class OptimizationApplyError(Exception):
     """Raised when the optimization proposal cannot be applied."""
-
-
-def _parse_iso_date(value: Any) -> date | None:
-    if not value:
-        return None
-    try:
-        return date.fromisoformat(str(value)[:10])
-    except ValueError:
-        return None
 
 
 def _lookup_tipo_by_uid(uid: str) -> str | None:
@@ -132,8 +125,8 @@ def apply_optimization_result(
     updates: list[tuple[Attivita, date, date, list[tuple[str, str]]]] = []
     for task in tasks_after:
         orm_id = task.get("orm_id")
-        start = _parse_iso_date(task.get("start"))
-        finish = _parse_iso_date(task.get("finish"))
+        start = parse_iso_day(task.get("start"))
+        finish = parse_iso_day(task.get("finish"))
         if orm_id is None:
             att = attivita_by_id.get(str(task.get("activity_id") or ""))
             if att is None:

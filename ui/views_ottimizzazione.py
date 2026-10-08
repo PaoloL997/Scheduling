@@ -20,6 +20,7 @@ from src.optimization.solver import schedule
 
 from ui.models import Stabilimento
 from ui.permissions import write_required
+from ui.services.parsing import parse_iso_day, parse_json_body
 from ui.services.runtime_config import load_runtime_config
 from ui.services.optimization_problem import (
     OptimizationProblemError,
@@ -57,27 +58,11 @@ def _plant_colors() -> dict[str, str]:
     return {s.nome: s.colore for s in Stabilimento.objects.all()}
 
 
-def _parse_request_body(request: HttpRequest) -> dict:
-    try:
-        return json.loads(request.body)
-    except (json.JSONDecodeError, ValueError):
-        return {}
-
-
-def _parse_date_field(value) -> date | None:
-    if not value:
-        return None
-    try:
-        return date.fromisoformat(str(value)[:10])
-    except ValueError:
-        return None
-
-
 def _parse_draft(data: dict) -> tuple[list[str], dict[str, date]]:
     job_ids = [str(j).strip() for j in data.get("job_ids") or [] if str(j).strip()]
     overrides: dict[str, date] = {}
     for aid, raw in (data.get("earliest_start_overrides") or {}).items():
-        parsed = _parse_date_field(raw)
+        parsed = parse_iso_day(raw)
         if parsed is not None:
             overrides[str(aid).strip()] = parsed
     return job_ids, overrides
@@ -87,7 +72,7 @@ def _parse_optimization_payload(
     data: dict,
 ) -> tuple[list[str], dict[str, date], date | None]:
     job_ids, overrides = _parse_draft(data)
-    horizon_start = _parse_date_field(data.get("horizon_start"))
+    horizon_start = parse_iso_day(data.get("horizon_start"))
     return job_ids, overrides, horizon_start
 
 
@@ -452,7 +437,9 @@ def ottimizzazione_nuova(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["POST"])
 def api_ottimizzazione_solve(request: HttpRequest) -> JsonResponse:
     """JSON API for optimization (used by tests and programmatic clients)."""
-    data = _parse_request_body(request)
+    data = parse_json_body(request)
+    if isinstance(data, JsonResponse):
+        return data
     job_ids, overrides, horizon_start = _parse_optimization_payload(data)
     job_ids = filter_job_ids_with_activities(job_ids)
     if not job_ids:

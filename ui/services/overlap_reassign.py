@@ -14,11 +14,15 @@ releases them at ``actual_finish``.
 from __future__ import annotations
 
 
+from ui.services.measures import parse_measure
 from ui.services.resource_conflicts import occupied_resource_ids
+from ui.services.resource_types import (
+    TIPO_LABELS as _TIPO_LABELS,
+    TIPO_TO_CATEGORIA as _TIPO_TO_CAT,
+    model_for_tipo,
+    pairs_to_risorse_dict,
+)
 from ui.services.problem_detection import (
-    _CAT_TO_TIPO,
-    _TIPO_LABELS,
-    _TIPO_TO_CAT,
     _serialize_overlap_resource,
     find_resource_overlaps,
     overdue_not_started,
@@ -42,28 +46,10 @@ class OverlapReassignError(Exception):
         self.status_code = status_code
 
 
-def _inventory_model(tipo):
-    from ui.models import (
-        GeneratoreItem,
-        MandrinoItem,
-        MascheraItem,
-        TastatoreItem,
-        TestaItem,
-    )
-
-    return {
-        "testa": TestaItem,
-        "mandrino": MandrinoItem,
-        "tastatore": TastatoreItem,
-        "maschera": MascheraItem,
-        "generatore": GeneratoreItem,
-    }[tipo]
-
-
 def _item_snapshot(tipo: str, uid: str, row: dict | None = None) -> dict:
     """Return display fields for one inventory item (plant, model, measures)."""
     if row is None:
-        model_cls = _inventory_model(tipo)
+        model_cls = model_for_tipo(tipo)
         row = model_cls.objects.filter(pk=uid).values().first() or {}
     plant = str(row.get("plant") or "").strip() or None
     model = str(row.get("model") or "").strip() or None
@@ -112,12 +98,6 @@ def _merge_resource_snapshot(res: dict) -> dict:
     return {**res, **snap}
 
 
-def _float_or_none(val) -> float | None:
-    from ui.services.measures import parse_measure
-
-    return parse_measure(val)
-
-
 def _fmt_iso_day(value) -> str:
     """Format ``YYYY-MM-DD`` or a date as ``DD/MM/YYYY``."""
     text = str(value or "").strip()
@@ -139,7 +119,7 @@ def _peer_label(overlap_item: dict) -> str:
 
 
 def _preferred_model(tipo: str, blocked, from_uid: str) -> str | None:
-    model_cls = _inventory_model(tipo)
+    model_cls = model_for_tipo(tipo)
     item = model_cls.objects.filter(pk=from_uid).first()
     current_model = getattr(item, "model", None) if item is not None else None
     if tipo == "testa":
@@ -159,10 +139,10 @@ def _blocked_availability(blocked) -> dict | None:
         stabilimento=blocked.stabilimento or "",
         data_inizio=start,
         data_fine=end,
-        bore_min=_float_or_none(blocked.bore_min),
-        bore_max=_float_or_none(blocked.bore_max),
-        bore_mid=_float_or_none(blocked.bore_mid),
-        tube_pitch=_float_or_none(blocked.tube_pitch),
+        bore_min=parse_measure(blocked.bore_min),
+        bore_max=parse_measure(blocked.bore_max),
+        bore_mid=parse_measure(blocked.bore_mid),
+        tube_pitch=parse_measure(blocked.tube_pitch),
         modello_testa=(blocked.modello_testa or "").strip() or None,
         exclude_activity_id=blocked.pk,
         strict_requirements=True,
@@ -179,7 +159,7 @@ def _pick_alternative(
     candidates: list[dict] | None = None,
 ) -> dict | None:
     """Return the best compatible free inventory item of *tipo*, or ``None``."""
-    model_cls = _inventory_model(tipo)
+    model_cls = model_for_tipo(tipo)
     skip = occupied | {from_uid}
     if candidates is None:
         qs = model_cls.objects.exclude(uid__in=skip)
@@ -445,15 +425,6 @@ def enrich_overlaps_with_suggestions(
     return overlaps_by_pk
 
 
-def _pairs_to_risorse(pairs: list[tuple[str, str]]) -> dict[str, list[str]]:
-    data = {cat: [] for cat in _CAT_TO_TIPO}
-    for tipo, uid in pairs:
-        cat = _TIPO_TO_CAT.get(tipo)
-        if cat:
-            data[cat].append(uid)
-    return data
-
-
 def apply_overlap_reassignment(blocked_pk: int) -> dict:
     """Recompute the suggestion for *blocked_pk* and apply it.
 
@@ -521,7 +492,7 @@ def apply_overlap_reassignment(blocked_pk: int) -> dict:
     try:
         result = update_attivita(
             blocked_pk,
-            {"risorse": _pairs_to_risorse(new_pairs)},
+            {"risorse": pairs_to_risorse_dict(new_pairs)},
             resolve_overlaps=False,
         )
     except BridgeWriteError as exc:

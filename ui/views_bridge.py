@@ -9,7 +9,6 @@ the response bodies are therefore identical on both channels.
 
 from __future__ import annotations
 
-import json
 from functools import wraps
 
 from django.contrib.auth import authenticate, login, logout
@@ -39,6 +38,7 @@ from ui.services.bridge_serializers import (
     serialize_tipi_attivita,
 )
 from ui.services.bridge_write import BridgeWriteError
+from ui.services.parsing import parse_json_body
 from ui.services.scan_substitution import scan_resource
 from ui.views_auth import user_stabilimento_name
 
@@ -68,13 +68,6 @@ def _ok(data=None, *, status: int = 200) -> JsonResponse:
 def _err(message: str, *, status: int = 400, **extra) -> JsonResponse:
     payload = {"ok": False, "error": message, **extra}
     return JsonResponse(payload, status=status)
-
-
-def _parse_json(request: HttpRequest) -> dict | JsonResponse:
-    try:
-        return json.loads(request.body or b"{}")
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return _err("Body JSON non valido.", status=400)
 
 
 def bridge_read_guard(view):
@@ -113,7 +106,7 @@ def bridge_write_guard(view):
 @require_http_methods(["POST"])
 def api_bridge_auth_login(request: HttpRequest) -> JsonResponse:
     """Authenticate via JSON and start a Django session."""
-    parsed = _parse_json(request)
+    parsed = parse_json_body(request)
     if isinstance(parsed, JsonResponse):
         return parsed
 
@@ -277,7 +270,7 @@ def api_bridge_attivita_create(request: HttpRequest) -> JsonResponse:
 @bridge_write_guard
 @require_http_methods(["PUT"])
 def api_bridge_attivita_update(request: HttpRequest, pk: int) -> JsonResponse:
-    parsed = _parse_json(request)
+    parsed = parse_json_body(request)
     if isinstance(parsed, JsonResponse):
         return parsed
     return views.tasks_update_response(request, pk, parsed)
@@ -298,7 +291,7 @@ def api_bridge_attivita_scan(request: HttpRequest, pk: int) -> JsonResponse:
     ``motivo`` (``non_corrispondente``, ``non_compatibile``, ``occupata``,
     ``requisiti``, ``misura``, ``atteso``, ``date``, ``non_trovato``).
     """
-    parsed = _parse_json(request)
+    parsed = parse_json_body(request)
     if isinstance(parsed, JsonResponse):
         return parsed
     try:

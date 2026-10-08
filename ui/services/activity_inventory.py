@@ -806,29 +806,18 @@ def lookup_resources(pairs: list[tuple[str, str]]) -> dict[str, dict]:
     Returns:
         dict[str, dict]: Mapping ``uid`` → row dict from the inventory ORM.
     """
-    from ui.models import (
-        GeneratoreItem,
-        MandrinoItem,
-        MascheraItem,
-        TastatoreItem,
-        TestaItem,
-    )
 
-    models = {
-        "testa": TestaItem,
-        "mandrino": MandrinoItem,
-        "tastatore": TastatoreItem,
-        "maschera": MascheraItem,
-        "generatore": GeneratoreItem,
-    }
+    from ui.services.resource_types import TIPI, model_for_tipo
+
     out: dict[str, dict] = {}
     for categoria, uid in pairs:
         uid = (uid or "").strip()
         if not uid or uid in out:
             continue
-        model = models.get((categoria or "").strip().lower())
-        if model is None:
+        tipo = (categoria or "").strip().lower()
+        if tipo not in TIPI:
             continue
+        model = model_for_tipo(tipo)
         row = model.objects.filter(uid=uid).values().first()
         if row:
             out[uid] = dict(row)
