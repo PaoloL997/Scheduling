@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import math
-import re
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import Any, Iterable
 
 from src.optimization.calendar import WorkingCalendar, working_days_in_calendar_span
-from src.optimization.compatibility import configure_generator_compatibility
 from src.optimization.data_model import (
-    PLANTS,
     Activity,
     Job,
     Resource,
@@ -23,7 +20,6 @@ from src.optimization.output_model import ScheduleResult
 
 from ui.models import (
     Attivita,
-    ConfigurazioneTesta,
     GeneratoreCompatibile,
     GeneratoreItem,
     Job as JobModel,
@@ -38,25 +34,6 @@ from ui.services.measures import parse_measure
 
 MINUTES_PER_WORKING_DAY = 8 * 60
 
-_DB_PROBLEM_ACTIVITY_ID_RE = re.compile(
-    r"^(?P<commessa>.+)-(?P<item>[^-]+)-(?P<activity>[A-Za-z0-9_]+)-(?P<pk>\d+)(?:-c\d+)?$"
-)
-
-
-def _parse_db_problem_activity_id(
-    activity_id: str,
-) -> tuple[str, str, str, int] | None:
-    """Parse activity ids produced by ``src.optimization.db_problem``."""
-    match = _DB_PROBLEM_ACTIVITY_ID_RE.match(activity_id or "")
-    if not match:
-        return None
-    return (
-        match.group("commessa"),
-        match.group("item"),
-        match.group("activity").replace("_", " "),
-        int(match.group("pk")),
-    )
-
 
 def match_attivita_for_solver_activity_id(
     solver_activity_id: str,
@@ -68,18 +45,7 @@ def match_attivita_for_solver_activity_id(
     if solver_activity_id in by_id:
         return by_id[solver_activity_id]
 
-    by_pk = {att.pk: att for att in rows}
     by_triple = {(att.commessa, att.item, att.activity): att for att in rows}
-
-    parsed_db = _parse_db_problem_activity_id(solver_activity_id)
-    if parsed_db is not None:
-        commessa, item, activity, pk = parsed_db
-        if pk in by_pk:
-            return by_pk[pk]
-        hit = by_triple.get((commessa, item, activity))
-        if hit is not None:
-            return hit
-
     try:
         from ui.services.identifiers import parse_activity_id
 
@@ -93,34 +59,27 @@ class OptimizationProblemError(ValueError):
     """Raised when the selected activities cannot form a valid problem."""
 
 
-def _activity_matches_job(att: Attivita, job_id: str) -> bool:
-    """Return whether an activity belongs to the canonical job id."""
+def _canonical_job_ids(job_ids: list[str]) -> set[str]:
+    """Accept a job id as given or as a raw commessa name."""
     from ui.services.identifiers import build_job_id, parse_job_id
 
-    commessa = parse_job_id(job_id)
-    canonical = build_job_id(commessa)
-    return (
-        att.commessa == commessa
-        or att.job_id in {job_id, canonical}
-        or (att.job_id or "").startswith(f"{canonical}-")
-    )
+    canonical: set[str] = set()
+    for job_id in job_ids:
+        canonical.add(job_id)
+        canonical.add(build_job_id(parse_job_id(job_id)))
+    return canonical
+
+
+def _activity_matches_job(att: Attivita, job_id: str) -> bool:
+    """Return whether an activity belongs to the job id (the Job link decides)."""
+    return att.job_id in _canonical_job_ids([job_id])
 
 
 def _job_ids_query(job_ids: list[str]) -> Any:
-    """Build an ORM Q object matching all activities for the given job ids."""
+    """Build an ORM Q object matching all activities of the given job ids."""
     from django.db.models import Q
 
-    from ui.services.identifiers import build_job_id, parse_job_id
-
-    query = Q()
-    for job_id in job_ids:
-        commessa = parse_job_id(job_id)
-        canonical = build_job_id(commessa)
-        query |= Q(commessa=commessa)
-        query |= Q(job_id=job_id)
-        query |= Q(job_id=canonical)
-        query |= Q(job_id__startswith=f"{canonical}-")
-    return query
+    return Q(job_id__in=sorted(_canonical_job_ids(job_ids)))
 
 
 def _parse_float(value: Any) -> float | None:
@@ -129,10 +88,8 @@ def _parse_float(value: Any) -> float | None:
 
 
 def _plant(value: str | None) -> str:
-    text = (value or "").strip()
-    if text in PLANTS:
-        return text
-    return "Valbrembo"
+    """Plant name as stored; descriptive only for the solver."""
+    return (value or "").strip()
 
 
 def _duration_days(
@@ -146,14 +103,18 @@ def _duration_days(
 
 
 def _penalty_per_week(job: JobModel | None) -> float:
+    """Weekly penalty in currency: ``total_cost × penalty% / 100``.
+
+    ``Job.penalty`` is a percentage of the commessa value, so without a cost
+    there is no amount to weigh: the job still counts in the objective, at
+    the minimum weight, through ``scale_penalty``.
+    """
     if job is None:
         return 0.0
     total_cost = job.total_cost
     penalty = job.penalty
     if total_cost and penalty and total_cost > 0 and penalty > 0:
         return total_cost * penalty / 100
-    if penalty and penalty > 0:
-        return penalty
     return 0.0
 
 
@@ -169,17 +130,35 @@ def _due_date(job: JobModel | None, activities: list[Attivita]) -> date:
     return date.today()
 
 
-def _fetch_required_quantities() -> dict[str, dict[ResourceType, int]]:
-    quantities: dict[str, dict[ResourceType, int]] = {}
-    for cfg in ConfigurazioneTesta.objects.all():
-        quantities[cfg.modello_testa] = {
-            ResourceType.MANDRINO: max(0, cfg.min_mandrini),
-            ResourceType.TASTATORE: max(0, cfg.min_tastatori),
-            ResourceType.MASCHERA: max(0, cfg.min_maschere),
-            ResourceType.GENERATORE: max(0, cfg.min_generatori),
-            ResourceType.TESTA: 1,
-        }
-    return quantities
+_CATEGORY_TO_TYPE = {
+    "teste": ResourceType.TESTA,
+    "mandrini": ResourceType.MANDRINO,
+    "tastatori": ResourceType.TASTATORE,
+    "maschere": ResourceType.MASCHERA,
+    "generatori": ResourceType.GENERATORE,
+}
+
+
+def _required_quantities(att: Attivita, configs: dict) -> dict[ResourceType, int]:
+    """Quantities the solver must assign: the planning minimum kit.
+
+    The same rule the picker and the start guard use
+    (:func:`~ui.services.activity_inventory.get_testa_min_requirements`),
+    TP60 Custom included, so the solver never proposes less than what the
+    activity needs to be started.
+    """
+    from ui.services.activity_inventory import get_testa_min_requirements
+
+    minimi = get_testa_min_requirements(
+        (att.modello_testa or "").strip() or None,
+        bool(att.tp60_custom),
+        configs=configs,
+    )
+    return {
+        _CATEGORY_TO_TYPE[key]: max(0, int(value))
+        for key, value in minimi.items()
+        if key in _CATEGORY_TO_TYPE
+    }
 
 
 def _fetch_generator_compatibility() -> dict[str, list[str]]:
@@ -292,23 +271,18 @@ def _planned_finish(att: Attivita) -> date | None:
 
 
 def fixed_calendar_window(att: Attivita) -> tuple[date, date] | None:
-    """Return the locked calendar window for a fixed activity, if any."""
-    if att.actual_finish:
-        start = att.actual_start or att.data_inizio
-        end = att.actual_finish
-    elif att.actual_start:
-        start = att.actual_start
-        end = att.data_fine or _planned_finish(att)
-    else:
+    """Return the locked calendar window for a fixed activity, if any.
+
+    The one occupancy definition of the application
+    (:func:`~ui.services.resource_conflicts.occupation_window`): a running
+    activity holds its resources through its working-day estimate and
+    through today.
+    """
+    from ui.services.resource_conflicts import occupation_window
+
+    if not is_attivita_fixed(att):
         return None
-    if start is None:
-        return None
-    if end is None:
-        # In progress without a planned end: lock at least one working day.
-        end = WorkingCalendar(start).completion_date(0, 1)
-    if end < start:
-        end = start
-    return start, end
+    return occupation_window(att)
 
 
 def is_gantt_task_fixed(
@@ -431,7 +405,7 @@ def reservations_for_excluded(
     activity outside the solved job set"). Windows are clamped to the horizon.
     """
     if activities is None:
-        activities = Attivita.objects.prefetch_related("risorse")
+        activities = Attivita.objects.prefetch_related("risorse", "predecessori")
 
     calendar = WorkingCalendar(horizon_start)
     reservations: list[ResourceReservation] = []
@@ -467,20 +441,16 @@ def reservations_for_excluded(
 
 
 def _parse_predecessor_ids(att: Attivita, known_ids: set[str]) -> list[str]:
-    """Parse the comma-separated ``predecessors`` field of an Attivita row.
+    """Return the predecessor ids of *att* that belong to the problem.
 
     Only references to other activities of the same problem job are kept;
-    unknown ids (e.g. activities of other commesse) are dropped. Matching
-    goes through :func:`~ui.services.identifiers.normalize_activity_id` and
-    the canonical id of the known activity is what comes back.
+    a predecessor outside the problem (another commessa, an excluded row) is
+    dropped.  The canonical id of the known activity is what comes back.
     """
-    raw = (att.predecessors or "").strip()
-    if not raw:
-        return []
     canonical = {normalize_activity_id(known): known for known in known_ids}
     self_key = normalize_activity_id(att.activity_id)
     seen: list[str] = []
-    for token in raw.split(","):
+    for token in att.predecessor_ids():
         key = normalize_activity_id(token)
         pred_id = canonical.get(key)
         if pred_id and key != self_key and pred_id not in seen:
@@ -492,14 +462,14 @@ def _to_opt_activity(
     att: Attivita,
     order: int,
     job_id: str,
-    quantities_by_head: dict[str, dict[ResourceType, int]],
+    configs: dict,
     earliest_start_overrides: dict[str, date],
     predecessors: list[str],
 ) -> Activity:
-    raw_head = (att.modello_testa or "").strip() or None
-    # Only models configured in ConfigurazioneTesta drive testa/generatore needs.
-    head_model = raw_head if raw_head and raw_head in quantities_by_head else None
-    quantities = quantities_by_head.get(raw_head or "", {}).copy()
+    # Any head model drives testa/generatore needs, configured or not: an
+    # unconfigured model accepts any generator (see compatibility).
+    head_model = (att.modello_testa or "").strip() or None
+    quantities = _required_quantities(att, configs)
     earliest = earliest_start_overrides.get(att.activity_id)
 
     return Activity(
@@ -521,28 +491,15 @@ def _to_opt_activity(
 
 def activities_for_job_ids(job_ids: list[str]) -> list[Attivita]:
     """Return all activities belonging to the given canonical job ids."""
-    from ui.services.identifiers import build_job_id
-
     unique_ids = list(dict.fromkeys(job_ids))
     if not unique_ids:
         return []
-    activities = list(
+    return list(
         Attivita.objects.filter(_job_ids_query(unique_ids))
-        .prefetch_related("risorse")
+        .prefetch_related("risorse", "predecessori")
         .order_by("commessa", "item", "activity_id")
         .distinct()
     )
-
-    stale: list[Attivita] = []
-    for att in activities:
-        expected_job_id = build_job_id(att.commessa)
-        if att.job_id != expected_job_id:
-            att.job_id = expected_job_id
-            stale.append(att)
-    if stale:
-        Attivita.objects.bulk_update(stale, ["job_id"])
-
-    return activities
 
 
 def filter_job_ids_with_activities(job_ids: list[str]) -> list[str]:
@@ -608,14 +565,14 @@ def build_scheduling_problem(
         )
 
     compatibility = _fetch_generator_compatibility()
-    if compatibility:
-        configure_generator_compatibility(compatibility)
 
     resources = _fetch_inventory()
     if not resources:
         raise OptimizationProblemError("Inventario risorse vuoto.")
 
-    quantities_by_head = _fetch_required_quantities()
+    from ui.services.activity_inventory import load_testa_configs
+
+    configs = load_testa_configs()
 
     grouped: dict[str, list[Attivita]] = defaultdict(list)
     for att in attivita:
@@ -644,7 +601,7 @@ def build_scheduling_problem(
 
         job_row = job_rows.get(commessa)
         job_id = rows[0].job_id or commessa
-        # Precedences come from the Attivita.predecessors field; activities
+        # Precedences come from the Attivita.predecessori relation; activities
         # without recorded predecessors are independent and may run in
         # parallel when enough compatible resources are available.
         known_ids = {att.activity_id for att in rows}
@@ -653,7 +610,7 @@ def build_scheduling_problem(
             # A predecessor that already started/completed becomes a lower
             # bound: the successor starts after the locked window ends.
             pred_bound: date | None = None
-            for raw_pred in (att.predecessors or "").split(","):
+            for raw_pred in att.predecessor_ids():
                 end = fixed_end_by_id.get(normalize_activity_id(raw_pred))
                 if end is not None:
                     candidate = end + timedelta(days=1)
@@ -673,7 +630,7 @@ def build_scheduling_problem(
                     att,
                     order,
                     job_id,
-                    quantities_by_head,
+                    configs,
                     local_overrides,
                     _parse_predecessor_ids(att, known_ids),
                 )
@@ -707,6 +664,7 @@ def build_scheduling_problem(
         horizon_start=horizon_start,
         horizon_days=None,
         resource_reservations=reservations,
+        generator_compatibility=compatibility,
     )
 
 
@@ -716,7 +674,7 @@ def _precedence_component(
     """Return the not-started activities precedence-connected to ``blocked``.
 
     Builds an undirected graph over the *not-started* activities of the same
-    commessa using the ``predecessors`` field, then returns the connected
+    commessa using the ``predecessori`` relation, then returns the connected
     component containing ``blocked`` (predecessors and successors, transitively).
     Started/completed activities are not traversed: they are immovable and only
     act as earliest-start bounds, so they do not link two not-started chains.
@@ -764,7 +722,9 @@ def build_reschedule_problem(
     ensure_django()
 
     try:
-        blocked = Attivita.objects.prefetch_related("risorse").get(pk=blocked_pk)
+        blocked = Attivita.objects.prefetch_related("risorse", "predecessori").get(
+            pk=blocked_pk
+        )
     except Attivita.DoesNotExist as exc:
         raise OptimizationProblemError("Attività non trovata.") from exc
 
@@ -775,7 +735,9 @@ def build_reschedule_problem(
 
     commessa = blocked.commessa
     commessa_atts = list(
-        Attivita.objects.filter(commessa=commessa).prefetch_related("risorse")
+        Attivita.objects.filter(commessa=commessa).prefetch_related(
+            "risorse", "predecessori"
+        )
     )
 
     schedulable = _precedence_component(blocked, commessa_atts)
@@ -788,9 +750,9 @@ def build_reschedule_problem(
         raise OptimizationProblemError("Inventario risorse vuoto.")
 
     compatibility = _fetch_generator_compatibility()
-    if compatibility:
-        configure_generator_compatibility(compatibility)
-    quantities_by_head = _fetch_required_quantities()
+    from ui.services.activity_inventory import load_testa_configs
+
+    configs = load_testa_configs()
 
     fixed_end_by_id: dict[str, date] = {}
     for att in commessa_atts:
@@ -807,7 +769,7 @@ def build_reschedule_problem(
     opt_activities: list[Activity] = []
     for order, att in enumerate(rows, 1):
         pred_bound: date | None = None
-        for raw_pred in (att.predecessors or "").split(","):
+        for raw_pred in att.predecessor_ids():
             end = fixed_end_by_id.get(normalize_activity_id(raw_pred))
             if end is not None:
                 candidate = end + timedelta(days=1)
@@ -819,7 +781,7 @@ def build_reschedule_problem(
                 att,
                 order,
                 job_id,
-                quantities_by_head,
+                configs,
                 local_overrides,
                 _parse_predecessor_ids(att, schedulable_ids),
             )
@@ -843,6 +805,7 @@ def build_reschedule_problem(
         horizon_start=horizon_start,
         horizon_days=None,
         resource_reservations=reservations,
+        generator_compatibility=compatibility,
     )
 
 
@@ -921,6 +884,8 @@ def hydrate_gantt_tasks_resources(tasks: list[dict]) -> None:
 
 def attivita_to_gantt_task(att: Attivita, plant_colors: dict[str, str]) -> dict:
     """Convert an Attivita ORM row to a Gantt-compatible task dict."""
+    from ui.services.problem_detection import effective_finish
+
     plant = att.stabilimento or None
     return {
         "commessa": att.commessa,
@@ -933,6 +898,9 @@ def attivita_to_gantt_task(att: Attivita, plant_colors: dict[str, str]) -> dict:
         "finish": att.data_fine.isoformat() if att.data_fine else None,
         "actual_start": att.actual_start.isoformat() if att.actual_start else None,
         "actual_finish": att.actual_finish.isoformat() if att.actual_finish else None,
+        "effective_finish": (
+            effective_finish(att).isoformat() if effective_finish(att) else None
+        ),
         "baseline_start": att.baseline_start.isoformat()
         if att.baseline_start
         else None,
@@ -944,7 +912,7 @@ def attivita_to_gantt_task(att: Attivita, plant_colors: dict[str, str]) -> dict:
         "responsible": att.responsabile or None,
         "resources": None,
         "assigned_resources": [],
-        "predecessors": att.predecessors,
+        "predecessors": att.predecessors_text() or None,
         "orm_id": att.pk,
     }
 

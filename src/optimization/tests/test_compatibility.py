@@ -47,9 +47,37 @@ def test_testa_matches_head_model():
 
 def test_generatore_matches_via_compatibility_map():
     req = Requirement(resource_type=ResourceType.GENERATORE, head_model="TP60")
-    assert is_compatible(make_resource("g1", ResourceType.GENERATORE, model="P6"), req)
+    mapping = {"TP60": ["P6", "P6-3"]}
+    assert is_compatible(
+        make_resource("g1", ResourceType.GENERATORE, model="P6"), req, mapping
+    )
     assert not is_compatible(
-        make_resource("g2", ResourceType.GENERATORE, model="SPX"), req
+        make_resource("g2", ResourceType.GENERATORE, model="SPX"), req, mapping
+    )
+
+
+def test_unconfigured_head_model_accepts_any_generator():
+    """Like the planning picker: no configured generators means no filter."""
+    req = Requirement(resource_type=ResourceType.GENERATORE, head_model="NEW")
+    g = make_resource("g1", ResourceType.GENERATORE, model="WHATEVER")
+    assert is_compatible(g, req)
+    assert is_compatible(g, req, {"TP60": ["P6"]})
+    assert is_compatible(g, req, {"NEW": []})
+
+
+def test_model_matching_ignores_case_and_blanks():
+    req = Requirement(resource_type=ResourceType.TESTA, head_model="tp60")
+    assert is_compatible(make_resource("t1", ResourceType.TESTA, model=" TP60 "), req)
+    gen = Requirement(resource_type=ResourceType.GENERATORE, head_model="TP60")
+    assert is_compatible(
+        make_resource("g1", ResourceType.GENERATORE, model="p6"), gen, {"tp60": ["P6"]}
+    )
+
+
+def test_maschera_pitch_uses_a_float_tolerance():
+    req = Requirement(resource_type=ResourceType.MASCHERA, tube_pitch=25.4)
+    assert is_compatible(
+        make_resource("x1", ResourceType.MASCHERA, tube_pitch=25.4000000001), req
     )
 
 

@@ -81,24 +81,15 @@ class BuildSchedulingProblemTest(TestCase):
         self.assertEqual(len(problem.jobs), 1)
         self.assertEqual(len(problem.jobs[0].activities), 3)
 
-    def test_stale_job_id_resolved_by_commessa(self) -> None:
-        """Activities with legacy job_id suffix still match canonical job selection."""
+    def test_job_selection_by_id_or_commessa_name(self) -> None:
+        """The Job link decides membership; a raw commessa name is accepted too."""
         a1 = _make_activity("25079", 1, "prep")
         _make_activity("25079", 2, "work")
-        Attivita.objects.filter(commessa="25079").update(job_id="25079-01")
+        self.assertEqual(a1.job.commessa, "25079")
         problem = build_scheduling_problem([a1.job_id])
         self.assertEqual(len(problem.jobs), 1)
         self.assertEqual(len(problem.jobs[0].activities), 2)
-        self.assertTrue(
-            Attivita.objects.filter(commessa="25079", job_id=a1.job_id).count() == 2
-        )
-
-    def test_legacy_job_id_prefix_without_commessa_match(self) -> None:
-        """Legacy per-item job_id still resolves to the canonical commessa."""
-        a1 = _make_activity("25079", 1, "Qualifica")
-        _make_activity("25079", 1, "SNB")
-        Attivita.objects.filter(commessa="25079").update(job_id="25079-01")
-        self.assertEqual(len(activities_for_job_ids([a1.job_id])), 2)
+        self.assertEqual(len(activities_for_job_ids(["25079"])), 2)
         self.assertEqual(
             filter_job_ids_with_activities([a1.job_id, "TG99"]), [a1.job_id]
         )
@@ -156,8 +147,7 @@ class BuildSchedulingProblemTest(TestCase):
         started.actual_start = date(2026, 6, 3)
         started.save()
         succ = _make_activity("T001", 1, "SNB")
-        succ.predecessors = started.activity_id
-        succ.save()
+        succ.predecessori.set([started])
         problem = build_scheduling_problem([started.job_id])
         act = next(
             a
@@ -165,16 +155,18 @@ class BuildSchedulingProblemTest(TestCase):
             for a in j.activities
             if a.activity_id == succ.activity_id
         )
-        # Locked window ends 2026-06-10 -> successor can start from the 11th.
-        self.assertEqual(act.earliest_start, date(2026, 6, 11))
+        # The successor starts the day after the locked window ends (the
+        # predecessor is still running, so that window reaches today).
+        self.assertEqual(
+            act.earliest_start, fixed_calendar_window(started)[1] + timedelta(days=1)
+        )
         # The dangling reference to the excluded predecessor is dropped.
         self.assertEqual(act.predecessors, [])
 
     def test_predecessors_from_db_field(self) -> None:
         a1 = _make_activity("T001", 1, "prep")
         a2 = _make_activity("T001", 1, "work")
-        a2.predecessors = a1.activity_id
-        a2.save()
+        a2.predecessori.set([a1])
         problem = build_scheduling_problem([a1.job_id])
         by_id = {a.activity_id: a for a in problem.jobs[0].activities}
         self.assertEqual(by_id[a2.activity_id].predecessors, [a1.activity_id])
@@ -190,23 +182,24 @@ class BuildSchedulingProblemTest(TestCase):
         problem = build_scheduling_problem([a1.job_id])
         self.assertEqual(precedence_pairs(problem.jobs[0]), [])
 
-    def test_unknown_predecessor_reference_dropped(self) -> None:
+    def test_predecessor_outside_the_problem_is_dropped(self) -> None:
         a1 = _make_activity("T001", 1, "prep")
-        a1.predecessors = "OTHER-01-x, " + a1.activity_id
-        a1.save()
+        other = _make_activity("OTHER", 1, "x")
+        a1.predecessori.set([other])
         problem = build_scheduling_problem([a1.job_id])
         self.assertEqual(problem.jobs[0].activities[0].predecessors, [])
 
-    def test_head_model_from_configurazione_testa(self) -> None:
-        """head_model is kept only when present in ConfigurazioneTesta."""
+    def test_head_model_and_quantities_follow_the_planning_minimums(self) -> None:
+        """Every head model counts; quantities are the planning minimum kit."""
         from ui.models import ConfigurazioneTesta
+        from src.optimization.data_model import ResourceType
 
         ConfigurazioneTesta.objects.create(
             modello_testa="TS2000",
             min_mandrini=0,
             min_tastatori=0,
             min_maschere=0,
-            min_generatori=1,
+            min_generatori=2,
         )
         configured = _make_activity("T001", 1, "work")
         configured.modello_testa = "TS2000"
@@ -214,11 +207,28 @@ class BuildSchedulingProblemTest(TestCase):
         unknown = _make_activity("T001", 2, "work")
         unknown.modello_testa = "UNKNOWN_HEAD"
         unknown.save()
+        custom = _make_activity("T001", 3, "work")
+        custom.modello_testa = "TS2000"
+        custom.tp60_custom = True
+        custom.save()
 
         problem = build_scheduling_problem([configured.job_id])
         by_id = {a.activity_id: a for a in problem.jobs[0].activities}
         self.assertEqual(by_id[configured.activity_id].head_model, "TS2000")
-        self.assertIsNone(by_id[unknown.activity_id].head_model)
+        self.assertEqual(
+            by_id[configured.activity_id].required_quantities[ResourceType.GENERATORE],
+            2,
+        )
+        # Unconfigured model: still a head requirement, default minimums.
+        self.assertEqual(by_id[unknown.activity_id].head_model, "UNKNOWN_HEAD")
+        self.assertEqual(
+            by_id[unknown.activity_id].required_quantities[ResourceType.MANDRINO], 1
+        )
+        # TP60 Custom: 2 mandrini, no tastatore, 1 maschera.
+        q = by_id[custom.activity_id].required_quantities
+        self.assertEqual(q[ResourceType.MANDRINO], 2)
+        self.assertEqual(q[ResourceType.TASTATORE], 0)
+        self.assertEqual(q[ResourceType.MASCHERA], 1)
 
     def test_gantt_after_excludes_fixed_activity(self) -> None:
         from src.optimization.output_model import (
@@ -273,12 +283,17 @@ class BuildSchedulingProblemTest(TestCase):
         self.assertEqual(fixed[0]["stato"], "in_corso")
 
     def test_fixed_calendar_window_in_progress(self) -> None:
+        """The locked window is the application's one occupancy rule."""
+        from ui.services.resource_conflicts import occupation_window
+
         att = _make_activity("T001", 9, "win", di="2026-06-01", df="2026-06-10")
         att.actual_start = date(2026, 6, 3)
         self.assertTrue(is_attivita_fixed(att))
-        self.assertEqual(
-            fixed_calendar_window(att), (date(2026, 6, 3), date(2026, 6, 10))
-        )
+        window = fixed_calendar_window(att)
+        self.assertEqual(window, occupation_window(att))
+        self.assertEqual(window[0], date(2026, 6, 3))
+        # Still running: held through today, not released on the planned end.
+        self.assertGreaterEqual(window[1], localdate())
 
     def test_no_implicit_earliest_start_from_db(self) -> None:
         att = _make_activity("T001", 1, "solo")
@@ -343,13 +358,12 @@ class BuildSchedulingProblemTest(TestCase):
         tasks = activities_to_gantt_tasks([att], {})
         self.assertEqual(tasks[0]["assigned_resources"], ["G501", "M12"])
 
-    def test_match_solver_activity_id_from_db_problem_format(self) -> None:
+    def test_match_solver_activity_id_by_canonical_id(self) -> None:
         att = _make_activity("25021", 1, "Qualifica")
-        matched = match_attivita_for_solver_activity_id(
-            f"25021-1-Qualifica-{att.pk}",
-            [att],
+        self.assertIs(
+            match_attivita_for_solver_activity_id(att.activity_id, [att]), att
         )
-        self.assertIs(matched, att)
+        self.assertIsNone(match_attivita_for_solver_activity_id("nope", [att]))
 
     def test_hydrate_restores_resources_on_stale_task_dict(self) -> None:
         att = _make_activity("T001", 1, "solo")
@@ -373,23 +387,21 @@ class PredecessorMatchingTest(TestCase):
         _seed_inventory()
         Job.objects.create(commessa="T002", delivery_date="2026-12-31")
 
-    def test_case_different_reference_is_matched(self) -> None:
+    def test_known_predecessor_comes_back_canonically(self) -> None:
         pred = _make_activity("T002", 1, "Qualifica")
         succ = _make_activity("T002", 1, "SNA")
-        succ.predecessors = pred.activity_id.lower()
-        succ.save(update_fields=["predecessors"])
-        self.assertNotEqual(succ.predecessors, pred.activity_id)
+        succ.predecessori.set([pred])
         self.assertEqual(
             _parse_predecessor_ids(succ, {pred.activity_id}),
             [pred.activity_id],
             "The canonical id of the known activity must come back.",
         )
 
-    def test_unknown_reference_is_still_dropped(self) -> None:
+    def test_predecessor_not_in_the_problem_is_dropped(self) -> None:
         pred = _make_activity("T002", 1, "Qualifica")
+        excluded = _make_activity("T002", 1, "Collaudo")
         succ = _make_activity("T002", 1, "SNA")
-        succ.predecessors = "T002-1-collaudo"
-        succ.save(update_fields=["predecessors"])
+        succ.predecessori.set([excluded])
         self.assertEqual(_parse_predecessor_ids(succ, {pred.activity_id}), [])
 
     def test_started_predecessor_bounds_the_successor(self) -> None:
@@ -398,8 +410,7 @@ class PredecessorMatchingTest(TestCase):
         pred.actual_start = date(2026, 6, 1)
         pred.save(update_fields=["actual_start"])
         succ = _make_activity("T002", 1, "SNA", di="2026-06-11", df="2026-06-15")
-        succ.predecessors = pred.activity_id.lower()
-        succ.save(update_fields=["predecessors"])
+        succ.predecessori.set([pred])
 
         problem = build_scheduling_problem([succ.job_id])
         activity = problem.jobs[0].activities[0]

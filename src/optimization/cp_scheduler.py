@@ -1,17 +1,31 @@
-"""CP-SAT scheduling model: build, solve (four-phase lexicographic), extract.
+"""CP-SAT scheduling model: build, solve (lexicographic phases), extract.
 
 Time is modelled in working-day indices. Each activity is a fixed-size interval;
 each (activity, compatible resource) pair is an optional interval whose presence
 literal selects that physical resource. Unit capacity is enforced with
-``NoOverlap`` per resource. The objective is solved lexicographically: first the
-total tardiness penalty, then a bore-mid tie-breaker, then resource continuity
-along precedence edges, and finally workload levelling (minimum peak of
-concurrent activities) — later phases never worsen earlier objectives.
+``NoOverlap`` per resource.
+
+The objective is solved lexicographically, each phase constrained not to worsen
+the earlier ones:
+
+1. total tardiness penalty (every job counts, a job without penalty weighs one
+   cent per late week);
+2. total late calendar days, so a job that is late anyway finishes as early as
+   possible and jobs without a real penalty are not left to drift;
+3. bore-mid tie-breaker;
+4. resource continuity along precedence edges;
+5. workload levelling (minimum peak of concurrent activities).
+
+A single ``time_limit`` is a budget for the whole run: the primary phase gets
+the largest share and every later phase gets its share of what is left, so a
+slow primary phase can no longer multiply the limit by the number of phases.
 """
 
 from __future__ import annotations
 
+import time
 from collections import defaultdict
+from collections.abc import Callable
 
 from ortools.sat.python import cp_model
 from pydantic import BaseModel
@@ -25,11 +39,19 @@ from src.optimization.data_model import (
 )
 from src.optimization.feasibility import FeasibilityReport, check_feasibility
 from src.optimization.objective import (
+    PENALTY_SCALE,
     add_job_penalty,
     calendar_due_offset,
     scale_penalty,
 )
 from src.optimization.requirements import generate_requirements
+
+_OK = (cp_model.OPTIMAL, cp_model.FEASIBLE)
+
+#: Relative share of the remaining time budget per phase, in phase order.
+_PHASE_WEIGHTS = (4.0, 1.0, 1.0, 1.0, 1.0)
+#: Below this many seconds a phase is skipped: CP-SAT cannot do useful work.
+_MIN_PHASE_SECONDS = 0.05
 
 
 class SolveOutcome(BaseModel):
@@ -41,6 +63,31 @@ class SolveOutcome(BaseModel):
     activity_resources: dict[str, list[str]] = {}
     total_penalty_cents: int = 0
     feasibility_report: FeasibilityReport | None = None
+
+
+class _Budget:
+    """Split one wall-clock budget across the lexicographic phases."""
+
+    def __init__(self, time_limit: float | None) -> None:
+        self._deadline = None if time_limit is None else time.monotonic() + time_limit
+        self._weights = list(_PHASE_WEIGHTS)
+
+    def next_phase_limit(self) -> float | None:
+        """Seconds for the next phase, ``None`` when unlimited, ``0`` when spent."""
+        weight = self._weights.pop(0) if self._weights else 1.0
+        if self._deadline is None:
+            return None
+        remaining = self.remaining()
+        if remaining <= _MIN_PHASE_SECONDS:
+            return 0.0
+        share = remaining * weight / (weight + sum(self._weights))
+        return max(_MIN_PHASE_SECONDS, share)
+
+    def remaining(self) -> float:
+        """Seconds left in the budget (``inf`` when unlimited)."""
+        if self._deadline is None:
+            return float("inf")
+        return self._deadline - time.monotonic()
 
 
 class _SchedulingModel:
@@ -56,7 +103,11 @@ class _SchedulingModel:
         self.assign: dict[tuple[str, str], cp_model.IntVar] = {}
         self._tie_break_literals: list[cp_model.IntVar] = []
         self._continuity_literals: list[cp_model.IntVar] = []
-        self._penalty_components: list[tuple[int, cp_model.IntVar]] = []
+        #: ``(objective weight, real weight in cents, late-weeks var)`` per
+        #: job: the objective weight is at least one cent so no job is
+        #: ignored, the real weight is what the report adds up.
+        self._penalty_components: list[tuple[int, int, cp_model.IntVar]] = []
+        self._delay_vars: list[cp_model.IntVar] = []
         # One non-optional interval per activity plus the fixed reservation
         # intervals: together they describe the global workload over time.
         self._load_intervals: list[cp_model.IntervalVar] = []
@@ -134,7 +185,11 @@ class _SchedulingModel:
     ) -> None:
         start = self.start[activity.activity_id]
         for requirement in generate_requirements(activity):
-            candidates = get_compatible_resources(self.problem.resources, requirement)
+            candidates = get_compatible_resources(
+                self.problem.resources,
+                requirement,
+                self.problem.generator_compatibility,
+            )
             literals: list[cp_model.IntVar] = []
             for resource in candidates:
                 lit = self.model.NewBoolVar(
@@ -164,8 +219,8 @@ class _SchedulingModel:
 
         For each predecessor→successor pair and each resource ``R`` that is a
         candidate for both activities, introduce a boolean that is true iff both
-        assign ``R``. Phase C maximises the sum of these booleans without
-        worsening penalty or bore-mid objectives.
+        assign ``R``. The continuity phase maximises the sum of these booleans
+        without worsening the earlier objectives.
         """
         for job in self.problem.jobs:
             for prev, curr in precedence_pairs(job):
@@ -189,15 +244,13 @@ class _SchedulingModel:
     def _add_penalties(self) -> None:
         offsets = self.calendar.calendar_offsets(self.horizon)
         for job in self.problem.jobs:
-            if job.penalty_per_week <= 0:
-                continue
             # Job completion is the latest end across all its activities;
             # with parallel branches no single activity is guaranteed last.
             end_day_exprs = [
                 self.start[a.activity_id] + a.duration_days - 1 for a in job.activities
             ]
             due_offset = calendar_due_offset(job.due_date, self.problem.horizon_start)
-            weeks = add_job_penalty(
+            weeks, delay = add_job_penalty(
                 self.model,
                 job.job_id,
                 end_day_exprs,
@@ -206,15 +259,20 @@ class _SchedulingModel:
                 self.horizon,
             )
             self._penalty_components.append(
-                (scale_penalty(job.penalty_per_week), weeks)
+                (
+                    scale_penalty(job.penalty_per_week),
+                    round(job.penalty_per_week * PENALTY_SCALE),
+                    weeks,
+                )
             )
+            self._delay_vars.append(delay)
 
     def _add_load_peak(self) -> None:
         """Bind ``_load_peak`` to the maximum number of concurrent intervals.
 
         ``AddCumulative`` with unit demands and a variable capacity makes the
-        capacity an upper bound on concurrency; minimizing it (phase D) turns
-        the bound into the actual peak.
+        capacity an upper bound on concurrency; minimizing it turns the bound
+        into the actual peak.
         """
         if not self._load_intervals:
             return
@@ -230,86 +288,110 @@ class _SchedulingModel:
     # -- objective expressions --------------------------------------------
 
     def _total_penalty_expr(self):
-        return sum(weight * weeks for weight, weeks in self._penalty_components)
+        return sum(weight * weeks for weight, _real, weeks in self._penalty_components)
 
-    def _penalty_value(self, solver: cp_model.CpSolver) -> int:
+    def _total_delay_expr(self):
+        return sum(self._delay_vars)
+
+    def _objective_penalty_value(self, solver: cp_model.CpSolver) -> int:
         return sum(
-            weight * solver.Value(weeks) for weight, weeks in self._penalty_components
+            weight * solver.Value(weeks)
+            for weight, _real, weeks in self._penalty_components
         )
 
-    def _tie_break_value(self, solver: cp_model.CpSolver) -> int:
-        return sum(solver.Value(lit) for lit in self._tie_break_literals)
-
-    def _continuity_value(self, solver: cp_model.CpSolver) -> int:
-        return sum(solver.Value(lit) for lit in self._continuity_literals)
+    def _penalty_value(self, solver: cp_model.CpSolver) -> int:
+        """Real penalty in cents (jobs without a penalty add nothing)."""
+        return sum(
+            real * solver.Value(weeks)
+            for _weight, real, weeks in self._penalty_components
+        )
 
     # -- solving -----------------------------------------------------------
 
     def solve(self, time_limit: float | None) -> SolveOutcome:
         solver = cp_model.CpSolver()
-        if time_limit is not None:
-            solver.parameters.max_time_in_seconds = time_limit
+        budget = _Budget(time_limit)
 
-        # Phase A: minimize the total tardiness penalty.
-        self.model.Minimize(self._total_penalty_expr())
-        status = solver.Solve(self.model)
-        if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            return SolveOutcome(status=solver.StatusName(status), feasible=False)
+        def run_phase(set_objective: Callable[[], None]) -> int | None:
+            """Solve one phase within its share of the budget.
 
-        # Snapshot after every successful phase: if a later phase times out
-        # without a solution, the last good solution is still returned.
+            Returns the CP-SAT status of a solved phase, or ``None`` when the
+            budget is spent or the phase found no solution; the model keeps
+            every constraint added so far, so a later phase can still run.
+            """
+            limit = budget.next_phase_limit()
+            if limit is not None and limit <= 0:
+                return None
+            if limit is not None:
+                solver.parameters.max_time_in_seconds = limit
+            set_objective()
+            status = solver.Solve(self.model)
+            if status not in _OK:
+                last_status.append(status)
+                return None
+            return status
+
+        last_status: list[int] = []
+
+        # Phase 1: minimize the total tardiness penalty.  A feasible schedule
+        # matters more than any later refinement: when the first share runs
+        # out without one, the whole remaining budget goes to this phase.
+        penalty_expr = self._total_penalty_expr()
+        status = run_phase(lambda: self.model.Minimize(penalty_expr))
+        if (
+            status is None
+            and last_status
+            and last_status[-1] == cp_model.UNKNOWN
+            and budget.remaining() > _MIN_PHASE_SECONDS
+        ):
+            solver.parameters.max_time_in_seconds = budget.remaining()
+            retry = solver.Solve(self.model)
+            if retry in _OK:
+                status = retry
+            else:
+                last_status.append(retry)
+        if status is None:
+            name = solver.StatusName(last_status[-1]) if last_status else "UNKNOWN"
+            return SolveOutcome(status=name, feasible=False)
+
+        # Snapshot after every successful phase: if a later phase runs out of
+        # time without a solution, the last good solution is still returned.
         best = self._extract(solver, status)
-        current_penalty = self._penalty_value(solver)
-        bore_bound: int | None = None
-        continuity_bound: int | None = None
+        self.model.Add(penalty_expr <= self._objective_penalty_value(solver))
 
-        # Phase B: only when phase A is provably optimal, minimize the
-        # tie-breaker subject to keeping the optimal penalty.
-        if status == cp_model.OPTIMAL and self._tie_break_literals:
-            self.model.Add(self._total_penalty_expr() <= current_penalty)
-            self.model.Minimize(sum(self._tie_break_literals))
-            phase_b_status = solver.Solve(self.model)
-            if phase_b_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-                status = phase_b_status
+        # Phase 2: minimize the total late days with the same penalty.
+        if self._delay_vars:
+            delay_expr = self._total_delay_expr()
+            phase = run_phase(lambda: self.model.Minimize(delay_expr))
+            if phase is not None:
+                status = phase
                 best = self._extract(solver, status)
-                current_penalty = self._penalty_value(solver)
-                if phase_b_status == cp_model.OPTIMAL:
-                    bore_bound = self._tie_break_value(solver)
+                self.model.Add(delay_expr <= solver.Value(delay_expr))
 
-        # Phase C: maximize resource continuity along precedence edges,
-        # without worsening penalty (or bore-mid, when phase B was optimal).
-        if self._continuity_literals and status in (
-            cp_model.OPTIMAL,
-            cp_model.FEASIBLE,
-        ):
-            self.model.Add(self._total_penalty_expr() <= current_penalty)
-            if bore_bound is not None:
-                self.model.Add(sum(self._tie_break_literals) <= bore_bound)
-            self.model.Maximize(sum(self._continuity_literals))
-            phase_c_status = solver.Solve(self.model)
-            if phase_c_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-                status = phase_c_status
+        # Phase 3: bore-mid tie-breaker.
+        if self._tie_break_literals:
+            bore_expr = sum(self._tie_break_literals)
+            phase = run_phase(lambda: self.model.Minimize(bore_expr))
+            if phase is not None:
+                status = phase
                 best = self._extract(solver, status)
-                current_penalty = self._penalty_value(solver)
-                # The achieved value is a valid lower bound even when phase C
-                # is only feasible: the current solution already reaches it.
-                continuity_bound = self._continuity_value(solver)
+                self.model.Add(bore_expr <= solver.Value(bore_expr))
 
-        # Phase D: level the workload by minimizing the peak number of
-        # concurrent activities, without worsening any earlier objective.
-        if self._load_peak is not None and status in (
-            cp_model.OPTIMAL,
-            cp_model.FEASIBLE,
-        ):
-            self.model.Add(self._total_penalty_expr() <= current_penalty)
-            if bore_bound is not None:
-                self.model.Add(sum(self._tie_break_literals) <= bore_bound)
-            if continuity_bound is not None:
-                self.model.Add(sum(self._continuity_literals) >= continuity_bound)
-            self.model.Minimize(self._load_peak)
-            phase_d_status = solver.Solve(self.model)
-            if phase_d_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-                status = phase_d_status
+        # Phase 4: maximize resource continuity along precedence edges.
+        if self._continuity_literals:
+            continuity_expr = sum(self._continuity_literals)
+            phase = run_phase(lambda: self.model.Maximize(continuity_expr))
+            if phase is not None:
+                status = phase
+                best = self._extract(solver, status)
+                self.model.Add(continuity_expr >= solver.Value(continuity_expr))
+
+        # Phase 5: level the workload by minimizing the peak concurrency.
+        if self._load_peak is not None:
+            load_peak = self._load_peak
+            phase = run_phase(lambda: self.model.Minimize(load_peak))
+            if phase is not None:
+                status = phase
                 best = self._extract(solver, status)
 
         return best
@@ -340,6 +422,7 @@ def solve(
 
     Returns a ``SolveOutcome``; when the pre-solver feasibility check fails the
     outcome is infeasible and carries the diagnostic ``feasibility_report``.
+    ``time_limit`` bounds the whole run, all phases included.
     """
     report = check_feasibility(problem)
     if not report.feasible:

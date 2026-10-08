@@ -60,11 +60,12 @@ def _resource_shortage_issue(
 def _check_resource_coverage(
     activity: Activity,
     resources: list[Resource],
+    compatibility: dict[str, list[str]],
     issues: list[FeasibilityIssue],
 ) -> None:
     """Each requirement must have at least ``quantity`` compatible resources."""
     for requirement in generate_requirements(activity):
-        compatible = get_compatible_resources(resources, requirement)
+        compatible = get_compatible_resources(resources, requirement, compatibility)
         if len(compatible) < requirement.quantity:
             issues.append(
                 _resource_shortage_issue(activity, requirement, len(compatible))
@@ -139,7 +140,9 @@ def check_feasibility(problem: SchedulingProblem) -> FeasibilityReport:
 
     for job in problem.jobs:
         for activity in job.activities:
-            _check_resource_coverage(activity, problem.resources, issues)
+            _check_resource_coverage(
+                activity, problem.resources, problem.generator_compatibility, issues
+            )
 
     _check_horizon(problem, calendar, issues)
 

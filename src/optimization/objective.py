@@ -17,7 +17,12 @@ _DAYS_PER_WEEK = 7
 
 
 def scale_penalty(penalty_per_week: float) -> int:
-    """Scale a per-week penalty to a strictly-positive integer weight."""
+    """Scale a per-week penalty to a strictly-positive integer weight.
+
+    A job without a penalty still weighs one cent per late week: the primary
+    objective then never *ignores* a job, it only ranks it below every job
+    that has a real penalty.
+    """
     return max(1, round(penalty_per_week * PENALTY_SCALE))
 
 
@@ -28,15 +33,16 @@ def add_job_penalty(
     calendar_offsets: list[int],
     due_offset: int,
     horizon_days: int,
-) -> cp_model.IntVar:
-    """Add tardiness variables for a job and return its late-weeks var.
+) -> tuple[cp_model.IntVar, cp_model.IntVar]:
+    """Add tardiness variables for a job; return ``(late_weeks, late_days)``.
 
     ``end_day_exprs`` are the working-day indices of the last working day of
     each activity (``start + duration - 1``); the job completes on their
     maximum. The completion calendar offset is obtained from
-    ``calendar_offsets`` indexed by that working-day index. The number of late
-    weeks is ``ceil(delay / 7)``, enforced as ``7 * weeks >= delay`` and driven
-    to equality by the objective's minimization pressure.
+    ``calendar_offsets`` indexed by that working-day index. ``late_days`` is
+    the calendar delay past the due date; ``late_weeks`` is ``ceil(delay / 7)``,
+    enforced as ``7 * weeks >= delay`` and driven to equality by the
+    objective's minimization pressure.
     """
     last_day = model.NewIntVar(0, horizon_days - 1, f"last_day_{job_id}")
     model.AddMaxEquality(last_day, end_day_exprs)
@@ -54,7 +60,7 @@ def add_job_penalty(
     weeks = model.NewIntVar(0, max_weeks, f"weeks_{job_id}")
     model.Add(_DAYS_PER_WEEK * weeks >= delay)
 
-    return weeks
+    return weeks, delay
 
 
 def calendar_due_offset(due_date: date, horizon_start: date) -> int:

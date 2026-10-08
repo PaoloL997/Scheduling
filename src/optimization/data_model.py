@@ -15,16 +15,6 @@ from pydantic import BaseModel, Field, model_validator
 
 from src.optimization.calendar import WorkingCalendar
 
-# TODO: da prendere direttamente dal DB
-PLANTS = [
-    "Valbrembo",
-    "Ricengo",
-    "Schio",
-    "Marghera",
-    "Albignasego",
-    "Milano",
-]
-
 
 class ResourceType(str, Enum):
     MANDRINO = "mandrino"
@@ -45,18 +35,13 @@ class Resource(BaseModel):
 
     resource_id: str
     resource_type: ResourceType
+    #: Plant name as written in the application; descriptive only.
     plant: str
 
     # Optional attributes (which one is relevant depends on resource_type).
     bore: float | None = None
     tube_pitch: float | None = None
     model: str | None = None
-
-    @model_validator(mode="after")
-    def check_plant(self):
-        if self.plant not in PLANTS:
-            raise ValueError(f"Invalid plant: {self.plant}. Must be one of {PLANTS}.")
-        return self
 
     @model_validator(mode="after")
     def check_bore(self):
@@ -278,6 +263,9 @@ class SchedulingProblem(BaseModel):
     horizon_days: int | None = None
     #: Resource intervals blocked by fixed activities of commesse not in ``jobs``.
     resource_reservations: list[ResourceReservation] = Field(default_factory=list)
+    #: Generator models compatible with each head model.  A head model that
+    #: is missing here accepts any generator (see ``compatibility``).
+    generator_compatibility: dict[str, list[str]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def check_unique_ids(self):
