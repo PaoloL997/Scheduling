@@ -121,6 +121,13 @@
   tranne `/api/ottimizzazione/solve/` che con un body non valido risponde 400
   invece di trattarlo come vuoto.
 
+- **Un solo handler per le anagrafiche.** Stabilimenti, responsabili, tipi
+  attivita' e configurazioni testa condividono le view di creazione e di
+  modifica/cancellazione in `ui/views_anagrafiche.py`, costruite da una
+  descrizione della tabella (modello, campo nome, campi extra, parole
+  italiane). Risposte, messaggi e voci di log sono invariati; `views.py`
+  perde circa 500 righe.
+
 ### Removed
 
 - Codice morto: `ui/forms.py` e i template del vecchio wizard a pagine
