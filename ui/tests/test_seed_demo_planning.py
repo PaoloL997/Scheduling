@@ -19,8 +19,8 @@ class SeedDemoPlanningTest(TestCase):
 
         opt01 = list(Attivita.objects.filter(commessa="OPT01").order_by("item"))
         self.assertEqual(len(opt01), 2)
-        self.assertIsNone(opt01[0].predecessors)
-        self.assertEqual(opt01[1].predecessors, opt01[0].activity_id)
+        self.assertEqual(opt01[0].predecessor_ids(), [])
+        self.assertEqual(opt01[1].predecessor_ids(), [opt01[0].activity_id])
 
         earliest = min(
             Attivita.objects.filter(commessa__startswith="OPT").values_list(

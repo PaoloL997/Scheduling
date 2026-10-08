@@ -131,9 +131,9 @@ class SeedOverlapDemoTest(TestCase):
         self.assertGreater(late.actual_start, late.data_inizio)
         self.assertEqual(blocked.data_inizio, date(2026, 8, 20))
         self.assertGreater(blocked.data_inizio, late.data_fine)
-        self.assertEqual(collaudo.predecessors, blocked.activity_id)
-        self.assertEqual(imballo.predecessors, collaudo.activity_id)
-        self.assertEqual(docs.predecessors, "")
+        self.assertEqual(collaudo.predecessor_ids(), [blocked.activity_id])
+        self.assertEqual(imballo.predecessor_ids(), [collaudo.activity_id])
+        self.assertEqual(docs.predecessor_ids(), [])
         # No swap alternative: the shared testa is kept and a proposal is stored.
         self.assertEqual(
             list(

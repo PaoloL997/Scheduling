@@ -65,7 +65,7 @@ def normalize_activity_id(activity_id: str) -> str:
     """Return the comparison key for an ``activity_id``.
 
     Renaming an activity rebuilds its ``activity_id`` but does not rewrite
-    the ``predecessors`` strings pointing at it, so a reference can differ
+    the predecessor references pointing at it, so a reference can differ
     from the current id by case or surrounding spaces only. Compare ids
     through this helper instead of matching them verbatim.
 

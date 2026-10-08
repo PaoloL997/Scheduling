@@ -435,7 +435,6 @@ class Command(BaseCommand):
                 "data_fine": finish,
                 "actual_start": actual_start,
                 "actual_finish": actual_finish,
-                "predecessors": "",
             },
         )
         return att
@@ -531,14 +530,10 @@ class Command(BaseCommand):
             modello_testa=_RS_STD_MODEL,
         )
 
-        late.predecessors = taglio.activity_id
-        late.save(update_fields=["predecessors"])
-        pulizia.predecessors = late.activity_id
-        pulizia.save(update_fields=["predecessors"])
-        collaudo.predecessors = blocked.activity_id
-        collaudo.save(update_fields=["predecessors"])
-        imballo.predecessors = collaudo.activity_id
-        imballo.save(update_fields=["predecessors"])
+        late.predecessori.set([taglio])
+        pulizia.predecessori.set([late])
+        collaudo.predecessori.set([blocked])
+        imballo.predecessori.set([collaudo])
 
         # Unique TP80 testa RS-T1 is shared only along the delayed chain
         # (sequential in the original plan). STD activities have their own kit
@@ -704,7 +699,6 @@ class Command(BaseCommand):
                 "data_inizio": date(2026, 8, 10),
                 "data_fine": date(2026, 8, 19),
                 "actual_start": date(2026, 8, 17),
-                "predecessors": "",
             },
         )
         blocked, _ = Attivita.objects.update_or_create(
@@ -717,7 +711,6 @@ class Command(BaseCommand):
                 "data_fine": date(2026, 8, 29),
                 "actual_start": None,
                 "actual_finish": None,
-                "predecessors": "",
             },
         )
 

@@ -48,3 +48,7 @@ Thumbs.db
 # Data files
 *.xlsx
 *.mpp
+
+# database dumps (pg_dump), never commit data
+backups/
+*.dump

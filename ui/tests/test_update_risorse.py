@@ -135,7 +135,7 @@ class UpdateAttivitaRisorseTest(TestCase):
             {"predecessors": [pred.activity_id]},
         )
         self.att.refresh_from_db()
-        self.assertEqual(self.att.predecessors, pred.activity_id)
+        self.assertEqual(self.att.predecessor_ids(), [pred.activity_id])
 
     def test_update_risorse_conflict_raises(self) -> None:
         other = Attivita.objects.create(

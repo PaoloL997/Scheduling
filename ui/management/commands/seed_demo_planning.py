@@ -206,11 +206,11 @@ class Command(BaseCommand):
                 jobs_created += 1
 
         for commessa, item, name, start, end, pred_item in _ACTIVITY_PLAN:
-            pred_id = None
-            if pred_item is not None:
-                predecessor = activity_by_key.get((commessa, pred_item))
-                if predecessor is not None:
-                    pred_id = predecessor.activity_id
+            predecessor = (
+                activity_by_key.get((commessa, pred_item))
+                if pred_item is not None
+                else None
+            )
 
             att, created = Attivita.objects.update_or_create(
                 commessa=commessa,
@@ -220,9 +220,9 @@ class Command(BaseCommand):
                     **_ACTIVITY_DEFAULTS,
                     "data_inizio": start,
                     "data_fine": end,
-                    "predecessors": pred_id,
                 },
             )
+            att.predecessori.set([predecessor] if predecessor is not None else [])
             if created:
                 acts_created += 1
             activity_by_key[(commessa, item)] = att

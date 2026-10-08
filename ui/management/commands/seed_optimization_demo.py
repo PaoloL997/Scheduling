@@ -62,7 +62,6 @@ _PRIORITY_ACTIVITY = {
     "duration_min": 5 * 480,  # 5 working days
     "actual_start": None,
     "actual_finish": None,
-    "predecessors": "",
 }
 
 # Group B: bore around 22.0 only -> mandrino+tastatore, no testa/maschera.
@@ -77,7 +76,6 @@ _BALANCE_ACTIVITY = {
     "duration_min": 3 * 480,  # 3 working days
     "actual_start": None,
     "actual_finish": None,
-    "predecessors": "",
 }
 
 

@@ -82,10 +82,10 @@ class JobsDeleteTest(TestCase):
         resp = api_jobs_delete(req)
         self.assertEqual(resp.status_code, 404)
 
-    def test_deletes_activities_when_job_row_missing(self) -> None:
-        """A commessa may have activities but no Job row."""
+    def test_deletes_the_job_created_with_its_activities(self) -> None:
+        """An activity always has a Job: deleting the commessa removes both."""
         Attivita.objects.create(commessa="MMP01", item=1, activity="sna")
-        self.assertFalse(Job.objects.filter(commessa="MMP01").exists())
+        self.assertTrue(Job.objects.filter(commessa="MMP01").exists())
 
         req = _delete_request(self.factory, {"commessa": "MMP01"})
         resp = api_jobs_delete(req)
@@ -93,3 +93,4 @@ class JobsDeleteTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(json.loads(resp.content)["ok"])
         self.assertFalse(Attivita.objects.filter(commessa="MMP01").exists())
+        self.assertFalse(Job.objects.filter(commessa="MMP01").exists())

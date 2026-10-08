@@ -13,14 +13,22 @@ class Attivita(models.Model):
     created through the multi-step add-activity wizard and edited from the
     web app and the tablet bridge.
 
-    Resource assignments are stored in the related :class:`RisorsaAttivita`
-    model.
+    The commessa is a real link (``job``); ``commessa`` is the same name kept
+    as text for display and filtering and is realigned on every save.
+    Precedences are the ``predecessori`` relation: renaming an activity never
+    breaks the links that point at it.  Resource assignments are stored in
+    the related :class:`RisorsaAttivita` model.
     """
 
     commessa = models.CharField(max_length=100)
     item = models.CharField(max_length=50, default="1")
     activity = models.CharField(max_length=200, blank=True, default="")
-    job_id = models.CharField(max_length=250, db_index=True, blank=True, default="")
+    job = models.ForeignKey(
+        "Job",
+        on_delete=models.PROTECT,
+        db_column="job_id",
+        related_name="attivita",
+    )
     activity_id = models.CharField(max_length=500, unique=True, blank=True, default="")
 
     duration_min = models.IntegerField(null=True, blank=True)
@@ -30,7 +38,12 @@ class Attivita(models.Model):
     actual_finish = models.DateField(null=True, blank=True)
     baseline_start = models.DateField(null=True, blank=True)
     baseline_finish = models.DateField(null=True, blank=True)
-    predecessors = models.TextField(null=True, blank=True)
+    predecessori = models.ManyToManyField(
+        "self",
+        symmetrical=False,
+        related_name="successori",
+        blank=True,
+    )
 
     stabilimento = models.CharField(max_length=200, blank=True, default="")
     responsabile = models.CharField(max_length=200, blank=True, default="")
@@ -78,10 +91,26 @@ class Attivita(models.Model):
         )
 
     def save(self, *args, **kwargs):
-        """Keep canonical identifiers aligned with commessa/item/activity fields."""
-        self.job_id = build_job_id(self.commessa)
+        """Keep the Job link and the canonical activity id aligned with the fields.
+
+        The commessa text is the input, the Job row is the truth: a commessa
+        that has no Job yet gets one, so an activity is never orphaned.
+        """
+        expected = build_job_id(self.commessa)
+        if self._state.adding or self.job_id != expected:
+            self.job, _ = Job.objects.get_or_create(
+                commessa=self.commessa, defaults={"job_id": expected}
+            )
         self.activity_id = build_activity_id(self.commessa, self.item, self.activity)
         super().save(*args, **kwargs)
+
+    def predecessor_ids(self) -> list[str]:
+        """Canonical ids of the predecessors (served from the prefetch when present)."""
+        return [p.activity_id for p in self.predecessori.all()]
+
+    def predecessors_text(self) -> str:
+        """Predecessor ids joined by ``", "``: the wire format of the clients."""
+        return ", ".join(self.predecessor_ids())
 
 
 class Stabilimento(models.Model):
@@ -284,8 +313,17 @@ class Job(models.Model):
         return self.job_id
 
     def save(self, *args, **kwargs):
-        """Keep canonical job identifier aligned with the commessa field."""
-        self.job_id = build_job_id(self.commessa)
+        """Keep canonical job identifier aligned with the commessa field.
+
+        The commessa is the primary key in disguise: an existing Job cannot
+        be renamed, its activities point at it.
+        """
+        expected = build_job_id(self.commessa)
+        if not self._state.adding and self.job_id and self.job_id != expected:
+            raise ValueError(
+                "La commessa di un Job esistente non puo' essere rinominata."
+            )
+        self.job_id = expected
         super().save(*args, **kwargs)
 
 
@@ -475,54 +513,6 @@ class ProblemaAttivita(models.Model):
         return f"[{self.tipo}] {self.risorsa_tipo} → {self.attivita}"
 
 
-class RisoluzioneProblema(models.Model):
-    """Resolved-problem note kept independently of the activity rows.
-
-    Unlike :class:`ProblemaAttivita`, this record is NOT linked to an
-    :class:`Attivita` foreign-key, so it is not cascade-deleted with the
-    activity.  :func:`ui.services.problem_detection.restore_resolved_notes`
-    matches the notes back to :class:`ProblemaAttivita` rows by activity
-    identity (commessa + item + activity) and problem signature
-    (tipo + risorsa_tipo + risorsa_uid).
-    """
-
-    commessa = models.CharField(max_length=100)
-    item = models.CharField(max_length=50, default="1")
-    activity = models.CharField(max_length=200, blank=True, default="")
-    tipo = models.CharField(max_length=20)
-    risorsa_tipo = models.CharField(max_length=20)
-    risorsa_uid = models.CharField(max_length=100, blank=True, default="")
-    note_risoluzione = models.TextField(blank=True, default="")
-    data_risoluzione = models.DateTimeField(null=True, blank=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        """Table metadata for RisoluzioneProblema."""
-
-        db_table = "risoluzione_problema"
-        constraints = [
-            UniqueConstraint(
-                fields=[
-                    "commessa",
-                    "item",
-                    "activity",
-                    "tipo",
-                    "risorsa_tipo",
-                    "risorsa_uid",
-                ],
-                name="uq_risoluzione_problema_identity",
-            )
-        ]
-
-    def __str__(self) -> str:
-        """Return a short description.
-
-        Returns:
-            str: Activity identity + problem type.
-        """
-        return f"{self.commessa}/{self.item}/{self.activity} [{self.tipo}] {self.risorsa_tipo}"
-
-
 class OperationLog(models.Model):
     """Immutable audit trail entry for a write operation or a system event.
 
@@ -532,8 +522,7 @@ class OperationLog(models.Model):
     services.  Never carries a foreign key to :class:`Attivita` or any
     inventory row: the log must outlive deleted activities and resources,
     so identity is stored as plain text in ``riferimento``
-    (commessa/item/activity or resource uid), exactly like
-    :class:`RisoluzioneProblema`.
+    (commessa/item/activity or resource uid).
     """
 
     SOURCE_WEB = "web"
