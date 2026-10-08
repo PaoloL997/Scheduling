@@ -352,30 +352,34 @@ def _fetch_tasks() -> list[dict]:
     """
 
     from ui.models import Attivita
+    from ui.services.activity_inventory import preloaded_testa_configs
     from ui.services.problem_detection import detect_for_all_activities
 
-    # Recalculate acquisto/spostamento so the page reflects the current
-    # schedule and resource assignments after edits.
-    detect_for_all_activities()
+    with preloaded_testa_configs():
+        # Recalculate acquisto/spostamento so the page reflects the current
+        # schedule and resource assignments after edits.
+        detect_for_all_activities()
 
-    activities = list(
-        Attivita.objects.prefetch_related("risorse", "problemi").order_by(
-            "job_id", F("data_inizio").asc(nulls_first=True), "activity_id"
-        )
-    )
-    id_to_name = {normalize_activity_id(a.activity_id): a.activity for a in activities}
-
-    result = []
-    for a in activities:
-        task = _attivita_to_task_dict(a)
-        if a.predecessors:
-            pred_ids = [p.strip() for p in a.predecessors.split(",") if p.strip()]
-            task["predecessor_names"] = ", ".join(
-                _resolve_predecessor_name(pid, id_to_name) for pid in pred_ids
+        activities = list(
+            Attivita.objects.prefetch_related("risorse", "problemi").order_by(
+                "job_id", F("data_inizio").asc(nulls_first=True), "activity_id"
             )
-        else:
-            task["predecessor_names"] = None
-        result.append(task)
+        )
+        id_to_name = {
+            normalize_activity_id(a.activity_id): a.activity for a in activities
+        }
+
+        result = []
+        for a in activities:
+            task = _attivita_to_task_dict(a)
+            if a.predecessors:
+                pred_ids = [p.strip() for p in a.predecessors.split(",") if p.strip()]
+                task["predecessor_names"] = ", ".join(
+                    _resolve_predecessor_name(pid, id_to_name) for pid in pred_ids
+                )
+            else:
+                task["predecessor_names"] = None
+            result.append(task)
     return result
 
 

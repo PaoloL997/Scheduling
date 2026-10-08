@@ -185,20 +185,35 @@ def _clear_wizard_session(request: HttpRequest) -> None:
     request.session.modified = True
 
 
-def _optimization_groups() -> list[dict]:
-    """Return grouped commesse that have at least one plannable activity."""
-    return [g for g in _fetch_grouped() if _has_plannable_activities(g["activities"])]
+def _optimization_groups(groups: list[dict] | None = None) -> list[dict]:
+    """Return grouped commesse that have at least one plannable activity.
+
+    Args:
+        groups: Output of :func:`_fetch_grouped` already computed for this
+            request; fetched when omitted.
+    """
+    if groups is None:
+        groups = _fetch_grouped()
+    return [g for g in groups if _has_plannable_activities(g["activities"])]
 
 
-def _sanitize_draft(draft: dict) -> dict:
-    """Drop job ids that no longer resolve to activities in the database."""
+def _sanitize_draft(draft: dict, groups: list[dict] | None = None) -> dict:
+    """Drop job ids that no longer resolve to activities in the database.
+
+    Args:
+        draft: The optimization draft stored in the session.
+        groups: Output of :func:`_fetch_grouped` already computed for this
+            request; fetched when needed and omitted.
+    """
     job_ids = [str(j).strip() for j in draft.get("job_ids") or [] if str(j).strip()]
     if not job_ids:
         return {}
     resolved = filter_job_ids_with_activities(job_ids)
+    if groups is None:
+        groups = _fetch_grouped()
     unplannable_ids = {
         g["job"]["job_id"]
-        for g in _fetch_grouped()
+        for g in groups
         if g["job"].get("job_id") and not _has_plannable_activities(g["activities"])
     }
     resolved = [jid for jid in resolved if jid not in unplannable_ids]
@@ -336,7 +351,8 @@ def ottimizzazione(request: HttpRequest) -> HttpResponse:
     today = localdate()
     horizon_default = (today + timedelta(days=1)).isoformat()
     raw_draft = request.session.get(SESSION_DRAFT_KEY) or {}
-    draft = _sanitize_draft(raw_draft)
+    groups = _fetch_grouped()
+    draft = _sanitize_draft(raw_draft, groups)
     if draft != raw_draft:
         if draft.get("job_ids"):
             _store_draft(request, draft)
@@ -348,7 +364,7 @@ def ottimizzazione(request: HttpRequest) -> HttpResponse:
         request,
         "ui/ottimizzazione_commesse.html",
         {
-            "groups_json": json.dumps(_optimization_groups()),
+            "groups_json": json.dumps(_optimization_groups(groups)),
             "draft_json": json.dumps(draft),
             "horizon_default": horizon,
             "solver_time_limit": load_runtime_config().solver_time_limit,

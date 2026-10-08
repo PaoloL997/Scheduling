@@ -6,13 +6,29 @@ date-overlap exclusion) during the resource-selection step of the wizard.
 """
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date
 
 #: Fixed consumable minimums of a TP60 Custom (Sporgenza Tubo-Piastra)
 #: activity, replacing the testa configuration: 2 mandrini and 1 maschera,
 #: no tastatore.
 TP60_CUSTOM_REQUIREMENTS = {"mandrini": 2, "tastatori": 0, "maschere": 1}
+
+_DEFAULT_TESTA_CONFIG: tuple[int, int, int, int, frozenset[str]] = (
+    1,
+    1,
+    1,
+    1,
+    frozenset(),
+)
+
+#: Testa configurations loaded by :func:`preloaded_testa_configs`, keyed by
+#: ``modello_testa``; ``None`` outside such a block.
+_testa_config_cache: ContextVar[dict | None] = ContextVar(
+    "testa_config_cache", default=None
+)
 
 
 def get_stabilimenti() -> list[str]:
@@ -288,20 +304,31 @@ def _get_testa_config(modello_testa: str | None) -> tuple[int, int, int, int, se
     if not modello_testa:
         return 1, 1, 1, 1, set()
 
-    from ui.models import ConfigurazioneTesta
+    cache = _testa_config_cache.get()
+    if cache is not None:
+        row = cache.get(modello_testa, _DEFAULT_TESTA_CONFIG)
+    else:
+        from ui.models import ConfigurazioneTesta
 
-    try:
-        cfg = ConfigurazioneTesta.objects.prefetch_related(
-            "generatori_compatibili"
-        ).get(modello_testa=modello_testa)
-    except ConfigurazioneTesta.DoesNotExist:
-        return 1, 1, 1, 1, set()
+        try:
+            cfg = ConfigurazioneTesta.objects.prefetch_related(
+                "generatori_compatibili"
+            ).get(modello_testa=modello_testa)
+        except ConfigurazioneTesta.DoesNotExist:
+            return 1, 1, 1, 1, set()
+        row = _config_row(cfg)
 
-    gen_models = {
+    *minimi, gen_models = row
+    return (*minimi, set(gen_models))
+
+
+def _config_row(cfg) -> tuple[int, int, int, int, frozenset[str]]:
+    """Return the minimums and compatible generator models of one configuration."""
+    gen_models = frozenset(
         g.modello_generatore
         for g in cfg.generatori_compatibili.all()
         if g.modello_generatore
-    }
+    )
     return (
         cfg.min_mandrini,
         cfg.min_tastatori,
@@ -309,6 +336,38 @@ def _get_testa_config(modello_testa: str | None) -> tuple[int, int, int, int, se
         cfg.min_generatori,
         gen_models,
     )
+
+
+@contextmanager
+def preloaded_testa_configs() -> Iterator[None]:
+    """Serve every testa-configuration lookup in the block from two queries.
+
+    Pages that evaluate the requirements of every activity would otherwise
+    query :class:`~ui.models.ConfigurazioneTesta` once per activity, which on
+    a remote database dominates the response time.  Nested blocks reuse the
+    outer snapshot.  Do not edit configurations inside the block: lookups
+    would keep returning the snapshot.
+
+    Yields:
+        None
+    """
+    if _testa_config_cache.get() is not None:
+        yield
+        return
+
+    from ui.models import ConfigurazioneTesta
+
+    configs = {
+        cfg.modello_testa: _config_row(cfg)
+        for cfg in ConfigurazioneTesta.objects.prefetch_related(
+            "generatori_compatibili"
+        )
+    }
+    token = _testa_config_cache.set(configs)
+    try:
+        yield
+    finally:
+        _testa_config_cache.reset(token)
 
 
 #: Why a currently-assigned resource would not otherwise be listed, most
