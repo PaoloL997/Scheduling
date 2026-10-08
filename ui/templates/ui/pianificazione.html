@@ -3273,11 +3273,6 @@ function filterPianGroups(term) {
   refreshPianSummary();
 }
 
-// Legacy alias kept so any residual callers don't error
-function filterActiveTable() {
-  filterPianGroups(document.getElementById('pian-search').value);
-}
-
 // Close ms-wrap dropdowns when clicking outside
 document.addEventListener('click', function(e) {
   if (e.target.closest('.ms-wrap') || e.target.closest('.ms-dropdown')) return;

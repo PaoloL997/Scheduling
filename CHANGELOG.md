@@ -111,6 +111,14 @@
 
 ### Removed
 
+- Codice morto: `ui/forms.py` e i template del vecchio wizard a pagine
+  (`attivita_aggiungi`, `attivita_pianificazione`, `attivita_risorse`), il
+  template `ottimizzazione_parametri` (la route resta come redirect),
+  `_get_draft` / `_draft_summary`, `problem_summary`, `_EXCEL_COLUMNS`,
+  `JOB_STATUS_SORT_ORDER`, il wrapper `occupied_ids_with_delay`, l'alias
+  JavaScript `filterActiveTable` in Pianificazione, le chiamate a
+  `ensure_django` dentro i servizi (resta come helper per i notebook),
+  `src/optimization/visualization.py` e la dipendenza `matplotlib`.
 - `restore_resolved_notes`: saltava tutti i tipi di problema, quindi non
   ripristinava mai nulla.
 - `src/optimization/db_problem.py`, `mockup_db.py` e il formato di id

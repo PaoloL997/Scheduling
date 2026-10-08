@@ -96,13 +96,6 @@ def _store_draft(request: HttpRequest, draft: dict) -> None:
     request.session.modified = True
 
 
-def _get_draft(request: HttpRequest) -> dict | None:
-    draft = request.session.get(SESSION_DRAFT_KEY)
-    if not draft or not draft.get("job_ids"):
-        return None
-    return draft
-
-
 def _parse_include_explanation(data: dict) -> bool:
     """Return whether the client requested an LLM explanation.
 
@@ -224,17 +217,6 @@ def _sanitize_draft(draft: dict, groups: list[dict] | None = None) -> dict:
         "job_ids": resolved,
         "earliest_start_overrides": overrides,
         "horizon_start": draft.get("horizon_start"),
-    }
-
-
-def _draft_summary(draft: dict) -> dict[str, Any]:
-    job_ids = draft.get("job_ids") or []
-    overrides = draft.get("earliest_start_overrides") or {}
-    attivita = activities_for_job_ids(job_ids)
-    return {
-        "n_jobs": len(job_ids),
-        "n_activities": len(attivita),
-        "n_constraints": len(overrides),
     }
 
 

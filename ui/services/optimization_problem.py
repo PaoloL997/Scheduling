@@ -538,9 +538,6 @@ def build_scheduling_problem(
     Raises:
         OptimizationProblemError: When no jobs/activities match or inventory is empty.
     """
-    from ui.services.optimization_explanation import ensure_django
-
-    ensure_django()
     if not job_ids:
         raise OptimizationProblemError("Seleziona almeno una commessa.")
 
@@ -717,10 +714,6 @@ def build_reschedule_problem(
         OptimizationProblemError: When the activity cannot be re-planned or the
             inventory is empty.
     """
-    from ui.services.optimization_explanation import ensure_django
-
-    ensure_django()
-
     try:
         blocked = Attivita.objects.prefetch_related("risorse", "predecessori").get(
             pk=blocked_pk
@@ -807,23 +800,6 @@ def build_reschedule_problem(
         resource_reservations=reservations,
         generator_compatibility=compatibility,
     )
-
-
-def problem_summary(problem: SchedulingProblem) -> dict[str, Any]:
-    """Return a JSON-serialisable summary of a SchedulingProblem."""
-    activities = sum(len(j.activities) for j in problem.jobs)
-    by_type: dict[str, int] = defaultdict(int)
-    for resource in problem.resources:
-        by_type[resource.resource_type.value] += 1
-    return {
-        "jobs": len(problem.jobs),
-        "activities": activities,
-        "resource_reservations": len(problem.resource_reservations),
-        "resources": len(problem.resources),
-        "resources_by_type": dict(by_type),
-        "horizon_start": problem.horizon_start.isoformat(),
-        "horizon_days": problem.horizon_days,
-    }
 
 
 def _strip_resource_prefix(resource_id: str) -> str:

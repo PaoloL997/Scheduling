@@ -13,13 +13,12 @@ releases them at ``actual_finish``.
 
 from __future__ import annotations
 
-from datetime import date
 
+from ui.services.resource_conflicts import occupied_resource_ids
 from ui.services.problem_detection import (
     _CAT_TO_TIPO,
     _TIPO_LABELS,
     _TIPO_TO_CAT,
-    _resource_pairs,
     _serialize_overlap_resource,
     find_resource_overlaps,
     overdue_not_started,
@@ -41,26 +40,6 @@ class OverlapReassignError(Exception):
     def __init__(self, message: str, *, status_code: int = 400) -> None:
         super().__init__(message)
         self.status_code = status_code
-
-
-def occupied_ids_with_delay(
-    tipo: str,
-    data_inizio: date,
-    data_fine: date,
-    exclude_activity_id: int | None,
-    activities: list | None = None,
-    pairs: dict[int, set[tuple[str, str]]] | None = None,
-) -> set[str]:
-    """Resource IDs of *tipo* occupying ``[data_inizio, data_fine]``.
-
-    Thin wrapper kept for call-site compatibility: occupancy now has a single
-    definition in :func:`ui.services.resource_conflicts.occupation_window`,
-    which :func:`~ui.services.resource_conflicts.occupied_resource_ids`
-    already applies.  ``activities`` and ``pairs`` are accepted and ignored.
-    """
-    from ui.services.resource_conflicts import occupied_resource_ids
-
-    return occupied_resource_ids(tipo, data_inizio, data_fine, exclude_activity_id)
 
 
 def _inventory_model(tipo):
@@ -272,7 +251,7 @@ def pick_free_spare(tipo: str, from_uid: str, att) -> dict | None:
         return None
 
     start, end = candidate_window(att.data_inizio, att.data_fine, att)
-    occupied = occupied_ids_with_delay(tipo, start, end, att.pk)
+    occupied = occupied_resource_ids(tipo, start, end, att.pk)
     busy = _open_assignment_ids(tipo, att.pk)
     availability = _blocked_availability(att)
     cat = _TIPO_TO_CAT.get(tipo)
@@ -340,17 +319,10 @@ def _format_suggestion_summary(
     return " ".join(_format_swap_line(row) for row in replacements)
 
 
-def build_suggestion(
-    blocked,
-    overlap_item: dict,
-    activities: list,
-    pairs: dict[int, set[tuple[str, str]]] | None = None,
-) -> dict:
+def build_suggestion(blocked, overlap_item: dict, activities: list) -> dict:
     """Build a replacement proposal for one blocked/late overlap pair."""
     from ui.services.activity_inventory import _open_assignment_ids
 
-    if pairs is None:
-        pairs = {a.pk: _resource_pairs(a) for a in activities}
     start = blocked.data_inizio
     end = blocked.data_fine
     replacements: list[dict] = []
@@ -401,9 +373,7 @@ def build_suggestion(
         uid = res.get("uid")
         if not tipo or not uid:
             continue
-        occupied = occupied_ids_with_delay(
-            tipo, start, end, blocked.pk, activities, pairs
-        )
+        occupied = occupied_resource_ids(tipo, start, end, blocked.pk)
         busy = _open_assignment_ids(tipo, blocked.pk)
         cat = _TIPO_TO_CAT.get(tipo)
         candidates = (availability or {}).get(cat) if cat else None
@@ -447,7 +417,6 @@ def enrich_overlaps_with_suggestions(
         return overlaps_by_pk
     if activities is None:
         activities = list(Attivita.objects.prefetch_related("risorse"))
-    pairs = {a.pk: _resource_pairs(a) for a in activities}
     by_id = {a.pk: a for a in activities}
     for items in overlaps_by_pk.values():
         for item in items:
@@ -464,7 +433,7 @@ def enrich_overlaps_with_suggestions(
                 continue
             key = (pk, item.get("peer_orm_id"))
             if key not in cache:
-                cache[key] = build_suggestion(blocked, item, activities, pairs)
+                cache[key] = build_suggestion(blocked, item, activities)
             item["suggestion"] = cache[key]
     for pk, items in overlaps_by_pk.items():
         for item in items:

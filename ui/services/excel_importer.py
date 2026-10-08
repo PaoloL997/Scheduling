@@ -41,9 +41,6 @@ logger = logging.getLogger(__name__)
 
 _VALID_CATEGORIES = {"Generatore", "Testa", "Mandrino", "Tastatore", "Maschera"}
 
-# The five column names that must appear in the Excel header.
-_EXCEL_COLUMNS = ["categoria", "uid", "misura / modello", "note", "stabilimento"]
-
 # For each category: maps Excel column name → ORM field name.
 _CATEGORY_FIELD_MAP: dict[str, dict[str, str]] = {
     "Generatore": {

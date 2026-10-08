@@ -32,15 +32,6 @@ from ui.services.resource_display import (
     format_activity_resources_html,
 )
 
-#: Aggregate commessa statuses in display priority order.
-JOB_STATUS_SORT_ORDER = {
-    "rischio_penale": 0,
-    "in_ritardo": 1,
-    "in_tempo": 2,
-    "pianificata": 3,
-    "non_pianificata": 4,
-}
-
 _JOB_STATUS_LABELS = {
     "rischio_penale": "RISCHIO PENALE",
     "in_ritardo": "IN RITARDO",
