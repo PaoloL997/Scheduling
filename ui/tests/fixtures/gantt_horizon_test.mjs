@@ -35,16 +35,16 @@ assert(typeof GanttChart.summarizeCommessaTasks === 'function', 'summarizeCommes
   // Counters come from the tasks; the status is the server's aggregate
   // (``jobs[job_id]`` of /api/gantt/), passed as the second argument.
   const s0 = GanttChart.summarizeCommessaTasks([
-    { start: '2099-06-01', finish: '2099-06-05' },
-    { start: '2099-06-08', finish: '2099-06-12' },
+    { start: '2099-06-01', finish: '2099-06-05', work_done: 0, work_total: 5 },
+    { start: '2099-06-08', finish: '2099-06-12', work_done: 0, work_total: 5 },
   ], { status: 'pianificata' });
   assert(s0.total === 2 && s0.pct === 0 && s0.status === 'Pianificata', `planned summary got ${s0.status}`);
 
-  // Mon–Fri 2099-06-01..05 = 5 working days; completed → 100% of that activity.
-  // Second activity not started → 0/5. Total = 5/10 → 50%.
+  // Progress comes from the server: 5/5 done on the first activity, 0/5 on
+  // the second. Total = 5/10 → 50%.
   const s1 = GanttChart.summarizeCommessaTasks([
-    { start: '2099-06-01', finish: '2099-06-05', actual_start: '2099-06-01', actual_finish: '2099-06-05' },
-    { start: '2099-06-08', finish: '2099-06-12' },
+    { start: '2099-06-01', finish: '2099-06-05', actual_start: '2099-06-01', actual_finish: '2099-06-05', work_done: 5, work_total: 5 },
+    { start: '2099-06-08', finish: '2099-06-12', work_done: 0, work_total: 5 },
   ], { status: 'in_tempo' });
   assert(s1.total === 2 && s1.pct === 50 && s1.status === 'In tempo', `pct/status got pct=${s1.pct} status=${s1.status}`);
 

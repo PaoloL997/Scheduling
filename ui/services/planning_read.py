@@ -141,6 +141,37 @@ def compute_delay_days(
     return max(delay, 1)
 
 
+def compute_work_progress(
+    data_inizio: date | None,
+    data_fine: date | None,
+    actual_start: date | None,
+    actual_finish: date | None,
+    today: date,
+) -> tuple[int, int]:
+    """Return ``(done, total)`` working days of an activity.
+
+    ``total`` is the planned span in working days (at least one when both
+    planned dates exist).  ``done`` is the whole span once finished, the
+    working days elapsed since ``actual_start`` (capped at the span) while
+    running, zero otherwise.
+    """
+    if data_inizio is None or data_fine is None:
+        return 0, 0
+    from src.optimization.calendar import working_days_in_calendar_span
+
+    total = working_days_in_calendar_span(data_inizio, data_fine)
+    if actual_finish:
+        return total, total
+    if actual_start is None or today < actual_start:
+        return 0, total
+    return min(total, working_days_in_calendar_span(actual_start, today)), total
+
+
+def progress_percent(done: int, total: int) -> int:
+    """Whole percentage, halves rounded up like the former client code."""
+    return int(done * 100 / total + 0.5) if total else 0
+
+
 def activity_state_key(pills: list[dict]) -> str:
     """Collapse the pills into the single state the commessa counters use."""
     keys = [p["key"] for p in pills or []]
@@ -314,6 +345,9 @@ def attivita_to_task_dict(
         a.data_inizio, a.data_fine, a.actual_start, a.actual_finish, reference
     )
     expected_finish = effective_finish(a)
+    work_done, work_total = compute_work_progress(
+        a.data_inizio, a.data_fine, a.actual_start, a.actual_finish, reference
+    )
 
     tp60 = bool(a.tp60_custom)
     min_requirements = get_testa_min_requirements(
@@ -365,6 +399,8 @@ def attivita_to_task_dict(
         "status_pills_json": json.dumps(status_pills),
         "state_key": activity_state_key(status_pills),
         "delay_days": delay_days,
+        "work_done": work_done,
+        "work_total": work_total,
         "min_requirements": min_requirements,
         "min_requirements_json": json.dumps(min_requirements),
         "missing_minimum": missing_minimum,
@@ -457,12 +493,17 @@ def fetch_jobs() -> list[dict]:
 def _job_aggregates(job: dict, activities: list[dict]) -> dict:
     """Return *job* extended with the fields every client displays as-is."""
     status = aggregate_job_status(activities, job.get("delivery_date"))
+    work_done = sum(int(a.get("work_done") or 0) for a in activities)
+    work_total = sum(int(a.get("work_total") or 0) for a in activities)
     return {
         **job,
         "n_open_problems": count_job_open_problems(activities),
         "status": status,
         "status_label": _JOB_STATUS_LABELS[status],
         "completed": is_job_completed(activities),
+        "work_done": work_done,
+        "work_total": work_total,
+        "progress_pct": progress_percent(work_done, work_total),
     }
 
 
@@ -524,6 +565,7 @@ def fetch_gantt() -> dict:
             "status_label": agg["status_label"],
             "completed": agg["completed"],
             "n_open_problems": agg["n_open_problems"],
+            "progress_pct": agg["progress_pct"],
         }
     return {"tasks": tasks, "deadlines": deadlines, "jobs": jobs}
 

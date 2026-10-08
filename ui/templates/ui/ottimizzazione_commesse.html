@@ -487,12 +487,6 @@
   const messagesEl = document.getElementById('ott-wiz-messages');
   const CONFIRM_LABEL = 'Ottimizza';
 
-  function getCsrfToken() {
-    const input = document.querySelector('#ott-draft-form input[name=csrfmiddlewaretoken]');
-    if (input && input.value) return input.value;
-    const m = document.cookie.match(/csrftoken=([^;]+)/);
-    return m ? decodeURIComponent(m[1]) : '';
-  }
 
   function showApiError(message) {
     if (!messagesEl) return;

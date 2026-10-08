@@ -330,13 +330,13 @@
         { name: 'in_manutenzione', label: 'Manutenzione', type: 'checkbox', skipAdd: true },
       ],
       renderRow: function(d) {
-        return `<td class="td-primary">${esc(d.uid)}</td>
-                <td>${esc(d.model)}</td>
+        return `<td class="td-primary">${escOrDash(d.uid)}</td>
+                <td>${escOrDash(d.model)}</td>
                 <td>${stabBadge(d.plant)}</td>
-                <td class="td-muted">${esc(d.notes)}</td>
+                <td class="td-muted">${escOrDash(d.notes)}</td>
                 <td class="inv-avail-cell">${availCellHtml('Generatore', d.uid)}</td>
                 <td class="inv-maint-cell">${maintSwitchHtml('Generatore', d.uid, isMaintOn(d.in_manutenzione))}</td>
-                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Generatore','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
+                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Generatore','${escOrDash(d.uid)}',this)" title="Elimina">🗑</button></td>`;
       }
     },
     mandrini: {
@@ -349,12 +349,12 @@
         { name: 'notes',    label: 'Note' },
       ],
       renderRow: function(d) {
-        return `<td class="td-primary">${esc(d.uid)}</td>
-                <td>${esc(d.diameter)}</td>
+        return `<td class="td-primary">${escOrDash(d.uid)}</td>
+                <td>${escOrDash(d.diameter)}</td>
                 <td>${stabBadge(d.plant)}</td>
-                <td class="td-muted">${esc(d.notes)}</td>
+                <td class="td-muted">${escOrDash(d.notes)}</td>
                 <td class="inv-avail-cell">${availCellHtml('Mandrino', d.uid)}</td>
-                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Mandrino','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
+                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Mandrino','${escOrDash(d.uid)}',this)" title="Elimina">🗑</button></td>`;
       }
     },
     maschere: {
@@ -367,12 +367,12 @@
         { name: 'center_distance', label: 'Interasse' },
       ],
       renderRow: function(d) {
-        return `<td class="td-primary">${esc(d.uid)}</td>
-                <td>${esc(d.pitch)}</td>
+        return `<td class="td-primary">${escOrDash(d.uid)}</td>
+                <td>${escOrDash(d.pitch)}</td>
                 <td>${stabBadge(d.plant)}</td>
-                <td class="td-right">${esc(d.center_distance)}</td>
+                <td class="td-right">${escOrDash(d.center_distance)}</td>
                 <td class="inv-avail-cell">${availCellHtml('Maschera', d.uid)}</td>
-                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Maschera','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
+                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Maschera','${escOrDash(d.uid)}',this)" title="Elimina">🗑</button></td>`;
       }
     },
     tastatori: {
@@ -385,12 +385,12 @@
         { name: 'notes',    label: 'Note' },
       ],
       renderRow: function(d) {
-        return `<td class="td-primary">${esc(d.uid)}</td>
-                <td>${esc(d.diameter)}</td>
+        return `<td class="td-primary">${escOrDash(d.uid)}</td>
+                <td>${escOrDash(d.diameter)}</td>
                 <td>${stabBadge(d.plant)}</td>
-                <td class="td-muted">${esc(d.notes)}</td>
+                <td class="td-muted">${escOrDash(d.notes)}</td>
                 <td class="inv-avail-cell">${availCellHtml('Tastatore', d.uid)}</td>
-                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Tastatore','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
+                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Tastatore','${escOrDash(d.uid)}',this)" title="Elimina">🗑</button></td>`;
       }
     },
     teste: {
@@ -404,23 +404,19 @@
         { name: 'in_manutenzione', label: 'Manutenzione', type: 'checkbox', skipAdd: true },
       ],
       renderRow: function(d) {
-        return `<td class="td-primary">${esc(d.uid)}</td>
-                <td>${esc(d.model)}</td>
+        return `<td class="td-primary">${escOrDash(d.uid)}</td>
+                <td>${escOrDash(d.model)}</td>
                 <td>${stabBadge(d.plant)}</td>
-                <td class="td-muted">${esc(d.notes)}</td>
+                <td class="td-muted">${escOrDash(d.notes)}</td>
                 <td class="inv-avail-cell">${availCellHtml('Testa', d.uid)}</td>
                 <td class="inv-maint-cell">${maintSwitchHtml('Testa', d.uid, isMaintOn(d.in_manutenzione))}</td>
-                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Testa','${esc(d.uid)}',this)" title="Elimina">🗑</button></td>`;
+                <td class="td-actions"><button class="btn-delete" onclick="deleteRow('Testa','${escOrDash(d.uid)}',this)" title="Elimina">🗑</button></td>`;
       }
     },
   };
 
   let activeKey = 'generatori';
 
-  function esc(val) {
-    if (val == null) return '—';
-    return String(val).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  }
 
   function isMaintOn(val) {
     return val === true || val === 'true' || val === '1' || val === 1;
@@ -431,8 +427,8 @@
     var cls = on ? 'inv-maint-switch is-on' : 'inv-maint-switch';
     var disabled = window.CAN_WRITE ? '' : ' disabled title="Accesso in sola lettura"';
     return '<button type="button" class="' + cls + '"' + disabled + ' role="switch" aria-checked="' + pressed +
-           '" aria-label="Manutenzione" onclick="toggleMaintenance(\'' + esc(table) + '\',\'' +
-           esc(uid) + '\', this)"><span class="inv-maint-knob"></span></button>';
+           '" aria-label="Manutenzione" onclick="toggleMaintenance(\'' + escOrDash(table) + '\',\'' +
+           escOrDash(uid) + '\', this)"><span class="inv-maint-knob"></span></button>';
   }
 
   function applyMaintenanceRow(tr, on) {
@@ -495,8 +491,8 @@
 
   function availCellHtml(table, uid) {
     var info = availInfo(table, uid);
-    var tip = esc(info.tooltip || '');
-    return '<span class="inv-avail inv-avail--' + esc(info.stato) + '" tabindex="0" role="img"' +
+    var tip = escOrDash(info.tooltip || '');
+    return '<span class="inv-avail inv-avail--' + escOrDash(info.stato) + '" tabindex="0" role="img"' +
            ' aria-label="' + tip + '" data-tooltip="' + tip + '">' +
            '<span class="inv-avail-dot"></span></span>';
   }
@@ -568,14 +564,8 @@
   window.addEventListener('resize', closeAvailPopover);
   window.addEventListener('scroll', closeAvailPopover, true);
 
-  const STAB_COLORS = {{ plant_colors_json|safe }};
+  window.STAB_COLORS = {{ plant_colors_json|safe }};
 
-  function stabBadge(name) {
-    if (!name) return '—';
-    const c = STAB_COLORS[name];
-    const style = c ? ` style="--stab-c:${c}"` : '';
-    return `<span class="stab-badge"${style}>${esc(name)}</span>`;
-  }
 
   document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.stab-plant-cell[data-stab]').forEach(function(td) {
@@ -811,7 +801,7 @@
       }
       return '<div class="det-field">' +
              '<span class="det-label">' + label + '</span>' +
-             '<span class="det-value">' + esc(val) + '</span>' +
+             '<span class="det-value">' + escOrDash(val) + '</span>' +
              '</div>';
     }).join('');
   }
@@ -832,7 +822,7 @@
         control = '<input class="det-input" id="det-field-' + f.name + '" type="checkbox"' +
                   (isMaintOn(d[f.name]) ? ' checked' : '') + '>';
       } else {
-        control = '<input class="det-input" id="det-field-' + f.name + '" type="text" value="' + esc(val) + '">';
+        control = '<input class="det-input" id="det-field-' + f.name + '" type="text" value="' + escOrDash(val) + '">';
       }
       return '<div class="det-field"><span class="det-label">' + label + '</span>' + control + '</div>';
     }).join('');
@@ -1014,13 +1004,13 @@
     var el = document.getElementById('import-result');
     var html = '';
     if (res.type === 'error') {
-      html = '<div class="modal-error" style="display:block;">' + esc(res.msg) + '</div>';
+      html = '<div class="modal-error" style="display:block;">' + escOrDash(res.msg) + '</div>';
     } else {
-      html = '<div style="color:var(--color-success,#16a34a);font-size:0.85rem;padding:0.5rem 0;">' + esc(res.msg) + '</div>';
+      html = '<div style="color:var(--color-success,#16a34a);font-size:0.85rem;padding:0.5rem 0;">' + escOrDash(res.msg) + '</div>';
       if (res.errors && res.errors.length) {
         html += '<details style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-subtle);">' +
                 '<summary style="cursor:pointer;">Errori (' + res.errors.length + ')</summary><ul style="margin:.5rem 0 0 1rem;">' +
-                res.errors.map(function(e) { return '<li>' + esc(e) + '</li>'; }).join('') +
+                res.errors.map(function(e) { return '<li>' + escOrDash(e) + '</li>'; }).join('') +
                 '</ul></details>';
       }
     }

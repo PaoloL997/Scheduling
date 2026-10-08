@@ -128,6 +128,16 @@
   italiane). Risposte, messaggi e voci di log sono invariati; `views.py`
   perde circa 500 righe.
 
+- **Helper JavaScript condivisi e avanzamento calcolato dal server.**
+  `ui/static/ui/common.js`, caricato da `base.html`, definisce una volta
+  `esc`, `escOrDash`, `stabBadge`, `getCsrfToken` e `parseIsoDay`; le copie in
+  Pianificazione, Inventario e nelle pagine di ottimizzazione sono sparite,
+  `fmtDate` dei risultati usa quella del Gantt. I giorni lavorativi fatti e
+  previsti di ogni attivita' (`work_done` / `work_total`) e la percentuale di
+  avanzamento della commessa (`progress_pct`) arrivano dal server in ogni
+  riga, risposta di scrittura e payload del Gantt: la regola non e' piu'
+  ricalcolata in due copie JavaScript.
+
 ### Removed
 
 - Codice morto: `ui/forms.py` e i template del vecchio wizard a pagine

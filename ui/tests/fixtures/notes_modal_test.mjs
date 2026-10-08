@@ -15,8 +15,12 @@ const tpl = readFileSync(
   'utf8'
 );
 
+// Helpers every page shares (esc, stabBadge, getCsrfToken, parseIsoDay) are
+// served by base.html from common.js: load them before the page script.
+const commonSrc = readFileSync(join(root, 'ui', 'static', 'ui', 'common.js'), 'utf8');
+
 const scriptBlocks = [...tpl.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-const js = scriptBlocks
+const js = commonSrc + '\n' + scriptBlocks
   .sort((a, b) => b.length - a.length)[0]
   // Django context values: an empty list satisfies both the `.length` and the
   // lookup-table uses in the page init code.

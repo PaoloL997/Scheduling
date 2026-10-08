@@ -189,12 +189,6 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
   }
 
-  function fmtDate(s) {
-    if (!s) return '—';
-    return new Date(s + 'T00:00:00').toLocaleDateString('it-IT', {
-      day: '2-digit', month: 'short', year: 'numeric',
-    });
-  }
 
   function activityKey(t) {
     const parts = [];
@@ -313,11 +307,11 @@
           '<td class="ott-res-table-name">' +
             '<span class="ott-res-table-label" style="--ott-comm-c:' + color + '">' + escHtml(label) + '</span>' +
           '</td>' +
-          '<td class="ott-res-table-date">' + fmtDate(b.start) + '</td>' +
-          '<td class="' + finishCellClass(b.finish, b.job_id) + '">' + fmtDate(b.finish) + '</td>' +
+          '<td class="ott-res-table-date">' + GanttChart.fmtDate(b.start) + '</td>' +
+          '<td class="' + finishCellClass(b.finish, b.job_id) + '">' + GanttChart.fmtDate(b.finish) + '</td>' +
           '<td class="ott-res-table-resources">' + escHtml(resBefore) + '</td>' +
-          '<td class="ott-res-table-date">' + fmtDate(a.start) + '</td>' +
-          '<td class="' + finishCellClass(a.finish, a.job_id) + '">' + fmtDate(a.finish) + '</td>' +
+          '<td class="ott-res-table-date">' + GanttChart.fmtDate(a.start) + '</td>' +
+          '<td class="' + finishCellClass(a.finish, a.job_id) + '">' + GanttChart.fmtDate(a.finish) + '</td>' +
           '<td class="ott-res-table-resources">' + escHtml(resAfter) + '</td>' +
         '</tr>'
       );
@@ -453,10 +447,6 @@
   const acceptError = document.getElementById('ott-res-accept-error');
   const ACCEPT_LABEL = 'Accetta';
 
-  function getCsrfToken() {
-    const m = document.cookie.match(/csrftoken=([^;]+)/);
-    return m ? decodeURIComponent(m[1]) : '';
-  }
 
   function showAcceptError(message) {
     if (!acceptError) return;

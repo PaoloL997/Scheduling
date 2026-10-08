@@ -310,38 +310,13 @@
     return isNaN(d.getTime()) ? null : d;
   }
 
-  function isWorkingDay(day) {
-    const wd = day.getDay();
-    return wd >= 1 && wd <= 5;
-  }
-
-  function countWorkingDaysInclusive(start, end) {
-    if (!start || !end) return 0;
-    if (end < start) return 1;
-    let working = 0;
-    const cur = new Date(start.getTime());
-    const last = new Date(end.getTime());
-    while (cur <= last) {
-      if (isWorkingDay(cur)) working += 1;
-      cur.setDate(cur.getDate() + 1);
-    }
-    return Math.max(1, working);
-  }
-
-  // Same formula as pianificazione `_activityWorkProgress` / `_pianJobStats`.
+  /** Working days done / planned, computed by the server
+   *  (``work_done`` / ``work_total`` on every task of /api/gantt/). */
   function activityWorkProgress(task) {
-    const planStart = parseIsoNoon(task && task.start);
-    const planFinish = parseIsoNoon(task && task.finish);
-    if (!planStart || !planFinish) return { done: 0, total: 0 };
-    const total = countWorkingDaysInclusive(planStart, planFinish);
-    if (parseIsoNoon(task.actual_finish)) return { done: total, total };
-    const actualStart = parseIsoNoon(task.actual_start);
-    if (!actualStart) return { done: 0, total };
-    const today = new Date();
-    today.setHours(12, 0, 0, 0);
-    if (today < actualStart) return { done: 0, total };
-    const worked = countWorkingDaysInclusive(actualStart, today);
-    return { done: Math.min(total, worked), total };
+    return {
+      done: Number(task && task.work_done) || 0,
+      total: Number(task && task.work_total) || 0,
+    };
   }
 
   const JOB_STATUS_LABELS = {
@@ -1797,5 +1772,6 @@
   GanttChart.summarizeCommessaTasks = summarizeCommessaTasks;
   GanttChart.taskDelayDays = taskDelayDays;
   GanttChart.filterTasks = filterTasks;
+  GanttChart.fmtDate = fmtDate;
   global.GanttChart = GanttChart;
 })(typeof window !== 'undefined' ? window : this);

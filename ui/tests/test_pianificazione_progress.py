@@ -42,7 +42,9 @@ class PianificazioneProgressBarTests(TestCase):
         self.assertIn("data-job-progress-fill", html)
         self.assertIn("data-job-progress-pct", html)
         self.assertIn("Completamento", html)
-        self.assertIn("function _countWorkingDaysInclusive(", html)
+        # Progress comes from the server on every row; the page only sums it.
+        self.assertIn('data-work-done="0"', html)
+        self.assertIn('data-work-total="5"', html)
         self.assertIn("function _activityWorkProgress(", html)
         self.assertIn("stats.progressPct", html)
 
@@ -58,7 +60,9 @@ class PianificazioneProgressBarTests(TestCase):
         self.assertIn('data-actual-start="', html)
         self.assertIn('class="pian-head-progress"', html)
         self.assertIn("data-job-progress-fill", html)
-        self.assertIn("_activityWorkProgress(", html)
+        # Started two days ago: one to three working days in, never zero.
+        self.assertRegex(html, r'data-work-done="[1-5]"')
+        self.assertIn('data-work-total="5"', html)
 
     def test_open_problems_count_in_job_header(self) -> None:
         att = Attivita.objects.get(commessa="C001")

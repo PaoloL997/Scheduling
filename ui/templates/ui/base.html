@@ -12,6 +12,7 @@
 </head>
 <body{% if user.is_authenticated and not can_write %} class="is-readonly"{% endif %} data-ruolo="{{ user_ruolo }}">
 
+<script src="{% static 'ui/common.js' %}"></script>
 <script>
     /* Permission layer of the signed-in user: "admin", "scrittura", "lettura". */
     window.USER_RUOLO = "{{ user_ruolo|escapejs }}";

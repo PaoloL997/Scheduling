@@ -120,6 +120,8 @@
                    data-note-count="{{ task.note_count|default:0 }}"
                    data-state-key="{{ task.state_key }}"
                    data-delay-days="{{ task.delay_days }}"
+                   data-work-done="{{ task.work_done }}"
+                   data-work-total="{{ task.work_total }}"
                    data-activity-id="{{ task.activity_id }}"
                    data-job-id="{{ task.job_id }}"
                    data-commessa="{{ task.commessa }}"
@@ -867,6 +869,8 @@ function _applyActivityUpdates(json) {
     if (u.note_count != null) row.dataset.noteCount = String(u.note_count);
     if (u.state_key) row.dataset.stateKey = u.state_key;
     if (u.delay_days != null) row.dataset.delayDays = String(u.delay_days);
+    if (u.work_done != null) row.dataset.workDone = String(u.work_done);
+    if (u.work_total != null) row.dataset.workTotal = String(u.work_total);
     if (u.resources_by_tipo) {
       row.dataset.resources = u.resources || '';
       row.dataset.resourcesTyped = JSON.stringify(u.resources_by_tipo);
@@ -984,44 +988,13 @@ function _pianActivityState(row) {
   return row.dataset.stateKey || 'non_pianificata';
 }
 
-function _pianParseIsoDay(raw) {
-  const s = String(raw || '').trim().slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
-  const d = new Date(`${s}T12:00:00`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function _pianIsWorkingDay(day) {
-  const wd = day.getDay();
-  return wd >= 1 && wd <= 5;
-}
-
-function _countWorkingDaysInclusive(start, end) {
-  if (!start || !end) return 0;
-  if (end < start) return 1;
-  let working = 0;
-  const cur = new Date(start.getTime());
-  const last = new Date(end.getTime());
-  while (cur <= last) {
-    if (_pianIsWorkingDay(cur)) working += 1;
-    cur.setDate(cur.getDate() + 1);
-  }
-  return Math.max(1, working);
-}
-
+// Working days done / planned, computed by the server
+// (ui/services/planning_read.py) and refreshed from every write response.
 function _activityWorkProgress(row) {
-  const planStart = _pianParseIsoDay(row.dataset.start);
-  const planFinish = _pianParseIsoDay(row.dataset.finish);
-  if (!planStart || !planFinish) return { done: 0, total: 0 };
-  const total = _countWorkingDaysInclusive(planStart, planFinish);
-  if (_pianParseIsoDay(row.dataset.actualFinish)) return { done: total, total };
-  const actualStart = _pianParseIsoDay(row.dataset.actualStart);
-  if (!actualStart) return { done: 0, total };
-  const today = new Date();
-  today.setHours(12, 0, 0, 0);
-  if (today < actualStart) return { done: 0, total };
-  const worked = _countWorkingDaysInclusive(actualStart, today);
-  return { done: Math.min(total, worked), total };
+  return {
+    done: parseInt(row.dataset.workDone || '0', 10) || 0,
+    total: parseInt(row.dataset.workTotal || '0', 10) || 0,
+  };
 }
 
 function _pianJobStats(commessa) {
@@ -1094,7 +1067,7 @@ function _pianGroupStatusKey(group) {
 function _pianEarliestStartMs(commessa) {
   let min = Infinity;
   _pianRowsForCommessa(commessa).forEach(row => {
-    const d = _pianParseIsoDay(row.dataset.start) || _pianParseIsoDay(row.dataset.actualStart);
+    const d = parseIsoDay(row.dataset.start) || parseIsoDay(row.dataset.actualStart);
     if (d) {
       const ms = d.getTime();
       if (ms < min) min = ms;
@@ -1104,7 +1077,7 @@ function _pianEarliestStartMs(commessa) {
 }
 
 function _pianRowStartMs(row) {
-  const d = _pianParseIsoDay(row.dataset.start) || _pianParseIsoDay(row.dataset.actualStart);
+  const d = parseIsoDay(row.dataset.start) || parseIsoDay(row.dataset.actualStart);
   return d ? d.getTime() : Number.POSITIVE_INFINITY;
 }
 
@@ -3084,6 +3057,8 @@ function _wizAppendRow(ormId, warningCount, noteCount, task, job) {
   div.dataset.actualFinish = '';
   div.dataset.stateKey     = (task && task.state_key) || 'pianificata';
   div.dataset.delayDays    = task ? String(task.delay_days ?? 0) : '0';
+  div.dataset.workDone     = task ? String(task.work_done ?? 0) : '0';
+  div.dataset.workTotal    = task ? String(task.work_total ?? 0) : '0';
   div.dataset.plant        = r.stabilimento;
   div.dataset.responsible  = r.responsabile;
   div.dataset.resources      = allRes;
@@ -3298,9 +3273,6 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ── Detail / Edit modal ───────────────────────────────────────────────────────
-function esc(s) {
-  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
 
 const _RES_TIPO_LABELS = {
   testa: 'Testa', generatore: 'Generatore',
@@ -3412,15 +3384,8 @@ function _pianResPopoverClick(e) {
 
 const PIAN_STAB_OPTIONS = {{ stabilimenti_json|safe }};
 const PIAN_RESP_OPTIONS = {{ responsabili_json|safe }};
-const STAB_COLORS = {{ plant_colors_json|safe }};
+window.STAB_COLORS = {{ plant_colors_json|safe }};
 
-function stabBadge(name, extraClass) {
-  if (!name) return '—';
-  const c = STAB_COLORS[name];
-  const style = c ? ` style="--stab-c:${c}"` : '';
-  const cls = extraClass ? ` ${extraClass}` : '';
-  return `<span class="stab-badge${cls}"${style}>${esc(name)}</span>`;
-}
 
 // Post-process server-rendered plant cells in the activity table
 document.addEventListener('DOMContentLoaded', () => {
@@ -3848,7 +3813,7 @@ async function saveEdit() {
   try {
     const resp = await fetch(url, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCsrfToken() },
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
       body: JSON.stringify(payload),
     });
     const json = await resp.json();
@@ -3894,6 +3859,8 @@ async function saveEdit() {
       if (json.task) {
         tr.dataset.stateKey = json.task.state_key || '';
         tr.dataset.delayDays = String(json.task.delay_days ?? 0);
+        tr.dataset.workDone = String(json.task.work_done ?? 0);
+        tr.dataset.workTotal = String(json.task.work_total ?? 0);
       }
       _pianSetJobStatus(newData.commessa, json.job);
       _applyActivityUpdates(json);
@@ -3968,10 +3935,6 @@ function _showPianDetWarning(msg) {
   el.style.display = '';
 }
 
-function _getCsrfToken() {
-  const m = document.cookie.match(/csrftoken=([^;]+)/);
-  return m ? m[1] : '';
-}
 
 function _parseMoneyInput(raw) {
   const text = String(raw ?? '').trim().replace(/\u00a0/g, '').replace(/\s/g, '');
@@ -4009,7 +3972,7 @@ async function deleteEntity() {
   try {
     const res = await fetch(url, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCsrfToken() },
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
       body: JSON.stringify(body),
     });
     const json = await res.json();
@@ -4355,7 +4318,7 @@ async function acceptReschedule(pk) {
   try {
     const resp = await fetch(`/api/attivita/${pk}/riprogramma/accetta/`, {
       method: 'POST',
-      headers: { 'X-CSRFToken': _getCsrfToken() },
+      headers: { 'X-CSRFToken': getCsrfToken() },
     });
     const data = await resp.json();
     if (!data.ok) {
@@ -4375,7 +4338,7 @@ async function rejectReschedule(pk) {
   try {
     const resp = await fetch(`/api/attivita/${pk}/riprogramma/rifiuta/`, {
       method: 'POST',
-      headers: { 'X-CSRFToken': _getCsrfToken() },
+      headers: { 'X-CSRFToken': getCsrfToken() },
     });
     await resp.json();
     if (_notesModalOrmId) openNotesModal(_notesModalOrmId);
@@ -4494,7 +4457,7 @@ async function saveNewCommessa() {
   try {
     const resp = await fetch('/api/jobs/create/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _getCsrfToken() },
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
       body: JSON.stringify(payload),
     });
     const data = await resp.json();

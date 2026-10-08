@@ -727,6 +727,7 @@ def _activity_update_payload(attivita) -> dict:
         activity_state_key,
         compute_activity_status,
         compute_delay_days,
+        compute_work_progress,
     )
 
     risorse_all = list(RisorsaAttivita.objects.filter(attivita=attivita))
@@ -747,6 +748,8 @@ def _activity_update_payload(attivita) -> dict:
         "note_count": sum(1 for p in problemi if p.risolto),
         "state_key": activity_state_key(compute_activity_status(*dates, today)),
         "delay_days": compute_delay_days(*dates, today),
+        "work_done": compute_work_progress(*dates, today)[0],
+        "work_total": compute_work_progress(*dates, today)[1],
     }
 
 

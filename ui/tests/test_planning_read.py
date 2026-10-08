@@ -19,6 +19,8 @@ from ui.models import (
 )
 from ui.services.planning_read import (
     compute_delay_days,
+    compute_work_progress,
+    progress_percent,
     fetch_gantt,
     fetch_grouped,
     fetch_tasks,
@@ -83,6 +85,30 @@ class DelayDaysTest(TestCase):
             0,
         )
         self.assertEqual(compute_delay_days(None, None, None, None, TODAY), 0)
+
+
+class WorkProgressTest(TestCase):
+    """Working days done / planned, the figure behind every progress bar."""
+
+    def test_progress(self) -> None:
+        mon, fri = date(2026, 6, 1), date(2026, 6, 5)
+        self.assertEqual(compute_work_progress(None, fri, None, None, TODAY), (0, 0))
+        self.assertEqual(compute_work_progress(mon, fri, None, None, TODAY), (0, 5))
+        self.assertEqual(compute_work_progress(mon, fri, mon, fri, TODAY), (5, 5))
+        # Started Monday, today is Wednesday: three working days in.
+        self.assertEqual(
+            compute_work_progress(mon, fri, mon, None, date(2026, 6, 3)), (3, 5)
+        )
+        # Running long past the planned span never exceeds the span.
+        self.assertEqual(compute_work_progress(mon, fri, mon, None, TODAY), (5, 5))
+        # Start recorded in the future: nothing done yet.
+        self.assertEqual(
+            compute_work_progress(mon, fri, date(2026, 6, 4), None, date(2026, 6, 2)),
+            (0, 5),
+        )
+        self.assertEqual(progress_percent(1, 3), 33)
+        self.assertEqual(progress_percent(1, 2), 50)
+        self.assertEqual(progress_percent(0, 0), 0)
 
 
 class ReadLayerIsPureTest(TestCase):
@@ -150,6 +176,10 @@ class ReadLayerIsPureTest(TestCase):
         groups = {g["job"]["commessa"]: g["job"] for g in fetch_grouped()}
         self.assertEqual(groups["C1"]["status"], "in_ritardo")
         self.assertEqual(groups["C1"]["status_label"], "IN RITARDO")
+        # Six planned, none started: a span to do, nothing done yet.
+        self.assertGreater(groups["C1"]["work_total"], 0)
+        self.assertEqual(groups["C1"]["work_done"], 0)
+        self.assertEqual(groups["C1"]["progress_pct"], 0)
         self.assertFalse(groups["C1"]["completed"])
         # A commessa with activities but no planned dates still reads
         # "pianificata": only an empty commessa is "non_pianificata".
