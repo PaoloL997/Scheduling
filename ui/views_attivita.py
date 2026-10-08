@@ -350,27 +350,26 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
         data_fine = date.fromisoformat(data["data_fine"])
     except (KeyError, ValueError):
         return JsonResponse({"ok": False, "error": "Date non valide."}, status=400)
+    if data_fine < data_inizio:
+        return JsonResponse(
+            {"ok": False, "error": "La fine prevista non puo' precedere l'inizio."},
+            status=400,
+        )
 
     bore = data.get("bore", {})
-    predecessor_ids = [
-        str(v).strip() for v in data.get("predecessors", []) if str(v).strip()
-    ]
 
-    if predecessor_ids:
-        valid_predecessors = set(
-            Attivita.objects.filter(commessa=commessa).values_list(
-                "activity_id", flat=True
-            )
+    from ui.services.precedences import resolve_predecessors
+
+    try:
+        predecessor_objs = resolve_predecessors(commessa, data.get("predecessors", []))
+    except ValueError:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Predecessor non validi per la commessa selezionata.",
+            },
+            status=400,
         )
-        invalid = [p for p in predecessor_ids if p not in valid_predecessors]
-        if invalid:
-            return JsonResponse(
-                {
-                    "ok": False,
-                    "error": "Predecessor non validi per la commessa selezionata.",
-                },
-                status=400,
-            )
 
     from ui.models import Job
 
@@ -475,14 +474,13 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
             bore_mid=_dec(bore.get("mid")),
             tube_pitch=_dec(bore.get("tube_pitch")),
             tp60_custom=bool(data.get("tp60_custom")),
-            predecessors=", ".join(predecessor_ids),
         )
 
         if tmp_path:
             default_storage.delete(tmp_path)
 
-        att.save()
-
+        # The Job row comes first, with its metadata: saving the activity
+        # links it to the Job of its commessa (creating a bare one otherwise).
         if new_job and new_job.get("commessa"):
             job_commessa = new_job["commessa"].strip()
             if job_commessa:
@@ -496,6 +494,10 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
                     },
                 )
 
+        att.save()
+        if predecessor_objs:
+            att.predecessori.set(predecessor_objs)
+
         risorsa_rows = [
             RisorsaAttivita(attivita=att, tipo=tipo, risorsa_id=rid)
             for tipo, rid in assignments_pairs
@@ -503,10 +505,11 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
         if risorsa_rows:
             RisorsaAttivita.objects.bulk_create(risorsa_rows)
 
-    # Detect and persist operational problems (outside atomic block so PKs are set)
-    from ui.services.problem_detection import detect_and_save_problems
+    # Reconcile the notes now that the rows exist: acquisto/spostamento for
+    # the new activity and, when it is planned in the past, its ritardo note.
+    from ui.services.reconcile import reconcile
 
-    warning_count = detect_and_save_problems(att, risorse_data)
+    reconcile([att.pk])
 
     from ui.services.operation_log import record_operation
 
@@ -517,7 +520,19 @@ def api_salva_attivita(request: HttpRequest) -> JsonResponse:
         riferimento=att.activity_id,
     )
 
-    return JsonResponse({"ok": True, "id": att.pk, "warning_count": warning_count})
+    from ui.services.planning_read import job_summary, load_task_dict
+
+    task = load_task_dict(att.pk)
+    return JsonResponse(
+        {
+            "ok": True,
+            "id": att.pk,
+            "warning_count": task["warning_count"] if task else 0,
+            "note_count": task["note_count"] if task else 0,
+            "task": task,
+            "job": job_summary(att.commessa),
+        }
+    )
 
 
 # ── AJAX: heatmap data ────────────────────────────────────────────────────────

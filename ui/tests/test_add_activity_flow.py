@@ -1,9 +1,10 @@
 """Tests for the add-activity wizard API flow."""
 
 import json
-from datetime import date
+from datetime import date, timedelta
 
 from django.test import Client, TestCase
+from django.utils.timezone import localdate
 
 from ui.models import (
     Attivita,
@@ -14,6 +15,11 @@ from ui.models import (
 )
 from ui.services.activity_inventory import find_modello_testa_in_db, get_testa_models
 from ui.tests.helpers import create_writer
+
+
+def _future(days: int) -> str:
+    """A planned date ahead of today: a past plan would also raise «ritardo»."""
+    return (localdate() + timedelta(days=days)).isoformat()
 
 
 class GetTestaModelsTests(TestCase):
@@ -237,7 +243,7 @@ class AddActivityFlowTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         att = Attivita.objects.get(activity="Qualifica")
-        self.assertEqual(att.predecessors, prev.activity_id)
+        self.assertEqual(att.predecessor_ids(), [prev.activity_id])
 
     def test_tp60_custom_flag_is_saved(self) -> None:
         """The wizard flag is persisted on the created activity."""
@@ -273,8 +279,8 @@ class AddActivityFlowTests(TestCase):
             "attivita": "Qualifica",
             "modello_testa": "TP60",
             "stabilimento": "Valbrembo",
-            "data_inizio": "2026-06-10",
-            "data_fine": "2026-06-12",
+            "data_inizio": _future(10),
+            "data_fine": _future(12),
             "risorse": {
                 "teste": ["T1"],
                 "generatori": ["G1"],
@@ -302,8 +308,8 @@ class AddActivityFlowTests(TestCase):
                 "attivita": "Qualifica",
                 "modello_testa": "TP60",
                 "stabilimento": "Valbrembo",
-                "data_inizio": "2026-06-10",
-                "data_fine": "2026-06-12",
+                "data_inizio": _future(10),
+                "data_fine": _future(12),
                 "risorse": {"teste": ["T1"], "generatori": ["G1"]},
             }
         )
@@ -337,4 +343,4 @@ class AddActivityFlowTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         att = Attivita.objects.get(commessa="C003", item="B2", activity="Qualifica")
-        self.assertEqual(att.predecessors, prev.activity_id)
+        self.assertEqual(att.predecessor_ids(), [prev.activity_id])

@@ -89,8 +89,16 @@ def _resource_assignments_for_task(task: dict[str, Any]) -> list[tuple[str, str]
     return [solver_resource_id_to_assignment(uid) for uid in stripped]
 
 
-def apply_optimization_result(result_payload: dict[str, Any]) -> int:
+def apply_optimization_result(
+    result_payload: dict[str, Any], *, reconcile_after: bool = True
+) -> int:
     """Write proposed dates and resources from ``tasks_after`` into the database.
+
+    Args:
+        result_payload: ``{"tasks_after": [...], "job_ids": [...]}``.
+        reconcile_after: Refresh the operational notes of the updated
+            activities once written.  Callers that run their own
+            reconciliation pass ``False``.
 
     Returns:
         Number of activities updated.
@@ -188,5 +196,10 @@ def apply_optimization_result(result_payload: dict[str, Any]) -> int:
                 finish,
                 exclude_activity_id=att.pk,
             )
+
+    if reconcile_after:
+        from ui.services.reconcile import reconcile
+
+        reconcile([att.pk for att, *_ in updates])
 
     return updated
