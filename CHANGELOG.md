@@ -1,5 +1,126 @@
 # Changelog
 
+## 2026-10-08
+
+### Changed
+
+- **Nuovo strato di lettura `ui/services/planning_read.py`.** Pianificazione,
+  Gantt, kanban e bridge tablet leggono le attivita' dallo stesso modulo, che
+  non scrive mai sul database e costa 5 query qualunque sia il numero di
+  attivita' (prima: due query per attivita' solo per i minimi di risorse).
+  Le funzioni `_fetch_tasks`, `_fetch_grouped`, `_fetch_jobs`,
+  `_attivita_to_task_dict`, `_compute_activity_status` e
+  `_aggregate_job_status` lasciano `ui/views.py` e diventano pubbliche in
+  `planning_read` (`fetch_tasks`, `fetch_grouped`, `fetch_jobs`,
+  `attivita_to_task_dict`, `compute_activity_status`, `aggregate_job_status`).
+- **Lo stato lo calcola solo il server.** Ogni riga porta `status_pills`,
+  `state_key` e `delay_days`; ogni commessa porta `status` / `status_label`.
+  Le tre copie JavaScript della regola (`_computeActivityStatus` e
+  `_pianDelayDays` in Pianificazione, `taskIsLate` / `taskDelayDays` /
+  `summarizeCommessaTasks` nel Gantt) non ricalcolano piu' nulla: leggono i
+  campi del server. Le risposte di `/api/tasks/update/`, `/api/jobs/update/`
+  e `/api/attivita/salva/` restituiscono la riga aggiornata (`task`) e la
+  commessa (`job`); `/api/gantt/` aggiunge `jobs` (stato per `job_id`).
+- La riconciliazione dei problemi (`detect_for_all_activities`) non e' piu'
+  dentro la lettura: la vista Pianificazione e `/api/gantt/` la chiamano
+  esplicitamente prima di leggere. Resta una scrittura su GET, da rimuovere
+  nel passo successivo.
+- `get_testa_min_requirements`, `resource_shortfalls` e
+  `missing_minimum_resources` accettano `configs=` (da `load_testa_configs()`)
+  per risolvere i minimi di molte attivita' senza una query ciascuna.
+- **Le letture non scrivono piu'.** Pianificazione e `/api/gantt/` non
+  eseguono piu' la riconciliazione dei problemi (`detect_for_all_activities`
+  + `auto_resolve_resource_overlaps`, 257 query con 19 attivita'): la fanno
+  i percorsi di scrittura, dentro `ui/services/reconcile.py`. Il wizard, la
+  cancellazione di attivita' e commesse e l'applicazione di una proposta di
+  ottimizzazione ora riconciliano subito (prima lo faceva il caricamento
+  pagina successivo). Le pagine sincronizzano solo le note «ritardo», che
+  dipendono dal calendario, una volta al giorno per processo.
+- Nuovo comando `python manage.py reconcile_problems` da schedulare ogni
+  notte: riallinea tutte le note (acquisto, spostamento, sovrapposizione,
+  ritardo) senza aspettare una scrittura.
+- La rilevazione «spostamento» cerca gli stabilimenti delle risorse con una
+  query per categoria invece di una per risorsa.
+
+### Fixed
+
+- **Un'attivita' in corso tiene le risorse fino a oggi.** La finestra di
+  occupazione di un'attivita' avviata e non chiusa e' ora
+  `[actual_start, max(data_fine, fine stimata, oggi)]`: prima, superata la
+  fine stimata, le risorse risultavano libere e i conflitti non venivano visti.
+- **La fine stimata conta i giorni lavorativi.** `effective_finish` distende
+  la durata pianificata (lun–ven, come il solver) a partire da
+  `actual_start`, non piu' i giorni di calendario. Il Gantt usa la stima del
+  server (`effective_finish` su ogni riga) invece di ricalcolarla.
+- **Lo stato non e' «in ritardo» il giorno dell'inizio previsto**: lo diventa
+  dal giorno dopo, e il contatore dei giorni di ritardo parte da li'.
+- **Il rischio penale guarda anche il piano**: una commessa con un'attivita'
+  pianificata oltre la consegna, anche se non iniziata, e' «rischio penale».
+- **Nessuna sostituzione automatica su un'attivita' avviata**: le risorse di
+  un'attivita' in corso non vengono piu' scambiate dall'auto-risoluzione delle
+  sovrapposizioni; resta la nota aperta. Le liste di disponibilita' per una
+  sostituzione (manutenzione, scansione) usano la finestra reale, non quella
+  pianificata.
+- `/api/tasks/update/` e il wizard rifiutano con 400 una fine prevista
+  precedente all'inizio. In `update_attivita` il controllo conflitti gira una
+  volta sola e la rilevazione problemi e' nella stessa transazione del
+  salvataggio.
+
+- **Commessa e predecessori sono relazioni** (migrazioni `0034`–`0037`).
+  `attivita.job_id` e' una chiave esterna verso `job` (stessa colonna, stessi
+  valori): salvare un'attivita' per una commessa senza riga `job` la crea, e
+  una commessa non si puo' rinominare. I predecessori vivono nella tabella
+  `attivita_predecessori`: rinominare un'attivita' non rompe piu' i legami che
+  la citano. La migrazione crea i `job` mancanti, collega ogni attivita' e
+  converte il testo dei predecessori; i riferimenti che non risolvono vengono
+  stampati e scartati. I payload restano uguali (`commessa` e `predecessors`
+  come stringhe). Nuovo modulo `ui/services/precedences.py`.
+- Prima di migrare un database esistente fare un backup (`pg_dump`, vedi
+  README): la migrazione `0035` ricrea la colonna `job_id`.
+
+- **Motore di ottimizzazione (`src/optimization`).**
+  - Il limite di tempo (`SOLVER_TIME_LIMIT`) vale per l'intera risoluzione:
+    prima valeva per ciascuna delle cinque fasi, quindi fino a cinque volte.
+    La fase principale ha la quota maggiore e, se non trova una soluzione,
+    riceve tutto il tempo residuo.
+  - Nessuna commessa viene ignorata: una commessa senza penale pesa un
+    centesimo a settimana di ritardo e una nuova fase minimizza i giorni di
+    ritardo totali, cosi' una commessa in ritardo comunque finisce il prima
+    possibile invece di scivolare a fine orizzonte.
+  - La compatibilita' testa/generatore viaggia dentro il problema
+    (`SchedulingProblem.generator_compatibility`) invece di una variabile
+    globale modificata a ogni richiesta. Le regole sono allineate a quelle del
+    picker: modello confrontato senza maiuscole, passo con tolleranza, un
+    modello senza generatori configurati accetta qualunque generatore.
+  - Le quantita' richieste dal solver sono i minimi di pianificazione
+    (`get_testa_min_requirements`, TP60 Custom compreso); prima un modello di
+    testa non configurato non generava alcun requisito di testa/generatore.
+  - La penale settimanale e' sempre `costo × penale% / 100`: senza costo era
+    usata la percentuale come importo.
+  - La finestra bloccata di un'attivita' avviata e' `occupation_window`
+    (giorni lavorativi, fino a oggi), non piu' una seconda definizione.
+  - Lo stabilimento non e' piu' validato contro una lista fissa nel codice.
+
+- **Bridge tablet.** Gli endpoint di scrittura eseguono direttamente le view
+  web sulla richiesta del tablet (stesso metodo, stesso body, stessa sessione)
+  invece di ricostruire una richiesta finta con `RequestFactory` e
+  ricodificare il JSON. Aggiornamento e cancellazione attivita' condividono
+  con il web le funzioni `tasks_update_response` / `attivita_delete_response`:
+  il tablet riceve ora anche la riga aggiornata (`task`) e la commessa (`job`).
+  Risposte, regole e log (`source: tablet`) sono identici sui due canali.
+
+### Removed
+
+- `restore_resolved_notes`: saltava tutti i tipi di problema, quindi non
+  ripristinava mai nulla.
+- `src/optimization/db_problem.py`, `mockup_db.py` e il formato di id
+  attivita' «da snapshot SQLite»: l'app legge solo da PostgreSQL.
+- La tabella `risoluzione_problema` (mai scritta ne' letta) e la colonna
+  testo `attivita.predecessors`, sostituita dalla relazione.
+- Il riconoscimento «legacy» dei `job_id` con suffisso item nella selezione
+  delle commesse per l'ottimizzazione: decide la chiave esterna.
+
+
 ## 2026-09-29
 
 ### Changed

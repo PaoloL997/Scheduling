@@ -395,3 +395,64 @@ class BridgeStatusTest(TestCase):
             reverse("api_bridge_import"), data="{}", content_type="application/json"
         )
         self.assertEqual(resp.status_code, 302)
+
+
+class BridgeSharesTheWebWriteChannelTest(TestCase):
+    """Writes through the bridge run the web views on the bridge request."""
+
+    def setUp(self) -> None:
+        from ui.tests.helpers import create_writer
+
+        self.client = Client()
+        self.user = create_writer("tablet-writer")
+        self.client.force_login(self.user)
+        Job.objects.create(commessa="B1", job_id="B1")
+        self.att = Attivita.objects.create(
+            commessa="B1",
+            item="1",
+            activity="Taglio",
+            data_inizio=date(2026, 11, 2),
+            data_fine=date(2026, 11, 6),
+        )
+
+    def test_update_returns_the_row_and_logs_as_tablet(self) -> None:
+        from ui.models import OperationLog
+
+        resp = self.client.put(
+            f"/api/bridge/attivita/{self.att.pk}/update/",
+            data=json.dumps({"start": "2026-11-03", "finish": "2026-11-06"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        body = resp.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["task"]["start"], "2026-11-03")
+        self.assertEqual(body["job"]["commessa"], "B1")
+        entry = OperationLog.objects.filter(azione="attivita_modifica").latest("pk")
+        self.assertEqual(entry.source, "tablet")
+
+    def test_job_create_through_the_bridge_logs_as_tablet(self) -> None:
+        from ui.models import OperationLog
+
+        resp = self.client.post(
+            "/api/bridge/jobs/create/",
+            data=json.dumps({"commessa": "B2", "delivery_date": "2026-12-31"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertTrue(Job.objects.filter(commessa="B2").exists())
+        entry = OperationLog.objects.filter(azione="commessa_crea").latest("pk")
+        self.assertEqual(entry.source, "tablet")
+
+    def test_invalid_json_is_refused_once(self) -> None:
+        resp = self.client.post(
+            "/api/bridge/jobs/create/",
+            data="{not json",
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(resp.json()["ok"])
+
+    def test_method_mismatch_is_refused(self) -> None:
+        resp = self.client.get("/api/bridge/jobs/create/")
+        self.assertEqual(resp.status_code, 405)

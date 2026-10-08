@@ -12,12 +12,20 @@ Activities, commesse, resource assignments and the inventory live in PostgreSQL.
 | Table | Content |
 |------|---------|
 | `attivita`, `risorse_attivita` | Activities and the resources assigned to them |
+| `attivita_predecessori` | Precedences between activities of the same commessa |
 | `job` | Commesse: cost, penalty, delivery date |
 | `testa_item`, `mandrino_item`, `tastatore_item`, `maschera_item`, `generatore_item` | Inventory |
 | `configurazione_testa`, `generatore_compatibile` | Per-testa requirements and compatible generators |
 | `problema_attivita`, `operation_log` | Operational problems and audit trail |
 
 See [docs/dataset.md](docs/dataset.md) for the data lifecycle.
+
+Every activity belongs to a `job` row through a foreign key: saving an
+activity for a commessa that has no `job` yet creates a bare one, and a
+commessa cannot be renamed. Predecessors are a many-to-many relation, so
+renaming an activity never breaks the links that point at it. Clients keep
+exchanging `commessa` and `predecessors` as strings (`activity_id`s joined by
+`", "`); `ui/services/precedences.py` resolves them within the commessa.
 
 ### Architecture
 ```
@@ -62,8 +70,13 @@ when a resource is held:
 | Activity state | Occupies |
 |---|---|
 | planned only | `[data_inizio, data_fine]` |
-| in progress | `[actual_start, max(data_fine, effective_finish)]` |
+| in progress | `[actual_start, max(data_fine, effective_finish, today)]` |
 | completed | `[actual_start or data_inizio, actual_finish]` |
+
+`effective_finish` lays the planned duration, counted in **working days**
+(Monday to Friday), out from `actual_start`. A running activity holds its
+resources through today however late it is: nothing is released until
+`actual_finish` is recorded.
 
 Overlap detection, reassignment and availability lists all read that one
 function; nothing re-implements it.  The **Modifica risorse** picker included:
@@ -144,6 +157,49 @@ When a late start makes two activities share a resource:
 2. **Reschedule proposal** — if no substitute exists, the CP-SAT model is run on that activity plus its precedence-connected chain. Every other activity's resource bookings are treated as fixed reservations. Planning shows the proposal (dates, assigned resources, mini-Gantt, deadline badge) with **Accept** / **Reject**.
 
 Overlap warnings on the home Gantt open the same notes modal.
+
+## When notes are reconciled
+
+Every operational note (`acquisto`, `spostamento`, `sovrapposizione`,
+`ritardo`) is derived from the activities, their assignments and the
+calendar. **Reading never writes**: Pianificazione, the Gantt, the kanban and
+the tablet bridge display what the last write left behind, through the pure
+read layer in `ui/services/planning_read.py`.
+
+The write paths reconcile when they are done, through
+`ui/services/reconcile.py`: saving an activity from the wizard, editing it
+(web or tablet), deleting an activity or a commessa, a tablet scan, accepting
+an optimization or a reschedule proposal, and inventory changes.
+
+`ritardo` is the one note that changes with the calendar alone, so the pages
+sync it once a day per process, and a scheduler should run the full pass
+nightly:
+
+```bash
+python manage.py reconcile_problems
+```
+
+## Optimization engine
+
+`src/optimization/` is a CP-SAT model over working days, independent of
+Django; `ui/services/optimization_problem.py` builds its input from the
+database (activities, the minimum kit of each activity, the inventory and the
+testa/generator compatibility) and `ui/services/optimization_apply.py` writes
+an accepted proposal back.
+
+The objective is lexicographic: total weekly penalty first (every commessa
+counts, one without a penalty weighs one cent per late week), then total late
+days, then the bore-mid preference, resource continuity along precedences and
+workload levelling. `SOLVER_TIME_LIMIT` (seconds, default 10) is the budget
+for the whole run; the primary phase gets the largest share and, when it finds
+no schedule in it, the whole remainder.
+
+## Tablet bridge
+
+`/api/bridge/...` is the JSON channel for tablets. Reads answer
+`{"ok": true, "data": ...}` from the shared read layer. Writes run the web
+application's own view functions on the bridge request, so rules, audit
+entries (`source: tablet`) and response bodies are the same on both channels.
 
 ## Tablet scan and compatible accessories
 

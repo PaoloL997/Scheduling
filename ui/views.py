@@ -2,11 +2,11 @@
 
 import json
 import logging
-from datetime import date, timedelta
+from datetime import date
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Count, F, Q
+from django.db.models import F
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
@@ -18,10 +18,12 @@ from ui.services.bridge_write import (
     delete_attivita,
     update_attivita,
 )
-from ui.services.identifiers import normalize_activity_id, parse_job_id
-from ui.services.resource_display import (
-    format_activity_resources,
-    format_activity_resources_html,
+from ui.services.identifiers import parse_job_id
+from ui.services.planning_read import (
+    fetch_gantt,
+    fetch_grouped,
+    job_summary,
+    load_task_dict,
 )
 from ui.services.runtime_config import load_runtime_config
 from ui.services.inventory import (
@@ -38,9 +40,7 @@ from ui.models import (
     Job,
     MandrinoItem,
     MascheraItem,
-    ProblemaAttivita,
     Responsabile,
-    RisorsaAttivita,
     Stabilimento,
     TastatoreItem,
     TestaItem,
@@ -144,8 +144,12 @@ def pianificazione(request: HttpRequest):
         get_testa_models,
         get_tipi_attivita,
     )
+    from ui.services.reconcile import ensure_daily_sync
 
-    groups = _fetch_grouped()
+    # Reading never reconciles: the write paths do.  Only the calendar-driven
+    # «ritardo» notes are synced here, once a day.
+    ensure_daily_sync()
+    groups = fetch_grouped()
 
     stab_objs = list(Stabilimento.objects.values("nome", "colore"))
     stab_orm = [s["nome"] for s in stab_objs]
@@ -244,456 +248,6 @@ def _fetch_inventory_table(table_name: str) -> list[dict]:
     if model_class is None:
         return []
     return list(model_class.objects.order_by("uid").values())
-
-
-def _fetch_grouped() -> list[dict]:
-    """Return activities grouped by commessa, each paired with job metadata.
-
-    Each entry in the returned list is a dict::
-
-        {
-            "job": {commessa, job_id, delivery_date, total_cost, penalty,
-                    n_activities, n_items},
-            "activities": [list of task dicts from _attivita_to_task_dict],
-        }
-
-    Groups are sorted by aggregate status (late, in progress, planned,
-    unplanned, completed) then by commessa name.  Commesse that appear only
-    in the activity table (no matching Job row) are included with blank job
-    metadata.
-
-    Returns:
-        list[dict]: One dict per commessa group.
-    """
-    from collections import defaultdict
-
-    tasks = _fetch_tasks()
-    jobs = _fetch_jobs()
-
-    job_by_commessa = {j["commessa"]: j for j in jobs}
-
-    groups_map: dict[str, list] = defaultdict(list)
-    for task in tasks:
-        groups_map[task["commessa"]].append(task)
-
-    all_commesse = sorted(set(list(groups_map.keys()) + list(job_by_commessa.keys())))
-    result = []
-    for commessa in all_commesse:
-        job = job_by_commessa.get(
-            commessa,
-            {
-                "job_id": "",
-                "commessa": commessa,
-                "total_cost": None,
-                "penalty": None,
-                "delivery_date": None,
-                "n_activities": 0,
-                "n_items": 0,
-            },
-        )
-        activities = groups_map.get(commessa, [])
-        activities.sort(
-            key=lambda t: (
-                _parse_iso_day(t.get("start"))
-                or _parse_iso_day(t.get("actual_start"))
-                or date.max,
-                str(t.get("activity_id") or ""),
-            )
-        )
-        job = {
-            **job,
-            "n_open_problems": _count_job_open_problems(activities),
-        }
-        result.append({"job": job, "activities": activities})
-    result.sort(
-        key=lambda g: (
-            _earliest_activity_start(g["activities"]) or date.max,
-            (g["job"].get("commessa") or "").lower(),
-        )
-    )
-    return result
-
-
-def _count_job_open_problems(activities: list[dict]) -> int:
-    """Return open problems for a commessa (acquisto, spostamento, overlap)."""
-    return sum(a.get("warning_count") or 0 for a in activities)
-
-
-def _earliest_activity_start(activities: list[dict]) -> date | None:
-    """Return the earliest planned (or actual) start among activities."""
-    earliest: date | None = None
-    for task in activities or []:
-        day = _parse_iso_day(task.get("start")) or _parse_iso_day(
-            task.get("actual_start")
-        )
-        if day is None:
-            continue
-        if earliest is None or day < earliest:
-            earliest = day
-    return earliest
-
-
-def _fetch_tasks() -> list[dict]:
-    """Return all activity rows for the pianificazione page.
-
-    Reads exclusively from :class:`~ui.models.Attivita`, which is the single
-    source of truth for all activities — both those imported from the MS
-    Project file and those added through the wizard.
-
-    Predecessor activity_ids are resolved to human-readable activity names.
-    Resolution priority:
-    1. In-memory lookup from the current activity set (exact match).
-    2. Parse the activity_id to extract the encoded activity component.
-    3. Fall back to the raw string if parsing fails.
-
-    Returns:
-        list[dict]: One dict per activity row, compatible with the
-            pianificazione table template.
-    """
-
-    from ui.models import Attivita
-    from ui.services.problem_detection import detect_for_all_activities
-
-    # Recalculate acquisto/spostamento so the page reflects the current
-    # schedule and resource assignments after edits.
-    detect_for_all_activities()
-
-    activities = list(
-        Attivita.objects.prefetch_related("risorse", "problemi").order_by(
-            "job_id", F("data_inizio").asc(nulls_first=True), "activity_id"
-        )
-    )
-    id_to_name = {normalize_activity_id(a.activity_id): a.activity for a in activities}
-
-    result = []
-    for a in activities:
-        task = _attivita_to_task_dict(a)
-        if a.predecessors:
-            pred_ids = [p.strip() for p in a.predecessors.split(",") if p.strip()]
-            task["predecessor_names"] = ", ".join(
-                _resolve_predecessor_name(pid, id_to_name) for pid in pred_ids
-            )
-        else:
-            task["predecessor_names"] = None
-        result.append(task)
-    return result
-
-
-def _resolve_predecessor_name(activity_id: str, id_to_name: dict) -> str:
-    """Return a short, human-readable name for a predecessor activity_id.
-
-    Tries three strategies in order:
-    1. Case-insensitive lookup in id_to_name (fastest, most accurate).
-    2. Parse the canonical ``commessa-item-activity`` format and URL-decode the
-       activity component.
-    3. Return the raw string unchanged as a last resort.
-
-    Args:
-        activity_id (str): The canonical activity identifier to resolve.
-        id_to_name (dict): Mapping of normalized ``activity_id`` →
-            ``activity`` for the current activity set.
-
-    Returns:
-        str: The resolved activity name, or the raw ``activity_id`` as fallback.
-    """
-    from urllib.parse import unquote
-
-    key = normalize_activity_id(activity_id)
-    if key in id_to_name:
-        return id_to_name[key]
-
-    parts = activity_id.split("-")
-    if len(parts) >= 3:
-        return unquote(parts[-1])
-
-    return activity_id
-
-
-def _compute_activity_status(
-    data_inizio,
-    data_fine,
-    actual_start,
-    actual_finish,
-    today,
-) -> list[dict]:
-    """Compute the ordered list of status pills for an activity.
-
-    Mirrors the Gantt badge logic exactly so both views are always consistent.
-    An activity may carry two pills simultaneously (e.g. IN RITARDO + IN LAVORAZIONE).
-    When planned dates are missing the activity is considered unscheduled.
-
-    Args:
-        data_inizio: Planned start date, or None.
-        data_fine: Planned finish date, or None.
-        actual_start: Actual start date, or None.
-        actual_finish: Actual finish date, or None.
-        today: The reference date for "now" comparisons.
-
-    Returns:
-        list[dict]: Ordered list of ``{"key": str, "label": str}`` dicts,
-        where *key* is the stable CSS modifier and *label* is the Italian string.
-        Always contains at least one element.
-    """
-    if data_inizio is None or data_fine is None:
-        return [{"key": "non_pianificata", "label": "NON PIANIFICATA"}]
-
-    is_completed = bool(actual_start and actual_finish)
-    is_started = bool(actual_start and not actual_finish)
-    is_late = bool(actual_start and actual_start > data_inizio)
-    is_overdue = not actual_start and today >= data_inizio
-    # Still open past the planned finish: the activity is running late even
-    # when it started on time.
-    is_past_due = not actual_finish and today > data_fine
-    # Never started and already past the planned finish: the plan is stale and
-    # the activity still holds its resources.
-    is_expired = not actual_start and is_past_due
-
-    if is_completed:
-        return [{"key": "completata", "label": "COMPLETATA"}]
-
-    pills = []
-    if is_late or is_overdue or is_past_due:
-        pills.append({"key": "in_ritardo", "label": "IN RITARDO"})
-
-    if is_started:
-        pills.append({"key": "in_lavorazione", "label": "IN LAVORAZIONE"})
-    elif is_expired:
-        pills.append({"key": "scaduta", "label": "NON INIZIATA · SCADUTA"})
-    elif is_overdue:
-        pills.append({"key": "da_iniziare", "label": "DA INIZIARE"})
-    else:
-        pills.append({"key": "pianificata", "label": "PIANIFICATA"})
-
-    return pills
-
-
-_JOB_STATUS_SORT_ORDER = {
-    "rischio_penale": 0,
-    "in_ritardo": 1,
-    "in_tempo": 2,
-    "pianificata": 3,
-    "non_pianificata": 4,
-}
-
-
-def _parse_iso_day(value):
-    """Parse YYYY-MM-DD (or date) to ``date``, else None."""
-    if value is None or value == "":
-        return None
-    if isinstance(value, date):
-        return value
-    try:
-        return date.fromisoformat(str(value)[:10])
-    except ValueError:
-        return None
-
-
-def _activity_state_key(task: dict) -> str:
-    """Return the primary status key for a task dict (mirrors client _pianActivityState)."""
-    keys = [p["key"] for p in (task.get("status_pills") or [])]
-    if "in_ritardo" in keys:
-        return "in_ritardo"
-    if "in_lavorazione" in keys or "in_lavorazione_ritardo" in keys:
-        return "in_lavorazione"
-    if "completata" in keys:
-        return "completata"
-    if "pianificata" in keys:
-        return "pianificata"
-    return "non_pianificata"
-
-
-def _aggregate_job_status(
-    activities: list[dict],
-    delivery_date: str | date | None = None,
-) -> str:
-    """Return aggregate commessa status (same rules as Gantt / client).
-
-    Priority: rischio_penale → in_ritardo → in_tempo → pianificata.
-    """
-    if not activities:
-        return "non_pianificata"
-
-    deadline = _parse_iso_day(delivery_date)
-    late = 0
-    started = 0
-    penalty_risk = False
-
-    for task in activities:
-        state = _activity_state_key(task)
-        if state == "in_ritardo":
-            late += 1
-        if task.get("actual_start"):
-            started += 1
-
-        if deadline is None:
-            continue
-        plan_s = _parse_iso_day(task.get("start"))
-        plan_f = _parse_iso_day(task.get("finish"))
-        act_s = _parse_iso_day(task.get("actual_start"))
-        act_f = _parse_iso_day(task.get("actual_finish"))
-        if plan_s is None or plan_f is None:
-            continue
-        dur_days = (plan_f - plan_s).days
-        end = None
-        if act_f is not None:
-            end = act_f
-        elif act_s is not None:
-            end = act_s + timedelta(days=dur_days)
-        if end is not None and end > deadline:
-            penalty_risk = True
-
-    if penalty_risk:
-        return "rischio_penale"
-    if late > 0:
-        return "in_ritardo"
-    if started > 0:
-        return "in_tempo"
-    return "pianificata"
-
-
-def _is_job_completed(activities: list[dict]) -> bool:
-    """True when every activity has both actual_start and actual_finish."""
-    if not activities:
-        return False
-    return all(a.get("actual_start") and a.get("actual_finish") for a in activities)
-
-
-def _has_plannable_activities(activities: list[dict]) -> bool:
-    """True when at least one activity is not in progress or completed."""
-    return any(
-        not (a.get("actual_start") or a.get("actual_finish")) for a in activities
-    )
-
-
-def _attivita_to_task_dict(a) -> dict:
-    """Convert an :class:`~ui.models.Attivita` instance to a pianificazione-compatible dict.
-
-    Args:
-        a: An :class:`~ui.models.Attivita` ORM instance with ``risorse`` and
-           ``problemi`` prefetched.
-
-    Returns:
-        dict: A dict with keys matching the pianificazione table columns,
-            including ``warning_count`` (count of unresolved problems),
-            ``status_pills`` — an ordered list of status badge dicts for the
-            status column — and ``min_requirements`` / ``can_start``, the
-            minimum resource kit required to launch the activity and whether
-            the current assignments satisfy it.
-    """
-    from django.utils.timezone import localdate
-
-    from ui.services.activity_inventory import get_testa_min_requirements
-    from ui.services.problem_detection import missing_minimum_resources
-
-    risorse_all = list(a.risorse.all())
-    res_fmt = format_activity_resources(risorse_all)
-    resources = ";".join(res_fmt["flat_ids"])
-    problemi_all = list(a.problemi.all())
-    warning_count = sum(1 for p in problemi_all if not p.risolto)
-    note_count = sum(1 for p in problemi_all if p.risolto)
-
-    status_pills = _compute_activity_status(
-        data_inizio=a.data_inizio,
-        data_fine=a.data_fine,
-        actual_start=a.actual_start,
-        actual_finish=a.actual_finish,
-        today=localdate(),
-    )
-
-    min_requirements = get_testa_min_requirements(
-        a.modello_testa or None, bool(getattr(a, "tp60_custom", False))
-    )
-    missing_minimum = missing_minimum_resources(
-        a, [(r.tipo, r.risorsa_id) for r in risorse_all]
-    )
-
-    return {
-        "activity_id": a.activity_id,
-        "job_id": a.job_id,
-        "commessa": a.commessa,
-        "item": str(a.item),
-        "activity": a.activity,
-        "duration_min": a.duration_min,
-        "start": a.data_inizio.isoformat() if a.data_inizio else None,
-        "finish": a.data_fine.isoformat() if a.data_fine else None,
-        "actual_start": a.actual_start.isoformat() if a.actual_start else None,
-        "actual_finish": a.actual_finish.isoformat() if a.actual_finish else None,
-        "baseline_start": a.baseline_start.isoformat() if a.baseline_start else None,
-        "baseline_finish": a.baseline_finish.isoformat() if a.baseline_finish else None,
-        "plant": a.stabilimento or None,
-        "responsible": a.responsabile or None,
-        "resources": resources or None,
-        "resources_display": res_fmt["display"],
-        "resources_tooltip": res_fmt["tooltip"] or None,
-        "resources_html": format_activity_resources_html(risorse_all),
-        "resources_by_tipo": res_fmt["by_tipo"],
-        "resources_by_tipo_json": json.dumps(res_fmt["by_tipo"]),
-        "modello_testa": a.modello_testa or None,
-        "bore_min": float(a.bore_min) if a.bore_min is not None else None,
-        "bore_max": float(a.bore_max) if a.bore_max is not None else None,
-        "bore_mid": float(a.bore_mid) if a.bore_mid is not None else None,
-        "tube_pitch": float(a.tube_pitch) if a.tube_pitch is not None else None,
-        "predecessors": a.predecessors,
-        "source": "attivita",
-        "orm_id": a.pk,
-        "warning_count": warning_count,
-        "note_count": note_count,
-        "status_pills": status_pills,
-        "min_requirements": min_requirements,
-        "min_requirements_json": json.dumps(min_requirements),
-        "missing_minimum": missing_minimum,
-        "can_start": not missing_minimum,
-    }
-
-
-def _fetch_jobs() -> list[dict]:
-    """Return all job rows enriched with activity counts.
-
-    Reads from :class:`~ui.models.Job` (one row per commessa) and annotates
-    each row with counts of distinct items and total activities from
-    :class:`~ui.models.Attivita`, which is the single source of truth.
-
-    Returns:
-        list[dict]: One dict per commessa with keys: commessa, job_id,
-            total_cost, penalty, delivery_date, n_activities, n_items.
-    """
-    from django.db.models import Count
-    from ui.models import Attivita
-
-    act_counts = {
-        row["commessa"]: row
-        for row in Attivita.objects.values("commessa").annotate(
-            n_act=Count("id"),
-            n_it=Count("item", distinct=True),
-        )
-    }
-
-    jobs_by_commessa = {
-        job["commessa"]: job
-        for job in Job.objects.order_by("commessa").values(
-            "job_id", "commessa", "total_cost", "penalty", "delivery_date"
-        )
-    }
-
-    result: list[dict] = []
-    all_commesse = sorted(set(list(jobs_by_commessa.keys()) + list(act_counts.keys())))
-    for commessa in all_commesse:
-        row = jobs_by_commessa.get(
-            commessa,
-            {
-                "job_id": "",
-                "commessa": commessa,
-                "total_cost": None,
-                "penalty": None,
-                "delivery_date": None,
-            },
-        )
-        counts = act_counts.get(commessa, {})
-        row["n_activities"] = counts.get("n_act", 0)
-        row["n_items"] = counts.get("n_it", 0)
-        result.append(row)
-
-    return result
 
 
 @write_required
@@ -917,9 +471,20 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
     orm_id = data.get("orm_id")
     if not orm_id:
         return JsonResponse({"ok": False, "error": "orm_id mancante."}, status=400)
+    return tasks_update_response(request, int(orm_id), data)
 
+
+def tasks_update_response(
+    request: HttpRequest, orm_id: int, data: dict
+) -> JsonResponse:
+    """Apply an activity update and build the response both channels return.
+
+    Shared by ``/api/tasks/update/`` (``orm_id`` in the body) and the tablet
+    bridge (``pk`` in the URL): same rules, same audit entry, same payload
+    with the refreshed ``task`` row and the ``job`` header.
+    """
     try:
-        result = update_attivita(int(orm_id), data)
+        result = update_attivita(orm_id, data)
     except BridgeWriteError as exc:
         payload = {"ok": False, "error": exc.message}
         if exc.conflicts is not None:
@@ -941,6 +506,13 @@ def api_tasks_update(request: HttpRequest) -> JsonResponse:
         ),
         riferimento=result["activity_id"],
     )
+
+    task = load_task_dict(orm_id)
+    if task is not None:
+        result["task"] = task
+        result["warning_count"] = task["warning_count"]
+        result["note_count"] = task["note_count"]
+        result["job"] = job_summary(task["commessa"])
 
     return JsonResponse({"ok": True, **result})
 
@@ -1133,7 +705,9 @@ def api_jobs_update(request: HttpRequest) -> JsonResponse:
         riferimento=commessa or job_id,
     )
 
-    return JsonResponse({"ok": True})
+    return JsonResponse(
+        {"ok": True, "job": job_summary(commessa) if commessa else None}
+    )
 
 
 @login_required
@@ -1228,15 +802,17 @@ def api_attivita_delete(request: HttpRequest) -> JsonResponse:
     orm_id = data.get("orm_id")
     if not orm_id:
         return JsonResponse({"ok": False, "error": "orm_id mancante."}, status=400)
+    return attivita_delete_response(request, int(orm_id))
 
+
+def attivita_delete_response(request: HttpRequest, orm_id: int) -> JsonResponse:
+    """Delete an activity and build the response both channels return."""
     activity_id = (
-        Attivita.objects.filter(pk=int(orm_id))
-        .values_list("activity_id", flat=True)
-        .first()
+        Attivita.objects.filter(pk=orm_id).values_list("activity_id", flat=True).first()
     )
 
     try:
-        delete_attivita(int(orm_id))
+        delete_attivita(orm_id)
     except BridgeWriteError as exc:
         return JsonResponse({"ok": False, "error": exc.message}, status=exc.status_code)
     except Exception as exc:
@@ -1311,6 +887,10 @@ def api_jobs_delete(request: HttpRequest) -> JsonResponse:
         )
         return JsonResponse({"ok": False, "error": str(exc)}, status=500)
 
+    from ui.services.reconcile import reconcile_after_delete
+
+    reconcile_after_delete()
+
     from ui.services.operation_log import record_operation
 
     record_operation(
@@ -1325,115 +905,24 @@ def api_jobs_delete(request: HttpRequest) -> JsonResponse:
 
 @login_required
 def api_gantt(request: HttpRequest) -> JsonResponse:
-    """Return all tasks with scheduling data for the Gantt chart.
+    """Return every task with its scheduling data for the Gantt and the kanban.
 
     Response shape::
 
         {
-          "tasks": [{commessa, item, activity, duration_min, start, finish,
-                     actual_start, actual_finish, baseline_start, baseline_finish,
-                     plant, plant_color, responsible, resources,
-                     resources_by_tipo: {testa, generatore, mandrino,
-                                         tastatore, maschera: [uid]},
-                     moving_resources: [uid with an open spostamento],
-                     predecessors}],
-          "deadlines": {"job_id": "YYYY-MM-DD"}
+          "tasks": [planning row dicts + plant_color],
+          "deadlines": {"job_id": "YYYY-MM-DD"},
+          "jobs": {"job_id": {commessa, status, status_label, completed,
+                              n_open_problems}}
         }
 
-    Args:
-        request: The incoming GET request.
+    Rows carry ``status_pills`` / ``state_key`` / ``delay_days`` and
+    ``moving_resources`` already computed, so the clients only display them.
     """
-    plant_colors = {s.nome: s.colore for s in Stabilimento.objects.all()}
-    tasks, deadlines = _load_gantt_data(plant_colors)
-    return JsonResponse({"tasks": tasks, "deadlines": deadlines})
+    from ui.services.reconcile import ensure_daily_sync
 
-
-def _load_gantt_data(plant_colors: dict) -> tuple[list, dict]:
-    """Query the Django ORM and build the tasks + deadlines payload.
-
-    All activities are read exclusively from :class:`~ui.models.Attivita`,
-    which is the single source of truth for both imported and wizard-created
-    activities.
-
-    Args:
-        plant_colors: Mapping of plant name → hex colour string.
-
-    Returns:
-        Tuple of ``(tasks list, deadlines dict)``.
-    """
-    from ui.models import Attivita
-    from ui.services.overlap_reassign import auto_resolve_resource_overlaps
-
-    auto_resolve_resource_overlaps()
-
-    deadlines: dict[str, str] = {
-        job["job_id"]: job["delivery_date"]
-        for job in Job.objects.exclude(delivery_date__isnull=True).values(
-            "job_id", "delivery_date"
-        )
-    }
-
-    tasks = []
-    activities = list(
-        Attivita.objects.prefetch_related("risorse")
-        .annotate(
-            open_problems=Count(
-                "problemi",
-                filter=Q(problemi__risolto=False),
-            )
-        )
-        .order_by("commessa", "item", "activity")
-    )
-    # Resources that must be moved from another plant (open "spostamento"
-    # notes), keyed by activity, so the kanban can flag their chips.
-    moving: dict[int, set[str]] = {}
-    for att_pk, uid in ProblemaAttivita.objects.filter(
-        risolto=False, tipo=ProblemaAttivita.TIPO_SPOSTAMENTO
-    ).values_list("attivita_id", "risorsa_uid"):
-        if uid:
-            moving.setdefault(att_pk, set()).add(uid)
-    for att in activities:
-        resources_str = ";".join(r.risorsa_id for r in att.risorse.all()) or None
-        by_tipo: dict[str, list[str]] = {
-            tipo: [] for tipo, _ in RisorsaAttivita.TIPO_CHOICES
-        }
-        for r in att.risorse.all():
-            by_tipo.setdefault(r.tipo, []).append(r.risorsa_id)
-        tasks.append(
-            {
-                "commessa": att.commessa,
-                "item": str(att.item),
-                "job_id": att.job_id,
-                "activity_id": att.activity_id,
-                "activity": att.activity or "",
-                "duration_min": att.duration_min,
-                "start": att.data_inizio.isoformat() if att.data_inizio else None,
-                "finish": att.data_fine.isoformat() if att.data_fine else None,
-                "actual_start": att.actual_start.isoformat()
-                if att.actual_start
-                else None,
-                "actual_finish": att.actual_finish.isoformat()
-                if att.actual_finish
-                else None,
-                "baseline_start": att.baseline_start.isoformat()
-                if att.baseline_start
-                else None,
-                "baseline_finish": att.baseline_finish.isoformat()
-                if att.baseline_finish
-                else None,
-                "plant": att.stabilimento or None,
-                "plant_color": plant_colors.get(att.stabilimento or "", "#4a90e2"),
-                "responsible": att.responsabile or None,
-                "resources": resources_str,
-                "resources_by_tipo": by_tipo,
-                "moving_resources": sorted(moving.get(att.pk, ())),
-                "predecessors": att.predecessors,
-                "orm_id": att.pk,
-                "warning_count": att.open_problems,
-            }
-        )
-
-    return tasks, deadlines
+    ensure_daily_sync()
+    return JsonResponse(fetch_gantt())
 
 
 @login_required

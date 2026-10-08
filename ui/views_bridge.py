@@ -1,4 +1,11 @@
-"""JSON bridge API for external devices (tablets)."""
+"""JSON bridge API for external devices (tablets).
+
+Read endpoints answer ``{"ok": true, "data": ...}`` from the shared read
+layer.  Write endpoints share the web application's own view functions,
+called on the very same request: the business rules, the audit log (whose
+``source`` is ``tablet`` because the path starts with ``/api/bridge/``) and
+the response bodies are therefore identical on both channels.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +15,10 @@ from functools import wraps
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, JsonResponse
-from django.test import RequestFactory
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from ui import views, views_attivita
 from ui.permissions import (
     WRITE_DENIED_MESSAGE,
     get_ruolo,
@@ -28,16 +35,12 @@ from ui.services.bridge_serializers import (
     serialize_jobs,
     serialize_problemi,
     serialize_responsabili,
-    serialize_tipi_attivita,
     serialize_stabilimenti,
+    serialize_tipi_attivita,
 )
-from ui.services.bridge_write import BridgeWriteError, delete_attivita, update_attivita
+from ui.services.bridge_write import BridgeWriteError
 from ui.services.scan_substitution import scan_resource
 from ui.views_auth import user_stabilimento_name
-from ui import views
-from ui import views_attivita
-
-_factory = RequestFactory()
 
 
 def _user_payload(user) -> dict:
@@ -103,28 +106,6 @@ def bridge_write_guard(view):
     return wrapper
 
 
-def _forward_response(response: JsonResponse) -> JsonResponse:
-    """Pass through delegated view responses unchanged."""
-    return response
-
-
-def _delegate(
-    view_func,
-    request: HttpRequest,
-    method: str,
-    path: str,
-    *,
-    data: dict | None = None,
-    **kwargs,
-):
-    body = json.dumps(data).encode() if data is not None else b""
-    factory_method = getattr(_factory, method.lower())
-    inner = factory_method(path, data=body, content_type="application/json")
-    inner.user = request.user
-    inner.session = request.session
-    return view_func(inner, **kwargs)
-
-
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 
@@ -162,8 +143,7 @@ def api_bridge_auth_logout(request: HttpRequest) -> JsonResponse:
 @login_required
 def api_bridge_auth_me(request: HttpRequest) -> JsonResponse:
     """Return the authenticated user profile."""
-    user = request.user
-    return _ok(_user_payload(user))
+    return _ok(_user_payload(request.user))
 
 
 # ── Status / import ───────────────────────────────────────────────────────────
@@ -283,23 +263,15 @@ def api_bridge_config_testa(request: HttpRequest) -> JsonResponse:
 
 
 # ── Write: attività ───────────────────────────────────────────────────────────
+#
+# Each endpoint is the web view itself, run on the bridge request: same
+# method, same JSON body, same user and session.  Nothing is re-encoded.
 
 
 @bridge_write_guard
 @require_http_methods(["POST"])
 def api_bridge_attivita_create(request: HttpRequest) -> JsonResponse:
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-    return _forward_response(
-        _delegate(
-            views_attivita.api_salva_attivita,
-            request,
-            "POST",
-            "/api/bridge/attivita/",
-            data=parsed,
-        )
-    )
+    return views_attivita.api_salva_attivita(request)
 
 
 @bridge_write_guard
@@ -308,28 +280,7 @@ def api_bridge_attivita_update(request: HttpRequest, pk: int) -> JsonResponse:
     parsed = _parse_json(request)
     if isinstance(parsed, JsonResponse):
         return parsed
-    try:
-        result = update_attivita(pk, parsed)
-    except BridgeWriteError as exc:
-        extra: dict = {}
-        if exc.conflicts is not None:
-            extra["conflicts"] = exc.conflicts
-        if exc.missing_resources is not None:
-            extra["missing_resources"] = exc.missing_resources
-        return _err(exc.message, status=exc.status_code, **extra)
-
-    from ui.services.operation_log import describe_attivita_update, record_operation
-
-    record_operation(
-        request,
-        azione="attivita_modifica",
-        descrizione=(
-            f"Attività {result['activity_id']}: {describe_attivita_update(parsed)}"
-        ),
-        riferimento=result["activity_id"],
-    )
-
-    return JsonResponse({"ok": True, **result})
+    return views.tasks_update_response(request, pk, parsed)
 
 
 @bridge_write_guard
@@ -394,27 +345,7 @@ def api_bridge_attivita_scan(request: HttpRequest, pk: int) -> JsonResponse:
 @bridge_write_guard
 @require_http_methods(["DELETE"])
 def api_bridge_attivita_delete(request: HttpRequest, pk: int) -> JsonResponse:
-    from ui.models import Attivita
-
-    activity_id = (
-        Attivita.objects.filter(pk=pk).values_list("activity_id", flat=True).first()
-    )
-
-    try:
-        delete_attivita(pk)
-    except BridgeWriteError as exc:
-        return _err(exc.message, status=exc.status_code)
-
-    from ui.services.operation_log import record_operation
-
-    record_operation(
-        request,
-        azione="attivita_elimina",
-        descrizione=f"Eliminata attività {activity_id or pk}",
-        riferimento=activity_id or "",
-    )
-
-    return _ok()
+    return views.attivita_delete_response(request, pk)
 
 
 # ── Write: jobs ───────────────────────────────────────────────────────────────
@@ -423,40 +354,19 @@ def api_bridge_attivita_delete(request: HttpRequest, pk: int) -> JsonResponse:
 @bridge_write_guard
 @require_http_methods(["POST"])
 def api_bridge_jobs_create(request: HttpRequest) -> JsonResponse:
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-    return _forward_response(
-        _delegate(
-            views.api_jobs_create, request, "POST", "/api/bridge/jobs/", data=parsed
-        )
-    )
+    return views.api_jobs_create(request)
 
 
 @bridge_write_guard
 @require_http_methods(["PUT"])
 def api_bridge_jobs_update(request: HttpRequest) -> JsonResponse:
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-    return _forward_response(
-        _delegate(
-            views.api_jobs_update, request, "PUT", "/api/bridge/jobs/", data=parsed
-        )
-    )
+    return views.api_jobs_update(request)
 
 
 @bridge_write_guard
 @require_http_methods(["DELETE"])
 def api_bridge_jobs_delete(request: HttpRequest) -> JsonResponse:
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-    return _forward_response(
-        _delegate(
-            views.api_jobs_delete, request, "DELETE", "/api/bridge/jobs/", data=parsed
-        )
-    )
+    return views.api_jobs_delete(request)
 
 
 # ── Write: inventario ─────────────────────────────────────────────────────────
@@ -465,19 +375,7 @@ def api_bridge_jobs_delete(request: HttpRequest) -> JsonResponse:
 @bridge_write_guard
 @require_http_methods(["POST"])
 def api_bridge_inventario_create(request: HttpRequest, table: str) -> JsonResponse:
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-    return _forward_response(
-        _delegate(
-            views.api_inventario_add,
-            request,
-            "POST",
-            f"/api/bridge/inventario/{table}/",
-            data=parsed,
-            table=table,
-        )
-    )
+    return views.api_inventario_add(request, table)
 
 
 @bridge_write_guard
@@ -485,166 +383,43 @@ def api_bridge_inventario_create(request: HttpRequest, table: str) -> JsonRespon
 def api_bridge_inventario_detail(
     request: HttpRequest, table: str, uid: str
 ) -> JsonResponse:
-    if request.method == "DELETE":
-        return _forward_response(
-            _delegate(
-                views.api_inventario_detail,
-                request,
-                "DELETE",
-                f"/api/bridge/inventario/{table}/{uid}/",
-                table=table,
-                uid=uid,
-            )
-        )
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-    return _forward_response(
-        _delegate(
-            views.api_inventario_detail,
-            request,
-            request.method,
-            f"/api/bridge/inventario/{table}/{uid}/",
-            data=parsed,
-            table=table,
-            uid=uid,
-        )
-    )
+    return views.api_inventario_detail(request, table, uid)
 
 
-# ── Write: stabilimenti / responsabili ────────────────────────────────────────
+# ── Write: stabilimenti / responsabili / tipi attività ────────────────────────
 
 
 @bridge_write_guard
 @require_http_methods(["POST"])
 def api_bridge_stabilimenti_create(request: HttpRequest) -> JsonResponse:
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-    return _forward_response(
-        _delegate(
-            views.api_stabilimenti_create,
-            request,
-            "POST",
-            "/api/bridge/stabilimenti/",
-            data=parsed,
-        )
-    )
+    return views.api_stabilimenti_create(request)
 
 
 @bridge_write_guard
 @require_http_methods(["PUT", "DELETE"])
 def api_bridge_stabilimenti_detail(request: HttpRequest, pk: int) -> JsonResponse:
-    if request.method == "DELETE":
-        return _forward_response(
-            _delegate(
-                views.api_stabilimenti_detail,
-                request,
-                "DELETE",
-                f"/api/bridge/stabilimenti/{pk}/",
-                pk=pk,
-            )
-        )
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-    return _forward_response(
-        _delegate(
-            views.api_stabilimenti_detail,
-            request,
-            "PUT",
-            f"/api/bridge/stabilimenti/{pk}/",
-            data=parsed,
-            pk=pk,
-        )
-    )
+    return views.api_stabilimenti_detail(request, pk)
 
 
 @bridge_write_guard
 @require_http_methods(["POST"])
 def api_bridge_responsabili_create(request: HttpRequest) -> JsonResponse:
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-    return _forward_response(
-        _delegate(
-            views.api_responsabili_create,
-            request,
-            "POST",
-            "/api/bridge/responsabili/",
-            data=parsed,
-        )
-    )
+    return views.api_responsabili_create(request)
 
 
 @bridge_write_guard
 @require_http_methods(["PUT", "DELETE"])
 def api_bridge_responsabili_detail(request: HttpRequest, pk: int) -> JsonResponse:
-    if request.method == "DELETE":
-        return _forward_response(
-            _delegate(
-                views.api_responsabili_detail,
-                request,
-                "DELETE",
-                f"/api/bridge/responsabili/{pk}/",
-                pk=pk,
-            )
-        )
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-    return _forward_response(
-        _delegate(
-            views.api_responsabili_detail,
-            request,
-            "PUT",
-            f"/api/bridge/responsabili/{pk}/",
-            data=parsed,
-            pk=pk,
-        )
-    )
+    return views.api_responsabili_detail(request, pk)
 
 
 @bridge_write_guard
 @require_http_methods(["POST"])
 def api_bridge_tipi_attivita_create(request: HttpRequest) -> JsonResponse:
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-    return _forward_response(
-        _delegate(
-            views.api_tipi_attivita_create,
-            request,
-            "POST",
-            "/api/bridge/tipi-attivita/",
-            data=parsed,
-        )
-    )
+    return views.api_tipi_attivita_create(request)
 
 
 @bridge_write_guard
 @require_http_methods(["PUT", "DELETE"])
 def api_bridge_tipi_attivita_detail(request: HttpRequest, pk: int) -> JsonResponse:
-    if request.method == "DELETE":
-        return _forward_response(
-            _delegate(
-                views.api_tipi_attivita_detail,
-                request,
-                "DELETE",
-                f"/api/bridge/tipi-attivita/{pk}/",
-                pk=pk,
-            )
-        )
-    parsed = _parse_json(request)
-    if isinstance(parsed, JsonResponse):
-        return parsed
-    return _forward_response(
-        _delegate(
-            views.api_tipi_attivita_detail,
-            request,
-            "PUT",
-            f"/api/bridge/tipi-attivita/{pk}/",
-            data=parsed,
-            pk=pk,
-        )
-    )
+    return views.api_tipi_attivita_detail(request, pk)
