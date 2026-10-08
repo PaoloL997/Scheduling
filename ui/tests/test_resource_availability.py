@@ -193,10 +193,12 @@ class AvailabilityOccupiedTest(TestCase):
             "X001", 1, "2026-08-25", "2026-09-05", actual_start="2026-09-01"
         )
         _book(att, "testa", "T1")
+        # Planned 25 Aug – 5 Sep = 9 working days; started Tuesday 1 Sep the
+        # ninth working day is Friday 11 Sep (weekends do not count).
         info = availability_map("testa", ["T1"], TODAY)["T1"]
         self.assertEqual(info["stato"], "occupata")
-        self.assertEqual(info["occupata_fino"], "2026-09-12")
-        self.assertEqual(info["libera_dal"], "2026-09-13")
+        self.assertEqual(info["occupata_fino"], "2026-09-11")
+        self.assertEqual(info["libera_dal"], "2026-09-12")
 
     def test_back_to_back_bookings_extend_the_release_day(self) -> None:
         first = _make_activity("X001", 1, "2026-09-01", "2026-09-15")

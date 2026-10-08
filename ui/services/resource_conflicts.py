@@ -7,8 +7,9 @@ save and the date-update endpoints.
 
 Occupancy follows execution, not the planned calendar: completed activities
 block through ``actual_finish``, in-progress ones through
-``max(data_fine, effective_finish)``.  Planned ``data_inizio`` / ``data_fine``
-are unchanged.
+``max(data_fine, effective_finish, today)`` — a running activity holds its
+resources at least through today, however late it is.  Planned
+``data_inizio`` / ``data_fine`` are unchanged.
 
 Overlap semantics are inclusive on both ends: an activity that ends on day
 ``X`` conflicts with one that starts on day ``X`` for the same resource.
@@ -123,23 +124,29 @@ def format_conflict_message(
     return "\n".join(lines)
 
 
-def occupation_window(attivita) -> tuple[date, date] | None:
+def occupation_window(attivita, today: date | None = None) -> tuple[date, date] | None:
     """Return the resource occupancy interval for an activity.
 
     Planned dates stay on the activity record.  Occupancy is:
 
     * planned only: ``[data_inizio, data_fine]``
-    * in progress: ``[actual_start, max(data_fine, effective_finish)]``
+    * in progress: ``[actual_start, max(data_fine, effective_finish, today)]``
     * completed: ``[actual_start or data_inizio, actual_finish]``
+
+    An activity that is still open holds its resources through today even
+    when its estimated finish is already behind: nothing is released until
+    ``actual_finish`` is recorded.
 
     Args:
         attivita: An :class:`~ui.models.Attivita` (or duck type with the
             same date fields).
+        today: Reference day; defaults to the local date.
 
     Returns:
         tuple[date, date] | None: Inclusive occupancy start and end, or
             ``None`` when the activity has no usable window.
     """
+    from django.utils.timezone import localdate
     from ui.services.problem_detection import effective_finish
 
     if attivita.actual_finish:
@@ -153,15 +160,13 @@ def occupation_window(attivita) -> tuple[date, date] | None:
 
     if attivita.actual_start:
         start = attivita.actual_start
-        end = attivita.data_fine
-        delayed = effective_finish(attivita)
-        if delayed is not None and (end is None or delayed > end):
-            end = delayed
-        if end is None:
-            end = start
-        if end < start:
-            end = start
-        return start, end
+        candidates = [
+            start,
+            attivita.data_fine,
+            effective_finish(attivita),
+            today or localdate(),
+        ]
+        return start, max(d for d in candidates if d is not None)
 
     if not (attivita.data_inizio and attivita.data_fine):
         return None
@@ -182,6 +187,7 @@ def candidate_window(
     data_inizio: date,
     data_fine: date,
     attivita=None,
+    today: date | None = None,
 ) -> tuple[date, date]:
     """Return the window the activity being edited would really hold.
 
@@ -199,6 +205,7 @@ def candidate_window(
         data_inizio: Candidate start date as currently shown in the form.
         data_fine: Candidate end date as currently shown in the form.
         attivita: The activity being edited, or ``None`` for a new one.
+        today: Reference day for :func:`occupation_window`.
 
     Returns:
         tuple[date, date]: The interval to test availability against —
@@ -214,7 +221,8 @@ def candidate_window(
             data_fine=data_fine,
             actual_start=attivita.actual_start,
             actual_finish=attivita.actual_finish,
-        )
+        ),
+        today=today,
     )
     return window or (data_inizio, data_fine)
 
@@ -244,6 +252,7 @@ def _overlapping_bookings(
     data_inizio: date,
     data_fine: date,
     exclude_activity_id: int | None = None,
+    today: date | None = None,
 ):
     """Yield bookings whose occupancy window overlaps the candidate range."""
     from ui.models import RisorsaAttivita
@@ -257,7 +266,7 @@ def _overlapping_bookings(
         qs = qs.exclude(attivita_id=exclude_activity_id)
 
     for row in qs:
-        window = occupation_window(row.attivita)
+        window = occupation_window(row.attivita, today=today)
         if window is None:
             continue
         occ_start, occ_end = window
@@ -310,6 +319,7 @@ def find_conflicts(
     data_inizio: date,
     data_fine: date,
     exclude_activity_id: int | None = None,
+    today: date | None = None,
 ) -> list[dict]:
     """Return existing bookings that overlap the candidate range.
 
@@ -325,6 +335,7 @@ def find_conflicts(
         data_fine: Candidate activity end date.
         exclude_activity_id: Optional Attivita primary key to ignore (used
             when re-validating an existing activity during an edit flow).
+        today: Reference day for the occupancy of running activities.
 
     Returns:
         list[dict]: One dictionary per conflicting booking with keys
@@ -354,7 +365,7 @@ def find_conflicts(
             "data_fine": occ_end.isoformat(),
         }
         for row, occ_start, occ_end in _overlapping_bookings(
-            pair_q, data_inizio, data_fine, exclude_activity_id
+            pair_q, data_inizio, data_fine, exclude_activity_id, today
         )
     ]
 
@@ -364,6 +375,7 @@ def validate_no_conflicts(
     data_inizio: date,
     data_fine: date,
     exclude_activity_id: int | None = None,
+    today: date | None = None,
 ) -> None:
     """Raise :class:`ResourceConflictError` if any assignment is already booked.
 
@@ -379,7 +391,9 @@ def validate_no_conflicts(
     Raises:
         ResourceConflictError: When at least one conflicting booking exists.
     """
-    conflicts = find_conflicts(assignments, data_inizio, data_fine, exclude_activity_id)
+    conflicts = find_conflicts(
+        assignments, data_inizio, data_fine, exclude_activity_id, today
+    )
     if conflicts:
         raise ResourceConflictError(conflicts)
 
@@ -389,6 +403,7 @@ def occupied_resource_ids(
     data_inizio: date,
     data_fine: date,
     exclude_activity_id: int | None = None,
+    today: date | None = None,
 ) -> set[str]:
     """Return all resource IDs of a given type booked during a range.
 
@@ -408,7 +423,7 @@ def occupied_resource_ids(
     return {
         row.risorsa_id
         for row, _occ_start, _occ_end in _overlapping_bookings(
-            Q(tipo=tipo), data_inizio, data_fine, exclude_activity_id
+            Q(tipo=tipo), data_inizio, data_fine, exclude_activity_id, today
         )
     }
 
@@ -437,4 +452,6 @@ def bookings_not_ended(
     ids = [rid for rid in risorsa_ids if rid]
     if not ids:
         return
-    yield from _overlapping_bookings(Q(tipo=tipo, risorsa_id__in=ids), since, date.max)
+    yield from _overlapping_bookings(
+        Q(tipo=tipo, risorsa_id__in=ids), since, date.max, today=since
+    )

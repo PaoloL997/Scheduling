@@ -5,11 +5,9 @@ or during an activity — either a resource that must be physically moved from
 another plant (``spostamento``) or a required resource category that has no
 assigned item at all (``acquisto``).
 
-Problems are detected at activity-creation time and stored as
+Problems are detected when an activity is written and stored as
 :class:`~ui.models.ProblemaAttivita` rows so that planners can track and
-resolve them through the UI.  :class:`~ui.models.RisoluzioneProblema` provides
-a persistent mirror of resolved notes that is kept even when the activity is
-deleted, so that resolution history is never lost.
+resolve them through the UI.
 
 Resource overlaps caused by a late start are detected by
 :func:`find_resource_overlaps` and auto-resolved when a compatible
@@ -76,6 +74,8 @@ def resource_shortfalls(
     modello_testa: str | None,
     counts: dict[str, int],
     tp60_custom: bool = False,
+    *,
+    configs: dict[str, object] | None = None,
 ) -> list[dict]:
     """Return one descriptor per category selected below its required minimum.
 
@@ -93,6 +93,9 @@ def resource_shortfalls(
         tp60_custom: When ``True`` the consumable minimums are the fixed
             TP60 Custom ones (2 mandrini, 1 maschera, no tastatore), per
             :func:`~ui.services.activity_inventory.get_testa_min_requirements`.
+        configs: Preloaded testa configurations from
+            :func:`~ui.services.activity_inventory.load_testa_configs`, to
+            avoid one query per call.
 
     Returns:
         list[dict]: One dict per under-selected category, in
@@ -103,7 +106,7 @@ def resource_shortfalls(
     from ui.services.activity_inventory import get_testa_min_requirements
 
     modello = (modello_testa or "").strip()
-    minimi = get_testa_min_requirements(modello or None, tp60_custom)
+    minimi = get_testa_min_requirements(modello or None, tp60_custom, configs=configs)
 
     shortfalls: list[dict] = []
     for key in _CAT_KEYS:
@@ -145,7 +148,9 @@ def _counts_by_categoria(pairs) -> dict[str, int]:
     return {key: len(uids) for key, uids in seen.items()}
 
 
-def missing_minimum_resources(attivita, pairs=None) -> list[dict]:
+def missing_minimum_resources(
+    attivita, pairs=None, *, configs: dict[str, object] | None = None
+) -> list[dict]:
     """Return the shortfalls that forbid starting *attivita*.
 
     An activity may not be started — that is, ``actual_start`` may not be
@@ -157,6 +162,8 @@ def missing_minimum_resources(attivita, pairs=None) -> list[dict]:
         attivita: The :class:`~ui.models.Attivita` being started.
         pairs: ``(tipo, risorsa_id)`` assignments to evaluate; defaults to the
             rows currently booked for the activity.
+        configs: Preloaded testa configurations from
+            :func:`~ui.services.activity_inventory.load_testa_configs`.
 
     Returns:
         list[dict]: Shortfall descriptors from :func:`resource_shortfalls`;
@@ -168,6 +175,7 @@ def missing_minimum_resources(attivita, pairs=None) -> list[dict]:
         attivita.modello_testa,
         _counts_by_categoria(pairs),
         tp60_custom=bool(getattr(attivita, "tp60_custom", False)),
+        configs=configs,
     )
 
 
@@ -234,23 +242,22 @@ def _get_resource_models() -> dict[str, type]:
     return _RESOURCE_MODELS
 
 
-def _lookup_plant(categoria: str, uid: str) -> str | None:
-    """Return the plant name for a single inventory resource UID.
+def _lookup_plants(categoria: str, uids: list[str]) -> dict[str, str | None]:
+    """Return ``{uid: plant}`` for the given inventory UIDs in one query.
 
     Args:
         categoria: Resource category name (testa, mandrino, tastatore,
             maschera, generatore).
-        uid: The primary-key UID of the resource.
+        uids: Primary-key UIDs to look up.
 
     Returns:
-        str | None: The ``plant`` field value, or ``None`` if the UID is not
-            found in the inventory.
+        dict[str, str | None]: Plant per UID; UIDs missing from the
+            inventory are absent.
     """
     model = _get_resource_models().get(categoria)
-    if model is None:
-        return None
-    row = model.objects.filter(uid=uid).values("plant").first()
-    return row["plant"] if row else None
+    if model is None or not uids:
+        return {}
+    return dict(model.objects.filter(uid__in=uids).values_list("uid", "plant"))
 
 
 def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> int:
@@ -272,9 +279,7 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
     selection: stale ones are auto-resolved, still-valid ones get an updated
     description when needed, and missing ones are created.  Creation is
     idempotent against **open** signatures only, so a condition that returns
-    after an auto-resolve can raise a new open note.  Auto-resolves are not
-    mirrored to :class:`~ui.models.RisoluzioneProblema`, so the issue
-    surfaces again if it returns.
+    after an auto-resolve raises a new open note.
 
     Args:
         attivita: The :class:`~ui.models.Attivita` instance.
@@ -319,8 +324,9 @@ def detect_and_save_problems(attivita, risorse_dict: dict[str, list[str]]) -> in
                 )
             )
 
+        plants = _lookup_plants(categoria, uids)
         for uid in uids:
-            plant = _lookup_plant(categoria, uid)
+            plant = plants.get(uid)
             if (
                 plant
                 and stabilimento_attivita
@@ -459,14 +465,23 @@ def refresh_problems_for_resource(tipo: str, *uids: str) -> int:
 
 
 def effective_finish(attivita) -> date | None:
-    """Return the expected finish if the activity started late (or at all).
+    """Return the expected finish of a started activity.
 
-    Uses planned duration ``data_fine - data_inizio`` applied to
-    ``actual_start``.  Missing dates yield ``None``.
+    The planned duration is counted in **working days** (Monday to Friday,
+    inclusive of both planned dates, at least one), the same unit the
+    scheduler plans in, and laid out from ``actual_start``: starting two days
+    late on a Thursday ends on the following Tuesday, not on Saturday.
+    Missing dates yield ``None``.
     """
     if not (attivita.actual_start and attivita.data_inizio and attivita.data_fine):
         return None
-    return attivita.actual_start + (attivita.data_fine - attivita.data_inizio)
+    from src.optimization.calendar import (
+        WorkingCalendar,
+        working_days_in_calendar_span,
+    )
+
+    duration = working_days_in_calendar_span(attivita.data_inizio, attivita.data_fine)
+    return WorkingCalendar(attivita.actual_start).completion_date(0, duration)
 
 
 def _resource_pairs(attivita) -> set[tuple[str, str]]:
@@ -512,7 +527,9 @@ def _overlap_roles(first, second) -> tuple:
     return (first, second) if first.pk < second.pk else (second, first)
 
 
-def find_resource_overlaps(activities: list | None = None) -> dict[int, list[dict]]:
+def find_resource_overlaps(
+    activities: list | None = None, today: date | None = None
+) -> dict[int, list[dict]]:
     """Compute resource overlaps from the shared occupancy windows.
 
     Two activities conflict when their
@@ -530,6 +547,7 @@ def find_resource_overlaps(activities: list | None = None) -> dict[int, list[dic
     Args:
         activities: Optional prefetched :class:`~ui.models.Attivita` list.
             When omitted, all activities are loaded.
+        today: Reference day for the occupancy of running activities.
 
     Returns:
         dict[int, list[dict]]: Mapping of activity primary key to overlap
@@ -546,7 +564,7 @@ def find_resource_overlaps(activities: list | None = None) -> dict[int, list[dic
     for att in activities:
         if not pairs[att.pk]:
             continue
-        window = occupation_window(att)
+        window = occupation_window(att, today=today)
         if window is not None:
             windows[att.pk] = window
 
@@ -691,14 +709,14 @@ def sync_overdue_problems(
 def detect_for_all_activities() -> int:
     """Run problem detection for every activity in the database.
 
-    Called on Pianificazione page load so that
-    open ``acquisto`` / ``spostamento`` notes stay aligned with current
-    assignments.  Stale open notes are auto-resolved; new conditions create
-    fresh rows.  Delay overlaps are auto-swapped when possible; remaining
-    ones become open ``sovrapposizione`` problems.  Never-started activities
-    past their planned finish raise a ``ritardo`` note (both handled inside
+    The full pass behind :func:`ui.services.reconcile.reconcile` with no
+    activity filter: open ``acquisto`` / ``spostamento`` notes are aligned
+    with the current assignments (stale ones auto-resolved, new conditions
+    created), delay overlaps are auto-swapped when possible and the rest
+    become open ``sovrapposizione`` problems, never-started activities past
+    their planned finish raise a ``ritardo`` note (both inside
     :func:`~ui.services.overlap_reassign.auto_resolve_resource_overlaps`).
-    Resolved swap notes are kept.
+    Resolved swap notes are kept.  Never called by a read path.
 
     Returns:
         int: Total number of new :class:`~ui.models.ProblemaAttivita` rows
@@ -716,62 +734,3 @@ def detect_for_all_activities() -> int:
 
     logger.info("detect_for_all_activities: %d nuovi problemi rilevati.", total)
     return total
-
-
-def restore_resolved_notes() -> int:
-    """Re-apply persistent resolution notes to re-created problems.
-
-    When :class:`~ui.models.ProblemaAttivita` rows are re-created by
-    :func:`detect_for_all_activities`, the notes are matched back.  Manual resolutions
-    of ``acquisto`` / ``spostamento`` are no longer restored: those notes
-    close only when the underlying condition is gone.
-
-    Returns:
-        int: Number of problems restored as resolved.
-    """
-    from django.utils import timezone
-    from ui.models import Attivita, ProblemaAttivita, RisoluzioneProblema
-
-    resoluzioni = list(RisoluzioneProblema.objects.all())
-    if not resoluzioni:
-        return 0
-
-    restored = 0
-    skipped_types = {
-        ProblemaAttivita.TIPO_SOVRAPPOSIZIONE,
-        ProblemaAttivita.TIPO_SPOSTAMENTO,
-        ProblemaAttivita.TIPO_ACQUISTO,
-        ProblemaAttivita.TIPO_MANUTENZIONE,
-        ProblemaAttivita.TIPO_RITARDO,
-        ProblemaAttivita.TIPO_SOSTITUZIONE,
-    }
-    for r in resoluzioni:
-        if r.tipo in skipped_types:
-            continue
-        try:
-            attivita = Attivita.objects.get(
-                commessa=r.commessa,
-                item=r.item,
-                activity=r.activity,
-            )
-        except Attivita.DoesNotExist:
-            continue
-
-        problema = ProblemaAttivita.objects.filter(
-            attivita=attivita,
-            tipo=r.tipo,
-            risorsa_tipo=r.risorsa_tipo,
-            risorsa_uid=r.risorsa_uid,
-        ).first()
-
-        if problema is None or problema.risolto:
-            continue
-
-        problema.risolto = True
-        problema.note_risoluzione = r.note_risoluzione
-        problema.data_risoluzione = r.data_risoluzione or timezone.now()
-        problema.save(update_fields=["risolto", "note_risoluzione", "data_risoluzione"])
-        restored += 1
-
-    logger.info("restore_resolved_notes: %d risoluzioni ripristinate.", restored)
-    return restored

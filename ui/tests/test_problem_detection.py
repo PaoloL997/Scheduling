@@ -567,7 +567,10 @@ class FindResourceOverlapsTest(TestCase):
     def test_flags_both_activities_with_shared_resource(self) -> None:
         from ui.services.problem_detection import find_resource_overlaps
 
-        result = find_resource_overlaps()
+        # Planned 10–19 August = 8 working days; started Monday 17 August
+        # the estimate ends Wednesday 26 August.  Fix "today" inside that
+        # window: a running activity holds the resource through today.
+        result = find_resource_overlaps(today=date(2026, 8, 21))
         self.assertIn(self.late.pk, result)
         self.assertIn(self.blocked.pk, result)
 

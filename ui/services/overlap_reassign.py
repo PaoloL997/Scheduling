@@ -29,6 +29,11 @@ from ui.services.problem_detection import (
 #: Problem types whose open rows carry a single-activity reschedule proposal.
 _RESCHEDULABLE_TIPI = ("sovrapposizione", "ritardo")
 
+#: Proposal summary for an overlap whose movable side is already running.
+STARTED_NO_SWAP_SUMMARY = (
+    "Attività già avviata: le risorse in uso non vengono sostituite automaticamente."
+)
+
 
 class OverlapReassignError(Exception):
     """Raised when a suggested overlap reassignment cannot be applied."""
@@ -164,13 +169,13 @@ def _preferred_model(tipo: str, blocked, from_uid: str) -> str | None:
 
 
 def _blocked_availability(blocked) -> dict | None:
-    """Wizard-compatible inventory lists for the blocked activity window."""
+    """Wizard-compatible inventory lists for the window the activity holds."""
     from ui.services.activity_inventory import get_available_resources
+    from ui.services.resource_conflicts import candidate_window
 
-    start = blocked.data_inizio
-    end = blocked.data_fine
-    if not (start and end):
+    if not (blocked.data_inizio and blocked.data_fine):
         return None
+    start, end = candidate_window(blocked.data_inizio, blocked.data_fine, blocked)
     return get_available_resources(
         stabilimento=blocked.stabilimento or "",
         data_inizio=start,
@@ -261,11 +266,13 @@ def pick_free_spare(tipo: str, from_uid: str, att) -> dict | None:
             the activity has no planned window or nothing compatible is free.
     """
     from ui.services.activity_inventory import _open_assignment_ids
+    from ui.services.resource_conflicts import candidate_window
 
     if not (att.data_inizio and att.data_fine):
         return None
 
-    occupied = occupied_ids_with_delay(tipo, att.data_inizio, att.data_fine, att.pk)
+    start, end = candidate_window(att.data_inizio, att.data_fine, att)
+    occupied = occupied_ids_with_delay(tipo, start, end, att.pk)
     busy = _open_assignment_ids(tipo, att.pk)
     availability = _blocked_availability(att)
     cat = _TIPO_TO_CAT.get(tipo)
@@ -365,7 +372,9 @@ def build_suggestion(
         or (late.activity_id if late else None),
         "late_plant": ((late.stabilimento or "").strip() or None) if late else None,
     }
-    if not (start and end):
+    if not (start and end) or blocked.actual_start:
+        # No planned window, or an activity already under way: the physical
+        # resources are in use, nothing gets swapped under the operator.
         unresolved = [
             {
                 "tipo": r.get("tipo"),
@@ -374,11 +383,16 @@ def build_suggestion(
             }
             for r in (overlap_item.get("resources") or [])
         ]
+        summary = (
+            STARTED_NO_SWAP_SUMMARY
+            if blocked.actual_start
+            else _format_suggestion_summary(meta, [], unresolved)
+        )
         return {
             **meta,
             "replacements": [],
             "unresolved": unresolved,
-            "summary": _format_suggestion_summary(meta, [], unresolved),
+            "summary": summary,
         }
 
     availability = _blocked_availability(blocked)
@@ -484,9 +498,11 @@ def apply_overlap_reassignment(blocked_pk: int) -> dict:
     from ui.services.bridge_write import BridgeWriteError, update_attivita
 
     try:
-        Attivita.objects.get(pk=blocked_pk)
+        target = Attivita.objects.get(pk=blocked_pk)
     except Attivita.DoesNotExist as exc:
         raise OverlapReassignError("Attività non trovata.", status_code=404) from exc
+    if target.actual_start:
+        raise OverlapReassignError(STARTED_NO_SWAP_SUMMARY, status_code=409)
 
     activities = list(Attivita.objects.prefetch_related("risorse"))
     overlaps = find_resource_overlaps(activities)
@@ -766,15 +782,31 @@ def _activity_update_payload(attivita) -> dict:
         format_activity_resources_html,
     )
 
+    from django.utils.timezone import localdate
+    from ui.services.planning_read import (
+        activity_state_key,
+        compute_activity_status,
+        compute_delay_days,
+    )
+
     risorse_all = list(RisorsaAttivita.objects.filter(attivita=attivita))
     res_fmt = format_activity_resources(risorse_all)
     problemi = list(ProblemaAttivita.objects.filter(attivita=attivita))
+    today = localdate()
+    dates = (
+        attivita.data_inizio,
+        attivita.data_fine,
+        attivita.actual_start,
+        attivita.actual_finish,
+    )
     return {
         "resources": ";".join(res_fmt["flat_ids"]) or None,
         "resources_by_tipo": res_fmt["by_tipo"],
         "resources_html": format_activity_resources_html(risorse_all),
         "warning_count": sum(1 for p in problemi if not p.risolto),
         "note_count": sum(1 for p in problemi if p.risolto),
+        "state_key": activity_state_key(compute_activity_status(*dates, today)),
+        "delay_days": compute_delay_days(*dates, today),
     }
 
 
@@ -801,10 +833,15 @@ def auto_resolve_resource_overlaps() -> dict:
     enrich_overlaps_with_suggestions(overlaps, activities)
     swapped_ids: list[int] = []
     affected: set[int] = set()
+    by_id = {a.pk: a for a in activities}
 
     for pk, items in list(overlaps.items()):
         blocked_items = [i for i in items if i.get("role") == "blocked"]
         if not blocked_items:
+            continue
+        blocked_att = by_id.get(pk)
+        if blocked_att is None or blocked_att.actual_start:
+            # Never swap the resources of a running activity.
             continue
         replacements: list[dict] = []
         seen: set[tuple[str, str]] = set()
@@ -1106,12 +1143,19 @@ def apply_reschedule(blocked_pk: int) -> dict:
         raise OverlapReassignError("La proposta non contiene modifiche da applicare.")
 
     try:
-        updated = apply_optimization_result({"tasks_after": tasks_after, "job_ids": []})
+        updated = apply_optimization_result(
+            {"tasks_after": tasks_after, "job_ids": []}, reconcile_after=False
+        )
     except OptimizationApplyError as exc:
         raise OverlapReassignError(str(exc)) from exc
 
-    # Re-run the overlap resolution so problems/proposals are reconciled.
-    result = auto_resolve_resource_overlaps()
+    # One reconciliation pass: closes the overlap, refreshes the notes of the
+    # moved activities and returns the row updates the page applies.
+    from ui.services.reconcile import reconcile
+
+    result = reconcile(
+        [int(t["orm_id"]) for t in tasks_after if t.get("orm_id") is not None]
+    )
     result["updated"] = updated
     result["blocked_orm_id"] = blocked_pk
     return result

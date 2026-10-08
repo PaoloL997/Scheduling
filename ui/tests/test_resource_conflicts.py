@@ -379,26 +379,43 @@ class OccupationWindowTest(TestCase):
             actual_start=date(2026, 6, 1),
         )
         self.assertEqual(
-            occupation_window(att),
+            occupation_window(att, today=date(2026, 6, 3)),
             (date(2026, 6, 1), date(2026, 6, 10)),
         )
 
     def test_in_progress_late_extends_to_effective_finish(self) -> None:
+        # Planned 1–10 June = 8 working days; started Friday 5 June the
+        # eighth working day is Tuesday 16 June (not 14 June, a Sunday).
         att = _ns(
             data_inizio=date(2026, 6, 1),
             data_fine=date(2026, 6, 10),
             actual_start=date(2026, 6, 5),
         )
         self.assertEqual(
-            occupation_window(att),
-            (date(2026, 6, 5), date(2026, 6, 14)),
+            occupation_window(att, today=date(2026, 6, 8)),
+            (date(2026, 6, 5), date(2026, 6, 16)),
         )
 
-    def test_in_progress_without_planned_end_occupies_one_day(self) -> None:
+    def test_in_progress_past_its_estimate_holds_through_today(self) -> None:
+        att = _ns(
+            data_inizio=date(2026, 6, 1),
+            data_fine=date(2026, 6, 10),
+            actual_start=date(2026, 6, 5),
+        )
+        self.assertEqual(
+            occupation_window(att, today=date(2026, 7, 1)),
+            (date(2026, 6, 5), date(2026, 7, 1)),
+        )
+
+    def test_in_progress_without_planned_end_occupies_through_today(self) -> None:
         att = _ns(actual_start=date(2026, 6, 5))
         self.assertEqual(
-            occupation_window(att),
+            occupation_window(att, today=date(2026, 6, 5)),
             (date(2026, 6, 5), date(2026, 6, 5)),
+        )
+        self.assertEqual(
+            occupation_window(att, today=date(2026, 6, 9)),
+            (date(2026, 6, 5), date(2026, 6, 9)),
         )
 
 
@@ -514,10 +531,11 @@ class FindConflictsInProgressDelayTest(TestCase):
             [("testa", "t1")],
             date(2026, 6, 12),
             date(2026, 6, 15),
+            today=date(2026, 6, 8),
         )
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["data_inizio"], "2026-06-05")
-        self.assertEqual(result[0]["data_fine"], "2026-06-14")
+        self.assertEqual(result[0]["data_fine"], "2026-06-16")
 
     def test_no_conflict_after_effective_finish(self) -> None:
         a = _make_activity(
@@ -530,10 +548,30 @@ class FindConflictsInProgressDelayTest(TestCase):
         _book(a, "testa", "t1")
         result = find_conflicts(
             [("testa", "t1")],
-            date(2026, 6, 15),
+            date(2026, 6, 17),
             date(2026, 6, 20),
+            today=date(2026, 6, 8),
         )
         self.assertEqual(result, [])
+
+    def test_still_open_past_its_estimate_keeps_conflicting(self) -> None:
+        """No actual_finish yet: the resource is held through today."""
+        a = _make_activity(
+            "X001",
+            1,
+            "2026-06-01",
+            "2026-06-10",
+            actual_start="2026-06-05",
+        )
+        _book(a, "testa", "t1")
+        result = find_conflicts(
+            [("testa", "t1")],
+            date(2026, 6, 25),
+            date(2026, 6, 30),
+            today=date(2026, 6, 26),
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["data_fine"], "2026-06-26")
 
     def test_gap_before_late_start_is_free(self) -> None:
         a = _make_activity(

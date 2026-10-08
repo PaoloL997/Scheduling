@@ -10,11 +10,9 @@ from django.utils.timezone import localdate
 
 from ui.models import Attivita, RisorsaAttivita
 from ui.services.resource_conflicts import (
-    ResourceConflictError,
     find_conflicts,
     occupation_window,
     format_conflict_message,
-    validate_no_conflicts,
 )
 from ui.services.resource_display import (
     format_activity_resources,
@@ -249,6 +247,11 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
     # pianificazione panel always echoes start/finish back, even untouched.
     plan_dates_changed = (a.data_inizio, a.data_fine) != (old_inizio, old_fine)
 
+    if a.data_inizio and a.data_fine and a.data_fine < a.data_inizio:
+        raise BridgeWriteError(
+            "La fine prevista non puo' precedere l'inizio previsto.",
+            status_code=400,
+        )
     if a.actual_finish and a.actual_start and a.actual_finish < a.actual_start:
         raise BridgeWriteError(
             "La fine effettiva non puo' precedere l'inizio effettivo.",
@@ -260,23 +263,19 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
         a.responsabile = data["responsible"] or ""
     if "tp60_custom" in data:
         a.tp60_custom = bool(data["tp60_custom"])
+    predecessor_objs: list | None = None
     if "predecessors" in data:
-        predecessor_ids = [
-            str(v).strip() for v in data["predecessors"] if str(v).strip()
-        ]
-        if predecessor_ids:
-            valid = set(
-                Attivita.objects.filter(commessa=a.commessa)
-                .exclude(pk=a.pk)
-                .values_list("activity_id", flat=True)
+        from ui.services.precedences import resolve_predecessors
+
+        try:
+            predecessor_objs = resolve_predecessors(
+                a.commessa, data["predecessors"], exclude_pk=a.pk
             )
-            invalid = [p for p in predecessor_ids if p not in valid]
-            if invalid:
-                raise BridgeWriteError(
-                    f"Predecessor non valido: {', '.join(invalid)}",
-                    status_code=400,
-                )
-        a.predecessors = ", ".join(predecessor_ids) if predecessor_ids else None
+        except ValueError as exc:
+            raise BridgeWriteError(str(exc), status_code=400) from exc
+    elif a.commessa != old_commessa:
+        # Moved to another commessa: the old precedences no longer apply.
+        predecessor_objs = []
 
     risorse_data = data.get("risorse")
     new_risorse_pairs: list[tuple[str, str]] | None = None
@@ -285,28 +284,7 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
             raise BridgeWriteError("Formato risorse non valido.", status_code=400)
         risorse_data = _merge_risorse_with_existing(a.pk, risorse_data)
         new_risorse_pairs = _risorse_to_pairs(risorse_data)
-        window = occupation_window(a)
-        if window is not None:
-            try:
-                validate_no_conflicts(
-                    new_risorse_pairs,
-                    window[0],
-                    window[1],
-                    exclude_activity_id=a.pk,
-                )
-            except ResourceConflictError as exc:
-                raise BridgeWriteError(
-                    format_conflict_message(
-                        exc.conflicts,
-                        action_hint=(
-                            "Scegli risorse alternative non occupate "
-                            "nel periodo indicato."
-                        ),
-                    ),
-                    status_code=409,
-                    conflicts=exc.conflicts,
-                ) from exc
-        elif new_risorse_pairs:
+        if new_risorse_pairs and occupation_window(a) is None:
             raise BridgeWriteError(
                 "Per assegnare risorse servono data di inizio e fine.",
                 status_code=400,
@@ -318,8 +296,6 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
     # note plus a reschedule proposal on the activity that has not started yet.
     # The one exception is the minimum-resources rule below: an activity
     # cannot be launched at all without its minimum kit.
-    # When new resources came in they were already validated above; otherwise
-    # check the ones currently booked.
     existing_pairs = (
         new_risorse_pairs
         if new_risorse_pairs is not None
@@ -348,21 +324,24 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
                 missing_resources=shortfalls,
             )
 
+    # One conflict check against the window the activity will really hold.
+    # A new resource selection or a moved planned window is a re-planning and
+    # is refused on conflict; a recorded fact only carries a warning.
     window = occupation_window(a)
     warnings: list[dict] = []
     if existing_pairs and window is not None:
         conflicts = find_conflicts(
             existing_pairs, window[0], window[1], exclude_activity_id=a.pk
         )
-        if conflicts and plan_dates_changed:
+        if conflicts and (new_risorse_pairs is not None or plan_dates_changed):
+            hint = (
+                "Scegli risorse alternative non occupate nel periodo indicato."
+                if new_risorse_pairs is not None
+                else "Usa «Modifica risorse» per sostituirle o rimuoverle, "
+                "oppure accorcia il periodo dell'attività."
+            )
             raise BridgeWriteError(
-                format_conflict_message(
-                    conflicts,
-                    action_hint=(
-                        "Usa «Modifica risorse» per sostituirle o rimuoverle, "
-                        "oppure accorcia il periodo dell'attività."
-                    ),
-                ),
+                format_conflict_message(conflicts, action_hint=hint),
                 status_code=409,
                 conflicts=conflicts,
             )
@@ -370,6 +349,8 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
 
     with transaction.atomic():
         a.save()
+        if predecessor_objs is not None:
+            a.predecessori.set(predecessor_objs)
 
         if new_risorse_pairs is not None:
             RisorsaAttivita.objects.filter(attivita_id=a.pk).delete()
@@ -380,14 +361,16 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
             if risorsa_rows:
                 RisorsaAttivita.objects.bulk_create(risorsa_rows)
 
-    if risorse_data is not None:
-        from ui.services.problem_detection import detect_and_save_problems
+        # The notes are part of the same write: a failure here rolls back
+        # the activity too, never leaving the two out of step.
+        if risorse_data is not None:
+            from ui.services.problem_detection import detect_and_save_problems
 
-        detect_and_save_problems(a, risorse_data)
-    elif "plant" in data or "tp60_custom" in data:
-        from ui.services.problem_detection import refresh_problems_for_attivita
+            detect_and_save_problems(a, risorse_data)
+        elif "plant" in data or "tp60_custom" in data:
+            from ui.services.problem_detection import refresh_problems_for_attivita
 
-        refresh_problems_for_attivita(a)
+            refresh_problems_for_attivita(a)
 
     result = {
         "item": a.item,
@@ -441,3 +424,7 @@ def delete_attivita(orm_id: int) -> None:
         raise BridgeWriteError("Attività non trovata.", status_code=404) from exc
 
     a.delete()
+
+    from ui.services.reconcile import reconcile_after_delete
+
+    reconcile_after_delete()
