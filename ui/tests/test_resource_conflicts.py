@@ -3,6 +3,7 @@
 import json
 from datetime import date
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import Client, RequestFactory, TestCase
 
@@ -217,6 +218,13 @@ class ApiTasksUpdateConflictTest(TestCase):
     """api_tasks_update rejects date changes that create resource conflicts."""
 
     def setUp(self) -> None:
+        # Fixture dates are fixed; pin "today" before them so a not-started
+        # activity keeps its planned window (see ``candidate_window``).
+        patcher = patch(
+            "ui.services.resource_conflicts.localdate", return_value=date(2026, 5, 1)
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.factory = RequestFactory()
         self.a = _make_activity("A001", 1, "2026-06-01", "2026-06-10")
         _book(self.a, "testa", "t1")

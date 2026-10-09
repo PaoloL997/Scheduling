@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-09
+
+### Fixed
+
+- **Risorse libere per un'attivita' non partita in ritardo sul piano.** In
+  «Modifica risorse» e al salvataggio, un'attivita' mai avviata con l'inizio
+  pianificato gia' passato e' verificata da oggi (`candidate_window`): non
+  puo' occupare nulla prima. Caso 25082: la produzione pianificata dal 30/09
+  non vedeva la H05, liberata dalla qualifica il 05/10. Le segnalazioni dei
+  problemi (`occupation_window`) restano invariate.
+- **Avanzamento commessa mai al 100% con attivita' aperte.** Un'attivita' in
+  corso oltre la durata pianificata si ferma a un giorno lavorativo dal
+  totale (`compute_work_progress`) e la percentuale arriva a 100 solo a
+  lavoro finito (`progress_percent`, `progressPercent` in `common.js`, Gantt).
+  Caso 25078: 100% con tre produzioni ancora aperte.
+- **Il kanban mostra l'avanzamento della Pianificazione** (`progress_pct` di
+  `/api/gantt/`, giorni lavorativi) invece della quota di attivita' completate.
+
 ## 2026-10-08
 
 ### Changed

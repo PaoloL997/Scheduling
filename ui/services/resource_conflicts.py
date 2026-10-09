@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from django.db.models import Q
+from django.utils.timezone import localdate
 
 from ui.services.resource_types import (
     TIPO_LABELS as _TIPO_LABELS,
@@ -184,7 +185,9 @@ def candidate_window(
     activity holds them?", so it must test the same interval the save will
     validate.  For an activity that has already started, occupancy follows
     execution rather than the calendar: it begins on ``actual_start``, so a
-    resource released on the *planned* start day is genuinely free.
+    resource released on the *planned* start day is genuinely free.  One not
+    started yet cannot begin before today, so a planned start already behind
+    is tested from today.
 
     Planned dates come from the caller (the user may be editing them in the
     form), the actual dates from the stored record, and
@@ -198,11 +201,13 @@ def candidate_window(
 
     Returns:
         tuple[date, date]: The interval to test availability against —
-            ``(data_inizio, data_fine)`` unchanged when the activity has not
-            started yet.
+            ``(data_inizio, data_fine)`` unchanged for a new activity.
     """
-    if attivita is None or not (attivita.actual_start or attivita.actual_finish):
+    if attivita is None:
         return data_inizio, data_fine
+    if not (attivita.actual_start or attivita.actual_finish):
+        start = max(data_inizio, today or localdate())
+        return start, max(data_fine, start)
 
     window = occupation_window(
         _EditedActivity(

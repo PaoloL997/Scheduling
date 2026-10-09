@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.test import RequestFactory, TestCase
@@ -28,6 +29,13 @@ from ui.tests.helpers import create_writer
 
 class UpdateAttivitaRisorseTest(TestCase):
     def setUp(self) -> None:
+        # Fixture dates are fixed; pin "today" before them so a not-started
+        # activity keeps its planned window (see ``candidate_window``).
+        patcher = patch(
+            "ui.services.resource_conflicts.localdate", return_value=date(2026, 5, 1)
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.att = Attivita.objects.create(
             commessa="C100",
             item=1,
@@ -164,8 +172,50 @@ class UpdateAttivitaRisorseTest(TestCase):
         self.assertEqual(ctx.exception.status_code, 409)
 
 
+    def test_not_started_behind_plan_accepts_a_unit_freed_before_today(self) -> None:
+        # Commessa 25082: the qualifica held the testa until 05/10 while the
+        # production, planned from 30/09, had not started by 09/10.
+        qualifica = Attivita.objects.create(
+            commessa="C100",
+            item=2,
+            activity="qualifica",
+            data_inizio=date(2026, 5, 28),
+            data_fine=date(2026, 6, 1),
+            actual_start=date(2026, 6, 1),
+            actual_finish=date(2026, 6, 3),
+        )
+        RisorsaAttivita.objects.create(
+            attivita=qualifica, tipo="testa", risorsa_id="T_FREED"
+        )
+        risorse = {
+            "teste": ["T_FREED"],
+            "mandrini": [],
+            "tastatori": [],
+            "maschere": [],
+            "generatori": [],
+        }
+        with patch(
+            "ui.services.resource_conflicts.localdate", return_value=date(2026, 6, 4)
+        ):
+            update_attivita(self.att.pk, {"risorse": risorse})
+        self.assertEqual(
+            list(
+                RisorsaAttivita.objects.filter(attivita=self.att).values_list(
+                    "risorsa_id", flat=True
+                )
+            ),
+            ["T_FREED"],
+        )
+
 class ApiGetRisorseExcludeTest(TestCase):
     def setUp(self) -> None:
+        # Fixture dates are fixed; pin "today" before them so a not-started
+        # activity keeps its planned window (see ``candidate_window``).
+        patcher = patch(
+            "ui.services.resource_conflicts.localdate", return_value=date(2026, 5, 1)
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.factory = RequestFactory()
         self.user = User.objects.create_user("ris", password="pass")
         TestaItem.objects.create(uid="T001", model="HT200", plant="Valbrembo")

@@ -10,6 +10,7 @@ from django.utils.timezone import localdate
 
 from ui.models import Attivita, RisorsaAttivita
 from ui.services.resource_conflicts import (
+    candidate_window,
     find_conflicts,
     occupation_window,
     format_conflict_message,
@@ -306,10 +307,13 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
                 missing_resources=shortfalls,
             )
 
-    # One conflict check against the window the activity will really hold.
+    # One conflict check against the window the activity will really hold --
+    # the same one the resource picker tests (see ``candidate_window``).
     # A new resource selection or a moved planned window is a re-planning and
     # is refused on conflict; a recorded fact only carries a warning.
     window = occupation_window(a)
+    if window is not None:
+        window = candidate_window(a.data_inizio, a.data_fine, a)
     warnings: list[dict] = []
     if existing_pairs and window is not None:
         conflicts = find_conflicts(

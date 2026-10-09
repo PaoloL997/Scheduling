@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.test import RequestFactory, TestCase
@@ -41,6 +42,13 @@ class AlwaysIncludeAssignedTestaTest(TestCase):
     """The currently-assigned testa survives every availability filter."""
 
     def setUp(self) -> None:
+        # Fixture dates are fixed; pin "today" before them so a not-started
+        # activity keeps its planned window (see ``candidate_window``).
+        patcher = patch(
+            "ui.services.resource_conflicts.localdate", return_value=START
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.att = Attivita.objects.create(
             commessa="25078",
             item="02-SNC",
@@ -346,8 +354,29 @@ class StartedActivityUsesItsRealWindowTest(TestCase):
         )
 
     def test_not_started_activity_keeps_its_planned_window(self) -> None:
+        with patch("ui.services.resource_conflicts.localdate", return_value=self.PLANNED_START):
+            self.assertEqual(
+                candidate_window(self.PLANNED_START, self.PLANNED_FINISH, self.att),
+                (self.PLANNED_START, self.PLANNED_FINISH),
+            )
+            self.assertNotIn("WO411", self._generatori())
+
+    def test_not_started_activity_behind_its_plan_is_tested_from_today(self) -> None:
+        # Never started, planned start already past: it cannot hold anything
+        # before today, so a unit released before today is offered again.
+        today = date(2026, 9, 24)
+        with patch("ui.services.resource_conflicts.localdate", return_value=today):
+            self.assertEqual(
+                candidate_window(self.PLANNED_START, self.PLANNED_FINISH, self.att),
+                (today, self.PLANNED_FINISH),
+            )
+            self.assertIn("WO411", self._generatori())
+
+    def test_not_started_activity_past_its_planned_finish_holds_today(self) -> None:
+        today = date(2026, 10, 9)
         self.assertEqual(
-            candidate_window(self.PLANNED_START, self.PLANNED_FINISH, self.att),
-            (self.PLANNED_START, self.PLANNED_FINISH),
+            candidate_window(
+                self.PLANNED_START, self.PLANNED_FINISH, self.att, today=today
+            ),
+            (today, today),
         )
-        self.assertNotIn("WO411", self._generatori())
