@@ -1005,7 +1005,7 @@ const KB_STATES = [
 ];
 const KB_RES_ORDER = ['testa', 'generatore', 'mandrino', 'tastatore', 'maschera'];
 const KB_RES_LABELS = { testa: 'Testa', generatore: 'Generatore', mandrino: 'Mandrino', tastatore: 'Tastatore', maschera: 'Maschera' };
-const kanban = { tasks: [], deadlines: {}, collapsed: new Set(), loaded: false };
+const kanban = { tasks: [], deadlines: {}, jobs: {}, collapsed: new Set(), loaded: false };
 
 function kbDate(iso) {
   if (!iso) return null;
@@ -1136,12 +1136,14 @@ function kbJobDetails(cell, key, tasks) {
   cell.append(meta);
 
   const done = tasks.filter(t => kbState(t) === 'done').length;
-  const pct = tasks.length ? Math.round(done / tasks.length * 100) : 0;
+  // Working-day progress of the whole commessa, the same figure Pianificazione
+  // shows (progress_pct of /api/gantt/).
+  const pct = (kanban.jobs[jobId] || {}).progress_pct || 0;
   const wrap = el('div', 'pian-progress-wrap');
   wrap.append(el('span', 'pian-progress-pct', pct + '%'));
   const bar = el('div', 'pian-progress');
   bar.setAttribute('role', 'progressbar');
-  bar.setAttribute('aria-label', 'Attività completate');
+  bar.setAttribute('aria-label', 'Avanzamento commessa');
   bar.setAttribute('aria-valuemin', '0');
   bar.setAttribute('aria-valuemax', '100');
   bar.setAttribute('aria-valuenow', String(pct));
@@ -1243,6 +1245,7 @@ function loadKanban() {
     .then(data => {
       kanban.tasks = data.tasks || [];
       kanban.deadlines = data.deadlines || {};
+      kanban.jobs = data.jobs || {};
       kanban.loaded = true;
       renderKanban();
     })

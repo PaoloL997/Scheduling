@@ -99,8 +99,10 @@ class WorkProgressTest(TestCase):
         self.assertEqual(
             compute_work_progress(mon, fri, mon, None, date(2026, 6, 3)), (3, 5)
         )
-        # Running long past the planned span never exceeds the span.
-        self.assertEqual(compute_work_progress(mon, fri, mon, None, TODAY), (5, 5))
+        # Still open past the planned span: only actual_finish completes it.
+        self.assertEqual(compute_work_progress(mon, fri, mon, None, TODAY), (4, 5))
+        one_day = compute_work_progress(mon, mon, mon, None, TODAY)
+        self.assertEqual(one_day, (0, 1))
         # Start recorded in the future: nothing done yet.
         self.assertEqual(
             compute_work_progress(mon, fri, date(2026, 6, 4), None, date(2026, 6, 2)),
@@ -109,6 +111,9 @@ class WorkProgressTest(TestCase):
         self.assertEqual(progress_percent(1, 3), 33)
         self.assertEqual(progress_percent(1, 2), 50)
         self.assertEqual(progress_percent(0, 0), 0)
+        self.assertEqual(progress_percent(5, 5), 100)
+        # Commessa 25078: open activities left, so never shown as 100%.
+        self.assertEqual(progress_percent(199, 200), 99)
 
 
 class ReadLayerIsPureTest(TestCase):

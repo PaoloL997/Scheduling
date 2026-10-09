@@ -344,7 +344,9 @@
       workDone += progress.done;
       workTotal += progress.total;
     });
-    const pct = workTotal ? Math.round(workDone / workTotal * 100) : 0;
+    // Same rule as progress_percent on the server: 100 only when all is done.
+    let pct = workTotal ? Math.round(workDone / workTotal * 100) : 0;
+    if (workDone < workTotal) pct = Math.min(pct, 99);
     const status = jobInfo && jobInfo.status ? (JOB_STATUS_LABELS[jobInfo.status] || jobInfo.status) : '';
     return { total, completed, wip, pct, status, workDone, workTotal };
   }

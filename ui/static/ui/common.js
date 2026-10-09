@@ -32,6 +32,14 @@ function getCsrfToken() {
   return m ? decodeURIComponent(m[1]) : '';
 }
 
+/** Whole progress percentage, as the server's progress_percent: halves
+ *  round up and 100 is reached only once every working day is done. */
+function progressPercent(done, total) {
+  if (!total) return 0;
+  const pct = Math.round(done / total * 100);
+  return done < total ? Math.min(pct, 99) : pct;
+}
+
 /** Parse YYYY-MM-DD (longer ISO strings are cut to the day) to a local
  *  noon Date, so day arithmetic never crosses a DST boundary. Null when
  *  unreadable. */

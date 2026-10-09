@@ -1024,9 +1024,7 @@ function _pianJobStats(commessa) {
     stats.workDone += progress.done;
     stats.workTotal += progress.total;
   });
-  stats.progressPct = stats.workTotal
-    ? Math.round(stats.workDone / stats.workTotal * 100)
-    : 0;
+  stats.progressPct = progressPercent(stats.workDone, stats.workTotal);
   return stats;
 }
 

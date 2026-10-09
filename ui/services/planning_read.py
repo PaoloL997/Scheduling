@@ -152,8 +152,9 @@ def compute_work_progress(
 
     ``total`` is the planned span in working days (at least one when both
     planned dates exist).  ``done`` is the whole span once finished, the
-    working days elapsed since ``actual_start`` (capped at the span) while
-    running, zero otherwise.
+    working days elapsed since ``actual_start`` while running, zero otherwise.
+    A running activity stays below its span even past its planned finish:
+    only ``actual_finish`` completes it.
     """
     if data_inizio is None or data_fine is None:
         return 0, 0
@@ -164,12 +165,16 @@ def compute_work_progress(
         return total, total
     if actual_start is None or today < actual_start:
         return 0, total
-    return min(total, working_days_in_calendar_span(actual_start, today)), total
+    elapsed = working_days_in_calendar_span(actual_start, today)
+    return min(total - 1, elapsed), total
 
 
 def progress_percent(done: int, total: int) -> int:
-    """Whole percentage, halves rounded up like the former client code."""
-    return int(done * 100 / total + 0.5) if total else 0
+    """Whole percentage, halves rounded up; 100 only once everything is done."""
+    if not total:
+        return 0
+    pct = int(done * 100 / total + 0.5)
+    return min(pct, 99) if done < total else pct
 
 
 def activity_state_key(pills: list[dict]) -> str:
