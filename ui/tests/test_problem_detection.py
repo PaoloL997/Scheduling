@@ -435,6 +435,53 @@ class DetectSpostamentoProblemsTest(TestCase):
         self.assertTrue(closed.risolto)
         self.assertIn("spostata", closed.note_risoluzione.lower())
 
+    def test_completed_activity_ignores_resource_plant(self) -> None:
+        """A resource moved after the work is done opens no spostamento."""
+        self.att.actual_start = date(2026, 6, 1)
+        self.att.actual_finish = date(2026, 6, 10)
+        self.att.save(update_fields=["actual_start", "actual_finish"])
+        count = detect_and_save_problems(self.att, self.risorse)
+        self.assertEqual(count, 0)
+        self.assertFalse(ProblemaAttivita.objects.filter(attivita=self.att).exists())
+
+    def test_completed_activity_raises_no_acquisto(self) -> None:
+        self.att.actual_start = date(2026, 6, 1)
+        self.att.actual_finish = date(2026, 6, 10)
+        self.att.save(update_fields=["actual_start", "actual_finish"])
+        count = detect_and_save_problems(self.att, {"teste": ["T1"]})
+        self.assertEqual(count, 0)
+        self.assertFalse(ProblemaAttivita.objects.filter(attivita=self.att).exists())
+
+    def test_completion_auto_resolves_open_spostamento(self) -> None:
+        """Open notes of an activity that has since finished are closed."""
+        detect_and_save_problems(self.att, self.risorse)
+        self.att.actual_start = date(2026, 6, 1)
+        self.att.actual_finish = date(2026, 6, 10)
+        self.att.save(update_fields=["actual_start", "actual_finish"])
+        detect_and_save_problems(self.att, self.risorse)
+        closed = ProblemaAttivita.objects.get(
+            attivita=self.att, tipo=ProblemaAttivita.TIPO_SPOSTAMENTO
+        )
+        self.assertTrue(closed.risolto)
+        self.assertIn("conclusa", closed.note_risoluzione.lower())
+
+    def test_inventory_plant_change_skips_completed_activity(self) -> None:
+        """refresh_problems_for_resource: the finished activity is left alone."""
+        from ui.models import TestaItem
+        from ui.services.problem_detection import refresh_problems_for_resource
+
+        self.att.actual_start = date(2026, 6, 1)
+        self.att.actual_finish = date(2026, 6, 10)
+        self.att.save(update_fields=["actual_start", "actual_finish"])
+        RisorsaAttivita.objects.create(attivita=self.att, tipo="testa", risorsa_id="T1")
+        TestaItem.objects.filter(uid="T1").update(plant="Schio")
+        self.assertEqual(refresh_problems_for_resource("testa", "T1"), 0)
+        self.assertFalse(
+            ProblemaAttivita.objects.filter(
+                attivita=self.att, tipo=ProblemaAttivita.TIPO_SPOSTAMENTO
+            ).exists()
+        )
+
     def test_patch_inventory_plant_closes_spostamento(self) -> None:
         import json
 

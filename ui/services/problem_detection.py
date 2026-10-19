@@ -37,6 +37,9 @@ logger = logging.getLogger(__name__)
 _SPOSTAMENTO_RESOLVED_NOTE = "Risorsa spostata allo stabilimento di lavorazione."
 _STALE_CONDITION_NOTE = "Condizione non piu verificata dopo aggiornamento attivita."
 _RITARDO_RESOLVED_NOTE = "Attivita avviata o ripianificata."
+_COMPLETED_NOTE = (
+    "Attivita conclusa: la posizione attuale delle risorse non la riguarda piu."
+)
 
 
 def _shortfall_description(
@@ -238,6 +241,11 @@ def detect_and_save_problems(
     mandrini and 1 maschera whatever the testa configuration says, and no
     tastatore: leaving the tastatore unselected raises no ``acquisto`` note.
 
+    A completed activity (``actual_finish`` set) raises neither: where its
+    resources are *now* no longer concerns it, so moving a resource from the
+    plant after the work is done opens nothing, and any open note is
+    auto-resolved as "attivita conclusa".
+
     Open ``acquisto`` / ``spostamento`` notes are reconciled with the current
     selection: stale ones are auto-resolved, still-valid ones get an updated
     description when needed, and missing ones are created.  Creation is
@@ -277,6 +285,7 @@ def detect_and_save_problems(
             )
         )
 
+    completed = bool(getattr(attivita, "actual_finish", None))
     shortfalls = {
         s["categoria"]: s
         for s in resource_shortfalls(
@@ -290,7 +299,7 @@ def detect_and_save_problems(
     stabilimento_attivita = (attivita.stabilimento or "").strip()
     problems: list[ProblemaAttivita] = []
 
-    for key in _CAT_KEYS:
+    for key in () if completed else _CAT_KEYS:  # a finished activity raises nothing
         categoria = _CAT_TO_TIPO[key]
         uids: list[str] = risorse_dict.get(key) or []
         label = _TIPO_LABELS.get(categoria, categoria.capitalize())
@@ -348,9 +357,12 @@ def detect_and_save_problems(
                     cat and problema.risorsa_uid in (risorse_dict.get(cat) or [])
                 )
             problema.risolto = True
-            problema.note_risoluzione = (
-                _SPOSTAMENTO_RESOLVED_NOTE if still_assigned else _STALE_CONDITION_NOTE
-            )
+            if completed:
+                problema.note_risoluzione = _COMPLETED_NOTE
+            elif still_assigned:
+                problema.note_risoluzione = _SPOSTAMENTO_RESOLVED_NOTE
+            else:
+                problema.note_risoluzione = _STALE_CONDITION_NOTE
             problema.data_risoluzione = timezone.now()
             problema.save(
                 update_fields=["risolto", "note_risoluzione", "data_risoluzione"]

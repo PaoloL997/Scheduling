@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-19
+
+### Fixed
+
+- **Nessuna segnalazione di spostamento o acquisto su un'attivita' conclusa.**
+  `detect_and_save_problems` non confronta piu' lo stabilimento delle risorse
+  con quello di un'attivita' che ha `actual_finish`: spostare una risorsa
+  dall'inventario dopo la fine del lavoro non apre nulla, e le note ancora
+  aperte vengono chiuse con «Attivita conclusa». Caso 25082: il generatore
+  WO401 portato a Schio il 19/10 riapriva uno spostamento sulla qualifica
+  finita il 05/10 (e sulla produzione 25078/03-SNA finita il 26/08).
+
 ## 2026-10-09
 
 ### Fixed
