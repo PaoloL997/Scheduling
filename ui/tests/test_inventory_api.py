@@ -105,3 +105,81 @@ class InventoryApiTest(TestCase):
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 404)
+
+
+class InventoryMeasuresStoredWithDotTest(TestCase):
+    """Measures typed with the comma are stored with the dot."""
+
+    def setUp(self) -> None:
+        self.client = Client()
+        self.client.force_login(create_writer("inventarista"))
+
+    def _post(self, table: str, payload: dict):
+        return self.client.post(
+            reverse("api_inventario_add", kwargs={"table": table}),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_add_mandrino_with_comma(self) -> None:
+        from ui.models import MandrinoItem
+
+        resp = self._post(
+            "Mandrino",
+            {"uid": "C900", "diameter": "20,5", "plant": "Valbrembo", "notes": "22,5"},
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        item = MandrinoItem.objects.get(uid="C900")
+        self.assertEqual(item.diameter, "20.5")
+        self.assertEqual(item.notes, "22.5")
+
+    def test_add_maschera_with_comma(self) -> None:
+        from ui.models import MascheraItem
+
+        resp = self._post(
+            "Maschera",
+            {
+                "uid": "M900",
+                "pitch": "49,21",
+                "plant": "Schio",
+                "center_distance": "147,6",
+            },
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        item = MascheraItem.objects.get(uid="M900")
+        self.assertEqual(item.pitch, "49.21")
+        self.assertEqual(item.center_distance, "147.6")
+
+    def test_patch_and_put_normalise_too(self) -> None:
+        from ui.models import TastatoreItem
+
+        TastatoreItem.objects.create(uid="T900", diameter="13.5", plant="Valbrembo")
+        resp = self.client.patch(
+            reverse(
+                "api_inventario_detail", kwargs={"table": "Tastatore", "uid": "T900"}
+            ),
+            data=json.dumps({"diameter": "15,08"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(TastatoreItem.objects.get(uid="T900").diameter, "15.08")
+
+        resp = self.client.put(
+            reverse(
+                "api_inventario_detail", kwargs={"table": "Tastatore", "uid": "T900"}
+            ),
+            data=json.dumps({"uid": "T900", "diameter": "21,1", "plant": "Valbrembo"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(TastatoreItem.objects.get(uid="T900").diameter, "21.1")
+
+    def test_free_text_notes_untouched(self) -> None:
+        from ui.models import TestaItem
+
+        resp = self._post(
+            "Testa",
+            {"uid": "H900", "model": "TP60", "plant": "Valbrembo", "notes": "rev 1,2"},
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(TestaItem.objects.get(uid="H900").notes, "rev 1,2")

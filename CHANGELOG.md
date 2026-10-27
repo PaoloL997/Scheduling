@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-27
+
+### Fixed
+
+- **Misure sempre col punto.** Diametri, passi, interassi e il diametro
+  massimo nelle note dei mandrini/tastatori vengono salvati con il punto
+  qualunque separatore si digiti (`normalize_measure`,
+  `normalize_measure_columns`): inserimento, modifica, PATCH e import Excel.
+  La pagina Pianificazione non localizza piu' in italiano le misure WPS
+  dell'attivita' (`|unlocalize` sui `data-bore-*`), che comparivano come
+  «13,886 mm» accanto a «14.83 mm» dell'inventario. Le 29 righe gia' salvate
+  con la virgola sono state riscritte nel database.
+
 ## 2026-10-19
 
 ### Fixed

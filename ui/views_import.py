@@ -24,7 +24,11 @@ from django.views.decorators.http import require_http_methods
 
 from ui.permissions import write_required
 from ui.services.excel_importer import parse_inventory_excel_generic
-from ui.services.inventory import _TABLE_COLUMNS, _get_model
+from ui.services.inventory import (
+    _TABLE_COLUMNS,
+    _get_model,
+    normalize_measure_columns,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +83,9 @@ def api_inventario_import_excel(request: HttpRequest) -> JsonResponse:
         table = row["_table"]
         model_class = _get_model(table)
         known_cols = _TABLE_COLUMNS[table]
-        obj_kwargs = {col: row.get(col) for col in known_cols}
+        obj_kwargs = normalize_measure_columns(
+            table, {col: row.get(col) for col in known_cols}
+        )
         try:
             with transaction.atomic():
                 model_class.objects.create(**obj_kwargs)

@@ -7,6 +7,7 @@ that operate on the Django ORM inventory models.
 
 from django.db import IntegrityError, transaction
 
+from ui.services.measures import normalize_measure
 from ui.services.resource_types import model_for_table
 
 _ALLOWED_TABLES = {"Generatore", "Mandrino", "Maschera", "Tastatore", "Testa"}
@@ -28,6 +29,34 @@ _TABLE_TO_TIPO: dict[str, str] = {
 }
 
 _MAINTENANCE_TABLES = {"Testa", "Generatore"}
+
+#: Columns holding a measure in millimetres, always stored with the dot.
+#: Mandrino / Tastatore notes carry the maximum diameter.
+_MEASURE_COLUMNS: dict[str, tuple[str, ...]] = {
+    "Mandrino": ("diameter", "notes"),
+    "Tastatore": ("diameter", "notes"),
+    "Maschera": ("pitch", "center_distance"),
+}
+
+
+def normalize_measure_columns(table: str, row: dict) -> dict:
+    """Return *row* with its measure columns written with the dot.
+
+    Only the keys present in *row* are touched, so a partial update keeps
+    the other columns as they are.
+
+    Args:
+        table: Inventory table name.
+        row: Column → value mapping about to be written.
+
+    Returns:
+        dict: The same mapping, measures normalised by
+            :func:`~ui.services.measures.normalize_measure`.
+    """
+    for col in _MEASURE_COLUMNS.get(table, ()):
+        if col in row:
+            row[col] = normalize_measure(row[col])
+    return row
 
 
 def _get_model(table: str):
@@ -85,7 +114,9 @@ def insert_resource(table: str, data: dict) -> None:
     _validated_table(table)
     model_class = _get_model(table)
     columns = _TABLE_COLUMNS[table]
-    row = {col: data.get(col) or None for col in columns}
+    row = normalize_measure_columns(
+        table, {col: data.get(col) or None for col in columns}
+    )
     maintenance = _extract_maintenance(table, data)
     if maintenance is not None:
         row["in_manutenzione"] = maintenance
@@ -163,7 +194,10 @@ def patch_resource(table: str, original_uid: str, data: dict) -> str:
     _validated_table(table)
     model_class = _get_model(table)
     columns = _TABLE_COLUMNS[table]
-    updates = {key: _normalize_field_value(data[key]) for key in data if key in columns}
+    updates = normalize_measure_columns(
+        table,
+        {key: _normalize_field_value(data[key]) for key in data if key in columns},
+    )
     maintenance = _extract_maintenance(table, data)
     if maintenance is not None:
         updates["in_manutenzione"] = maintenance
@@ -216,7 +250,9 @@ def update_resource(table: str, original_uid: str, data: dict) -> None:
     _validated_table(table)
     model_class = _get_model(table)
     columns = _TABLE_COLUMNS[table]
-    row = {col: data.get(col) or None for col in columns}
+    row = normalize_measure_columns(
+        table, {col: data.get(col) or None for col in columns}
+    )
     maintenance = _extract_maintenance(table, data)
 
     try:

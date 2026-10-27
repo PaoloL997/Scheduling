@@ -1,6 +1,7 @@
 """Culture-invariant parsing and comparison of inventory measures.
 
 Inventory measures (``diameter``, ``pitch``) are stored as free text, and
+written with the dot (:func:`normalize_measure`) whatever the user typed;
 activity requirements arrive as ``Decimal`` or query-string values.  Every
 compatibility check in planning and on the tablet goes through this module so
 that a value such as ``"12,5"`` reads as ``12.5`` on any locale and an
@@ -45,6 +46,31 @@ def parse_measure(value: Any) -> float | None:
     except ValueError:
         return None
     return parsed if math.isfinite(parsed) else None
+
+
+def normalize_measure(value: Any) -> str | None:
+    """Return a measure as text with the dot as decimal separator.
+
+    Inventory measures are stored as free text and shown as they are, so
+    ``"20,5"`` and ``"20.5"`` would sit side by side in the same list.  A
+    value that reads as a number is rewritten with the dot (``"20,5"`` →
+    ``"20.5"``, ``"14.83"`` unchanged); anything else is only stripped, so a
+    free-text note is never altered.
+
+    Args:
+        value: Raw measure from a request, an Excel cell or the ORM.
+
+    Returns:
+        str | None: The normalised text, or ``None`` when empty.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if "," in text and parse_measure(text) is not None:
+        return text.replace(",", ".")
+    return text
 
 
 def bore_in_range(value: Any, bore_min: Any, bore_max: Any) -> bool:

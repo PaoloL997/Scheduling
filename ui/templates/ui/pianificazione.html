@@ -1,5 +1,5 @@
 {% extends "ui/base.html" %}
-{% load static %}
+{% load static l10n %}
 
 {% block title %}Pianificazione{% endblock %}
 
@@ -137,10 +137,10 @@
                    data-resources-typed="{{ task.resources_by_tipo_json }}"
                    data-min-requirements="{{ task.min_requirements_json }}"
                    data-modello-testa="{{ task.modello_testa|default:'' }}"
-                   data-bore-min="{{ task.bore_min|default:'' }}"
-                   data-bore-max="{{ task.bore_max|default:'' }}"
-                   data-bore-mid="{{ task.bore_mid|default:'' }}"
-                   data-tube-pitch="{{ task.tube_pitch|default:'' }}"
+                   data-bore-min="{{ task.bore_min|default:''|unlocalize }}"
+                   data-bore-max="{{ task.bore_max|default:''|unlocalize }}"
+                   data-bore-mid="{{ task.bore_mid|default:''|unlocalize }}"
+                   data-tube-pitch="{{ task.tube_pitch|default:''|unlocalize }}"
                    data-predecessors="{{ task.predecessors|default:'' }}"
                    onclick="openDetailModal(this, 'task')">
                 <span class="pian-col-id" title="{{ task.activity_id }}">{{ task.activity_id }}</span>

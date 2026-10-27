@@ -12,6 +12,7 @@ from ui.services.activity_inventory import _select_n, get_available_resources
 from ui.services.measures import (
     bore_in_range,
     is_resource_compatible,
+    normalize_measure,
     parse_measure,
     pitch_matches,
 )
@@ -33,6 +34,25 @@ class ParseMeasureTest(TestCase):
 
     def test_zero_is_a_real_value(self) -> None:
         self.assertEqual(parse_measure("0"), 0.0)
+
+
+class NormalizeMeasureTest(TestCase):
+    def test_comma_becomes_dot(self) -> None:
+        self.assertEqual(normalize_measure("20,5"), "20.5")
+        self.assertEqual(normalize_measure(" 49,21 "), "49.21")
+
+    def test_dot_and_integers_unchanged(self) -> None:
+        self.assertEqual(normalize_measure("14.83"), "14.83")
+        self.assertEqual(normalize_measure("100"), "100")
+        self.assertEqual(normalize_measure(22.0), "22.0")
+
+    def test_free_text_only_stripped(self) -> None:
+        self.assertEqual(normalize_measure(" 12,5 mm circa "), "12,5 mm circa")
+        self.assertEqual(normalize_measure("demo opt"), "demo opt")
+
+    def test_empty_is_none(self) -> None:
+        for raw in (None, "", "   "):
+            self.assertIsNone(normalize_measure(raw))
 
 
 class RangeChecksTest(TestCase):
