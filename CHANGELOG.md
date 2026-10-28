@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-10-28
+
+### Fixed
+
+- **Avvio con pezzi di un'altra attivita'.** Registrare l'«Inizio effettivo»
+  (web e tablet) distingue chi tiene il pezzo nel periodo che l'attivita'
+  occupera': un'attivita' **pianificata** non blocca, l'avvio viene salvato e
+  la risposta avvisa che i pezzi erano destinati a un'altra attivita'
+  (`warning_message`, `warnings`); il server prova a riassegnarla e, se non
+  trova pezzi compatibili, propone una ripianificazione. Un'attivita' **in
+  corso** blocca: 409 «Conflitto risorse» con `conflicts`, niente salvato.
+  Prima l'avvio passava sempre con un avviso. Caso 25100: avvio anticipato
+  con pezzi pianificati sulla 25108 dal 27/10 al 13/11.
+- **La scansione rifiuta un pezzo ancora in uso, anche se e' quello
+  previsto.** `POST /api/bridge/attivita/<pk>/scan/` risponde 409
+  `occupata` quando il pezzo scansionato (testa, generatore o accessorio) e'
+  assegnato a un'altra attivita' avviata e non ancora chiusa, qualunque siano
+  le date. Prima il pezzo previsto passava come «corrisponde alla
+  pianificazione». Un pezzo di un'attivita' solo pianificata resta
+  accettato.
+
 ## 2026-10-27
 
 ### Fixed

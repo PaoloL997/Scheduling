@@ -86,11 +86,12 @@ from the planned `data_inizio`, so it offers exactly what the save will accept
 
 **Facts are never refused.** Writing `actual_start` / `actual_finish` records
 something that already happened, so the save always succeeds. A resulting
-conflict becomes a `sovrapposizione` note on the activity that has not started
-yet, plus a reschedule proposal. Only a real change to the planned dates or to
-the assigned resources can be rejected with a 409 — plus the two rules below on
-starting an activity, which are the only things that can refuse a start: the
-minimum kit must be booked, and the start cannot be dated in the future.
+conflict with a *planned* activity becomes a `sovrapposizione` note on that
+activity, plus a reschedule proposal. Only a real change to the planned dates or
+to the assigned resources can be rejected with a 409 — plus the three rules
+below on starting an activity, which are the only things that can refuse a
+start: the minimum kit must be booked, no piece may be held by an activity in
+progress, and the start cannot be dated in the future.
 
 ## The effective start is never in the future
 
@@ -126,6 +127,23 @@ both `/api/tasks/update/` and the tablet bridge.
 Every activity payload also carries `min_requirements` and `can_start`, so
 Pianificazione warns on the **Inizio effett.** field and stops the save before
 the round-trip.
+
+## Starting with pieces another activity holds
+
+Recording `actual_start` tests the window the activity will really occupy
+(from `actual_start` through `max(data_fine, effective_finish, today)`)
+against every other booking of its pieces:
+
+- **Held by a planned activity** → the start is saved; the response carries
+  `warnings` and a `warning_message` saying the pieces were meant for another
+  activity in that window. The overlap engine then re-equips the planned
+  activity with compatible free pieces or leaves it a reschedule proposal.
+- **Held by an activity in progress** (started, not closed) → 409 with
+  `error` and `conflicts`; nothing is saved. The piece is released only by that
+  activity's `actual_finish`.
+- A closed activity has released its pieces and never blocks.
+
+Both `/api/tasks/update/` and the tablet bridge answer the same way.
 
 An activity that was never started and is already past `data_fine` raises a
 `ritardo` note, shows a **NON INIZIATA · SCADUTA** badge, and gets a reschedule
@@ -218,10 +236,13 @@ The tablet starts an activity by scanning its components against
   tolerance → 409 `non_compatibile` with the measures spelled out. The activity
   must define the requirement (`requisiti`) and the item measure must be
   readable (`misura`): an unreadable value is never treated as zero.
-- The scanned item is then classified in the activity's occupation window:
+- **Any item held by another activity in progress** (started, no actual
+  finish) → 409 `occupata`, whether it is the planned piece or not and
+  whatever the dates: it is in use until that activity is closed.
+- A different accessory is then classified in the activity's occupation window:
   1. **Free** → allowed; a different piece needs `conferma: true` after the
      operator sees `"Stai usando MND-117 al posto di MND-102, va bene?"`.
-  2. **Held by an activity in progress or closed** → 409 `occupata`, nothing
+  2. **Held by an activity closed in the window** → 409 `occupata`, nothing
      changes.
   3. **Held only by planned activities** → same confirmation; on confirm the
      started activity gets the scanned piece, each robbed activity is

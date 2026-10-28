@@ -273,12 +273,14 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
                 status_code=400,
             )
 
-    # Re-planning is validated up front; recording a fact never is.  Setting
-    # «Inizio/Fine effettiva» states what already happened, so a *resource
-    # conflict* can be surfaced but must never refuse the save -- it becomes a
-    # note plus a reschedule proposal on the activity that has not started yet.
-    # The one exception is the minimum-resources rule below: an activity
-    # cannot be launched at all without its minimum kit.
+    # Re-planning is validated up front; recording a fact mostly is not.
+    # Setting «Inizio/Fine effettiva» states what already happened, so a
+    # *resource conflict* with a planned activity is surfaced but never
+    # refuses the save -- it becomes a note plus a reschedule proposal on the
+    # activity that has not started yet.  Two things can refuse a start: the
+    # minimum kit below, and a piece physically in use by an activity in
+    # progress (see ``_in_progress_conflicts``).
+    starting = a.actual_start is not None and old_actual_start is None
     existing_pairs = (
         new_risorse_pairs
         if new_risorse_pairs is not None
@@ -293,7 +295,7 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
     # one generatore and, per testa model, the minimum of each accessory).
     # Only the transition to «avviata» is guarded, so unrelated edits on an
     # activity started before the rule existed keep working.
-    if a.actual_start is not None and old_actual_start is None:
+    if starting:
         from ui.services.problem_detection import (
             format_missing_minimum_message,
             missing_minimum_resources,
@@ -331,6 +333,21 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
                 status_code=409,
                 conflicts=conflicts,
             )
+        if conflicts and starting:
+            in_use = _in_progress_conflicts(conflicts)
+            if in_use:
+                raise BridgeWriteError(
+                    format_conflict_message(
+                        in_use,
+                        action_hint=(
+                            "L'attività non può partire: il pezzo è in uso in "
+                            "un'attività in corso e si libera solo con la sua "
+                            "fine effettiva."
+                        ),
+                    ),
+                    status_code=409,
+                    conflicts=in_use,
+                )
         warnings = conflicts
 
     with transaction.atomic():
@@ -368,8 +385,13 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
         result["warning_message"] = format_conflict_message(
             warnings,
             action_hint=(
-                "La registrazione e' stata salvata. Il conflitto e' segnalato "
-                "sull'attività non ancora iniziata, con proposta di "
+                "Stai avviando l'attività con pezzi che in questo periodo erano "
+                "destinati a un'altra attività pianificata. L'attività e' stata "
+                "avviata comunque: il server prova a riassegnare l'altra e, se "
+                "non trova pezzi compatibili, propone una ripianificazione."
+                if starting
+                else "La registrazione e' stata salvata. Il conflitto e' "
+                "segnalato sull'attività non ancora iniziata, con proposta di "
                 "ripianificazione."
             ),
         )
@@ -393,6 +415,23 @@ def update_attivita(orm_id: int, data: dict, *, resolve_overlaps: bool = True) -
 
             result.update(auto_resolve_resource_overlaps())
     return result
+
+
+def _in_progress_conflicts(conflicts: list[dict]) -> list[dict]:
+    """Keep the conflicts whose holder is in progress (started, not closed).
+
+    A planned holder only yields a warning: the piece is physically free and
+    the holder is re-equipped or rescheduled.  A closed holder has released
+    the piece.  One in progress is really using it.
+    """
+    running = set(
+        Attivita.objects.filter(
+            pk__in={c["attivita_id"] for c in conflicts},
+            actual_start__isnull=False,
+            actual_finish__isnull=True,
+        ).values_list("pk", flat=True)
+    )
+    return [c for c in conflicts if c["attivita_id"] in running]
 
 
 def delete_attivita(orm_id: int) -> None:

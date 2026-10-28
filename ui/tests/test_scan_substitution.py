@@ -205,6 +205,48 @@ class Case2InUseTest(ScanBase):
         self.assertIn(("mandrino", "M102"), _pairs(self.att))
         self.assertIn(("mandrino", "M117"), _pairs(other))
 
+    def test_planned_piece_held_by_activity_in_progress_is_refused(self) -> None:
+        other = self._other("M102", actual_start=date(2026, 6, 2))
+        with self.assertRaises(BridgeWriteError) as ctx:
+            scan_resource(self.att.pk, tipo="mandrino", codice="M102")
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(ctx.exception.motivo, "occupata")
+        self.assertEqual(ctx.exception.conflicts[0]["attivita_id"], other.pk)
+        self.assertIn("non ancora chiusa", ctx.exception.message)
+
+    def test_planned_testa_held_by_activity_in_progress_is_refused(self) -> None:
+        other = self._other("M120", actual_start=date(2026, 6, 2))
+        RisorsaAttivita.objects.filter(attivita=other, tipo="testa").update(
+            risorsa_id="T1"
+        )
+        with self.assertRaises(BridgeWriteError) as ctx:
+            scan_resource(self.att.pk, tipo="testa", codice="T1")
+        self.assertEqual(ctx.exception.motivo, "occupata")
+
+    def test_in_progress_holder_outside_the_window_still_refuses(self) -> None:
+        self._other(
+            "M117",
+            data_inizio=date(2026, 7, 1),
+            data_fine=date(2026, 7, 3),
+            actual_start=date(2026, 7, 1),
+        )
+        with self.assertRaises(BridgeWriteError) as ctx:
+            scan_resource(self.att.pk, tipo="mandrino", codice="M117", conferma=True)
+        self.assertEqual(ctx.exception.motivo, "occupata")
+        self.assertIn(("mandrino", "M102"), _pairs(self.att))
+
+    def test_planned_piece_released_by_a_closed_activity_matches(self) -> None:
+        self._other(
+            "M102", actual_start=date(2026, 6, 2), actual_finish=date(2026, 6, 3)
+        )
+        result = scan_resource(self.att.pk, tipo="mandrino", codice="M102")
+        self.assertEqual(result["esito"], "corrispondente")
+
+    def test_planned_piece_held_by_a_planned_activity_matches(self) -> None:
+        self._other("M102")
+        result = scan_resource(self.att.pk, tipo="mandrino", codice="M102")
+        self.assertEqual(result["esito"], "corrispondente")
+
 
 class Case3PlannedOverlapTest(ScanBase):
     def test_confirmation_message_names_the_robbed_activity(self) -> None:
@@ -329,6 +371,14 @@ class BridgeScanEndpointTest(ScanBase):
     def test_in_use_refusal_carries_conflicts(self) -> None:
         self._other("M117", actual_start=date(2026, 6, 2))
         resp = self._post({"tipo": "mandrino", "codice": "M117", "conferma": True})
+        self.assertEqual(resp.status_code, 409)
+        body = resp.json()
+        self.assertEqual(body["motivo"], "occupata")
+        self.assertEqual(len(body["conflicts"]), 1)
+
+    def test_planned_piece_in_use_refusal_carries_conflicts(self) -> None:
+        self._other("M102", actual_start=date(2026, 6, 2))
+        resp = self._post({"tipo": "mandrino", "codice": "M102"})
         self.assertEqual(resp.status_code, 409)
         body = resp.json()
         self.assertEqual(body["motivo"], "occupata")

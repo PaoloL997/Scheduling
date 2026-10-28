@@ -3,12 +3,16 @@
 The tablet starts an activity by scanning its components.  Heads and
 generators must match the assigned UID exactly.  Accessories (mandrini,
 tastatori, maschere) are constrained by a measure, not by an identity, so a
-scanned item that is dimensionally compatible may replace the planned one:
+scanned item that is dimensionally compatible may replace the planned one.
+
+Whatever the category, and whether it matches the plan or not, an item held
+by another activity in progress (started, not closed) is refused: it is in
+use there until that activity records its actual finish, whatever its dates.
 
 * **Caso 1** -- the scanned item is free in the activity window: allowed,
   with an explicit confirmation when it differs from the planned item.
-* **Caso 2** -- the scanned item is held by an activity already in progress
-  (or closed) in the same window: refused, nothing changes.
+* **Caso 2** -- the scanned item is held by an activity in progress, or by
+  one closed within the same window: refused, nothing changes.
 * **Caso 3** -- the scanned item is assigned to a planned, overlapping
   activity: allowed with the same confirmation; the robbed activity is
   re-equipped through :func:`ui.services.overlap_reassign.pick_free_spare`
@@ -128,6 +132,17 @@ def scan_resource(
     assigned = _assigned_uids(att, tipo)
     base: dict = {"tipo": tipo, "codice": codice, "atteso": None, "avvisi": []}
 
+    if codice not in assigned and tipo in EXACT_TIPI:
+        previsto = ", ".join(f"«{u}»" for u in assigned) or "nessuna"
+        raise ScanError(
+            f"{label} «{codice}» non corrisponde a quella prevista ({previsto}). "
+            "Per teste e generatori serve il pezzo esatto.",
+            status_code=409,
+            motivo="non_corrispondente",
+        )
+
+    _refuse_if_in_use(att, tipo, codice)
+
     if codice in assigned:
         return {
             **base,
@@ -137,15 +152,6 @@ def scan_resource(
             "applicata": False,
             "messaggio": f"{label} «{codice}» corrisponde alla pianificazione.",
         }
-
-    if tipo in EXACT_TIPI:
-        previsto = ", ".join(f"«{u}»" for u in assigned) or "nessuna"
-        raise ScanError(
-            f"{label} «{codice}» non corrisponde a quella prevista ({previsto}). "
-            "Per teste e generatori serve il pezzo esatto.",
-            status_code=409,
-            motivo="non_corrispondente",
-        )
 
     expected = _resolve_expected(tipo, assigned, atteso)
     base["atteso"] = expected
@@ -211,6 +217,68 @@ def _assigned_uids(att, tipo: str) -> list[str]:
         RisorsaAttivita.objects.filter(attivita_id=att.pk, tipo=tipo)
         .order_by("pk")
         .values_list("risorsa_id", flat=True)
+    )
+
+
+def _in_progress_holders(att, tipo: str, uid: str) -> list[dict]:
+    """Other activities started and not closed that hold *uid*.
+
+    No window applies: the piece is physically in use there until
+    ``actual_finish`` is recorded, however far its dates are from *att*.
+
+    Returns:
+        list[dict]: Conflict dicts shaped like :func:`find_conflicts`, with
+            the holder's occupancy dates.
+    """
+    rows = (
+        RisorsaAttivita.objects.select_related("attivita")
+        .filter(
+            tipo=tipo,
+            risorsa_id=uid,
+            attivita__actual_start__isnull=False,
+            attivita__actual_finish__isnull=True,
+        )
+        .exclude(attivita_id=att.pk)
+        .order_by("attivita__actual_start", "pk")
+    )
+    holders: list[dict] = []
+    for row in rows:
+        start, end = occupation_window(row.attivita)
+        holders.append(
+            {
+                "tipo": row.tipo,
+                "risorsa_id": row.risorsa_id,
+                "attivita_id": row.attivita_id,
+                "attivita_label": str(row.attivita),
+                "data_inizio": start.isoformat(),
+                "data_fine": end.isoformat(),
+            }
+        )
+    return holders
+
+
+def _refuse_if_in_use(att, tipo: str, codice: str) -> None:
+    """Refuse *codice* while another activity in progress holds it.
+
+    Raises:
+        ScanError: ``occupata``, whether *codice* is the planned piece or not.
+    """
+    holders = _in_progress_holders(att, tipo, codice)
+    if not holders:
+        return
+    label = _TIPO_LABELS.get(tipo, tipo.capitalize())
+    where, chiusa = (
+        ("nell'attività", "chiusa")
+        if len(holders) == 1
+        else ("nelle attività", "chiuse")
+    )
+    names = ", ".join(h["attivita_label"] for h in holders)
+    raise ScanError(
+        f"{label} «{codice}» è in uso {where} {names}, non ancora {chiusa}: "
+        "si potrà usare quando ne verrà registrata la fine effettiva.",
+        status_code=409,
+        motivo="occupata",
+        conflicts=holders,
     )
 
 
