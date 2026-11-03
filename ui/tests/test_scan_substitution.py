@@ -171,14 +171,42 @@ class Case1FreeTest(ScanBase):
             ).exists()
         )
 
-    def test_ambiguous_expected_requires_atteso(self) -> None:
+    def test_check_without_atteso_among_several_names_any_planned(self) -> None:
+        RisorsaAttivita.objects.create(
+            attivita=self.att, tipo="mandrino", risorsa_id="M120"
+        )
+        result = scan_resource(self.att.pk, tipo="mandrino", codice="M117")
+        self.assertEqual(result["esito"], "sostituzione")
+        self.assertTrue(result["richiede_conferma"])
+        self.assertFalse(result["applicata"])
+        self.assertIsNone(result["atteso"])
+        self.assertEqual(
+            result["messaggio"],
+            "Stai usando M117 al posto di uno dei mandrini previsti, va bene?",
+        )
+        self.assertEqual(
+            {u for t, u in _pairs(self.att) if t == "mandrino"}, {"M102", "M120"}
+        )
+
+    def test_check_without_atteso_still_refuses_out_of_tolerance(self) -> None:
         RisorsaAttivita.objects.create(
             attivita=self.att, tipo="mandrino", risorsa_id="M120"
         )
         with self.assertRaises(BridgeWriteError) as ctx:
-            scan_resource(self.att.pk, tipo="mandrino", codice="M117")
+            scan_resource(self.att.pk, tipo="mandrino", codice="M130")
+        self.assertEqual(ctx.exception.motivo, "non_compatibile")
+
+    def test_ambiguous_expected_requires_atteso_to_confirm(self) -> None:
+        RisorsaAttivita.objects.create(
+            attivita=self.att, tipo="mandrino", risorsa_id="M120"
+        )
+        with self.assertRaises(BridgeWriteError) as ctx:
+            scan_resource(self.att.pk, tipo="mandrino", codice="M117", conferma=True)
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertEqual(ctx.exception.motivo, "atteso")
+        self.assertEqual(
+            {u for t, u in _pairs(self.att) if t == "mandrino"}, {"M102", "M120"}
+        )
 
         result = scan_resource(
             self.att.pk, tipo="mandrino", codice="M117", atteso="M120", conferma=True

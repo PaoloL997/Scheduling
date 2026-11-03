@@ -93,7 +93,9 @@ def scan_resource(
         tipo: Resource category of the scanned item.
         codice: Scanned code, equal to the inventory UID.
         atteso: Planned UID the scan replaces; inferred when the activity
-            holds exactly one item of *tipo*.
+            holds exactly one item of *tipo*.  A check without *conferma*
+            may omit it even with several items: the tablet pairs the
+            substitutes with the planned pieces left over only at start.
         conferma: When ``True`` the operator confirmed the substitution and
             the planning assignments are updated.
 
@@ -153,7 +155,7 @@ def scan_resource(
             "messaggio": f"{label} «{codice}» corrisponde alla pianificazione.",
         }
 
-    expected = _resolve_expected(tipo, assigned, atteso)
+    expected = _resolve_expected(tipo, assigned, atteso, conferma=conferma)
     base["atteso"] = expected
     _check_compatibility(att, tipo, row)
 
@@ -186,7 +188,9 @@ def scan_resource(
             f"{label} «{codice}» risulta nello stabilimento "
             f"«{row.get('plant') or '—'}», non in «{plant}»."
         )
-    messaggio = _confirm_message(label, codice, expected, planned)
+    messaggio = _confirm_message(
+        tipo, label, codice, expected, planned, has_planned=bool(assigned)
+    )
 
     if not conferma:
         return {
@@ -282,21 +286,29 @@ def _refuse_if_in_use(att, tipo: str, codice: str) -> None:
     )
 
 
-def _resolve_expected(tipo: str, assigned: list[str], atteso: str | None) -> str | None:
+def _resolve_expected(
+    tipo: str, assigned: list[str], atteso: str | None, *, conferma: bool = True
+) -> str | None:
     """Return the planned UID the scan replaces.
+
+    Compatibility depends on the activity requirement, not on the piece being
+    replaced, so a check without confirmation needs no pairing: the tablet
+    decides which planned piece each substitute replaces only at start.
 
     Args:
         tipo: Resource category.
         assigned: UIDs of *tipo* currently assigned.
         atteso: UID named by the tablet, if any.
+        conferma: ``False`` for a check that writes nothing.
 
     Returns:
         str | None: The UID to replace, or ``None`` when the activity holds no
-            item of *tipo* and the scanned one is simply added.
+            item of *tipo* (the scanned one is simply added) or when a check
+            without confirmation names none among several.
 
     Raises:
         ScanError: When *atteso* is not assigned, or is required because the
-            activity holds several items of *tipo*.
+            activity holds several items of *tipo* and the write is confirmed.
     """
     label = _TIPO_LABELS.get(tipo, tipo.capitalize())
     if atteso is not None:
@@ -311,6 +323,8 @@ def _resolve_expected(tipo: str, assigned: list[str], atteso: str | None) -> str
         return None
     if len(assigned) == 1:
         return assigned[0]
+    if not conferma:
+        return None
     raise ScanError(
         f"L'attività ha più {label.lower()} assegnati ({', '.join(assigned)}): "
         "indica quale stai sostituendo.",
@@ -414,12 +428,32 @@ def _conflict_summary(conflict: dict) -> dict:
     }
 
 
+_ANY_PLANNED: dict[str, str] = {
+    "mandrino": "uno dei mandrini previsti",
+    "tastatore": "uno dei tastatori previsti",
+    "maschera": "una delle maschere previste",
+}
+
+
 def _confirm_message(
-    label: str, scanned: str, expected: str | None, planned: list[dict]
+    tipo: str,
+    label: str,
+    scanned: str,
+    expected: str | None,
+    planned: list[dict],
+    *,
+    has_planned: bool,
 ) -> str:
-    """``Stai usando MND-117 al posto di MND-102, va bene?``"""
+    """``Stai usando MND-117 al posto di MND-102, va bene?``
+
+    Without *expected* but with planned pieces of *tipo* (a check before the
+    tablet pairs them), the replaced piece is any of them.
+    """
     if expected:
         text = f"Stai usando {scanned} al posto di {expected}, va bene?"
+    elif has_planned:
+        any_planned = _ANY_PLANNED.get(tipo, "un pezzo previsto")
+        text = f"Stai usando {scanned} al posto di {any_planned}, va bene?"
     else:
         text = f"Stai usando {scanned}, non previsto dalla pianificazione, va bene?"
     if planned:
