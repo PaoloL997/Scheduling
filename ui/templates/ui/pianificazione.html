@@ -136,6 +136,7 @@
                    data-resources="{{ task.resources|default:'' }}"
                    data-resources-typed="{{ task.resources_by_tipo_json }}"
                    data-min-requirements="{{ task.min_requirements_json }}"
+                   data-tp60-custom="{{ task.tp60_custom|yesno:'1,' }}"
                    data-modello-testa="{{ task.modello_testa|default:'' }}"
                    data-bore-min="{{ task.bore_min|default:''|unlocalize }}"
                    data-bore-max="{{ task.bore_max|default:''|unlocalize }}"
@@ -2720,9 +2721,11 @@ async function openRisorsePickerForEdit() {
   const startEl = body?.querySelector('[name="start"]');
   const finishEl = body?.querySelector('[name="finish"]');
   const plantEl = body?.querySelector('[name="plant"]');
+  const tp60El = body?.querySelector('[name="tp60Custom"]');
   if (startEl?.value) d.start = startEl.value;
   if (finishEl?.value) d.finish = finishEl.value;
   if (plantEl?.value) d.plant = plantEl.value;
+  if (tp60El) d.tp60Custom = tp60El.checked ? '1' : '';
   if (!d.start || !d.finish) return;
   const overlay = document.getElementById('risorse-picker-overlay');
   overlay.style.display = 'flex';
@@ -2738,6 +2741,8 @@ async function openRisorsePickerForEdit() {
       tube_pitch: d.tubePitch || '',
     },
     exclude_activity_id: d.ormId || '',
+    // The minimums follow the flag as currently ticked, not the saved one.
+    tp60_custom: d.tp60Custom === '1',
     risorseTarget: _detState.editRisorse,
     useServerPreselect: false,
     // The server echoes the current assignment back via always_include, keyed
@@ -3062,6 +3067,7 @@ function _wizAppendRow(ormId, warningCount, noteCount, task, job) {
   div.dataset.resources      = allRes;
   div.dataset.resourcesTyped = JSON.stringify(resByTipo);
   div.dataset.minRequirements = JSON.stringify(WIZ.minRequirements || {});
+  div.dataset.tp60Custom     = WIZ.tp60Custom ? '1' : '';
   div.dataset.predecessors   = r.predecessors && r.predecessors.length ? r.predecessors.join(', ') : '';
   div.setAttribute('onclick', 'openDetailModal(this, \'task\')');
 
@@ -3440,7 +3446,8 @@ const TASK_FIELDS = [
   { label:'Fine effett.',  key:'actualFinish',  readonly:false, isDate:true },
   { label:'Stabilimento',  key:'plant',         readonly:false, isPlant:true },
   { label:'Responsabile',  key:'responsible',   readonly:false, isResponsible:true },
-  { label:'Risorse',       key:'resources',     readonly:false, isResources:true },
+  { label:'TP60 Custom',   key:'tp60Custom',    readonly:false, isTp60:true },
+  { label:'Risorse',      key:'resources',     readonly:false, isResources:true },
 ];
 
 const JOB_FIELDS = [
@@ -3472,6 +3479,7 @@ function openDetailModal(tr, entityType) {
       resources:    ds.resources    || '',
       resourcesTyped: ds.resourcesTyped || '',
       minRequirements: ds.minRequirements || '',
+      tp60Custom:   ds.tp60Custom === '1' ? '1' : '',
       modelloTesta: ds.modelloTesta || '',
       boreMin:      ds.boreMin      || '',
       boreMax:      ds.boreMax      || '',
@@ -3543,6 +3551,8 @@ function _renderPianViewMode(data, fields) {
       displayVal = rawVal ? `<code class="s6-uid">${esc(rawVal)}</code>` : '—';
     } else if (f.key === 'resources') {
       displayVal = formatResourcesHtml(data.resourcesTyped || rawVal);
+    } else if (f.isTp60) {
+      displayVal = rawVal === '1' ? 'Sì' : 'No';
     } else {
       displayVal = esc(rawVal) || '—';
     }
@@ -3593,6 +3603,17 @@ async function enterEditMode() {
       return `<div class="det-field">
                 <span class="det-label">${esc(f.label)}</span>
                 <select class="det-input" name="${f.key}">${opts}</select>
+              </div>`;
+    }
+    if (f.isTp60) {
+      // A checkbox, not a .det-input: saveEdit reads it on its own.
+      const checked = originalData[f.key] === '1' ? ' checked' : '';
+      return `<div class="det-field">
+                <span class="det-label">${esc(f.label)}</span>
+                <label class="det-check" title="Richiede 2 mandrini e 1 maschera; il tastatore non è richiesto">
+                  <input type="checkbox" name="${f.key}"${checked}>
+                  <span>Sporgenza Tubo-Piastra</span>
+                </label>
               </div>`;
     }
     if (f.key === 'activity' && entityType === 'task') {
@@ -3727,6 +3748,9 @@ async function saveEdit() {
   const body = document.getElementById('det-body');
   const newData = { ...originalData };
   body.querySelectorAll('.det-input').forEach(el => { newData[el.name] = el.value; });
+  const tp60El = body.querySelector('input[name="tp60Custom"]');
+  if (tp60El) newData.tp60Custom = tp60El.checked ? '1' : '';
+  const tp60Changed = entityType === 'task' && newData.tp60Custom !== originalData.tp60Custom;
 
   let url, payload;
   if (entityType === 'task') {
@@ -3744,7 +3768,9 @@ async function saveEdit() {
       saveBtn.textContent = 'Salva';
       return;
     }
-    if (!originalData.actualStart && newData.actualStart) {
+    // Toggling TP60 Custom changes the minimums the row carries: the server
+    // checks the start against the new ones, so the local guard steps aside.
+    if (!originalData.actualStart && newData.actualStart && !tp60Changed) {
       const risorse = (_detState.risorseDirty && _detState.editRisorse)
         ? _detState.editRisorse
         : _typedToRisorse(originalData.resourcesTyped);
@@ -3771,6 +3797,7 @@ async function saveEdit() {
       responsible:   newData.responsible,
       predecessors:  newData.predecessors ? [newData.predecessors] : [],
     };
+    if (tp60Changed) payload.tp60_custom = newData.tp60Custom === '1';
     if (_detState.risorseDirty && _detState.editRisorse) {
       payload.risorse = _detState.editRisorse;
     }
@@ -3854,6 +3881,11 @@ async function saveEdit() {
       sortPianActivitiesInHost(tr.closest('.pian-activities'));
       if (json.warning_count != null) tr.dataset.warningCount = String(json.warning_count);
       if (json.note_count != null) tr.dataset.noteCount = String(json.note_count);
+      tr.dataset.tp60Custom = newData.tp60Custom || '';
+      if (json.task && json.task.min_requirements) {
+        newData.minRequirements = JSON.stringify(json.task.min_requirements);
+        tr.dataset.minRequirements = newData.minRequirements;
+      }
       if (json.task) {
         tr.dataset.stateKey = json.task.state_key || '';
         tr.dataset.delayDays = String(json.task.delay_days ?? 0);

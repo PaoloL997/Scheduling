@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-03
+
+### Added
+
+- **TP60 Custom modificabile dal pannello attivita'.** In Pianificazione, il
+  dettaglio della singola attivita' mostra il flag «TP60 Custom» (Sì/No) e in
+  modifica lo presenta come casella. Il valore va a `/api/tasks/update/`
+  (`tp60_custom`) solo se cambia; la riga prende i nuovi minimi di risorse
+  restituiti dal server e «Modifica risorse» usa i minimi del flag come
+  spuntato. Se nella stessa modifica si cambia il flag e si registra
+  l'«Inizio effettivo», il controllo dei minimi resta al server.
+
 ## 2026-10-28
 
 ### Fixed
