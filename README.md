@@ -253,7 +253,12 @@ The tablet starts an activity by scanning its components against
 
 Without `conferma` nothing is written: the response carries
 `richiede_conferma`, `messaggio` and `attivita_sottratte`. `atteso` is inferred
-when the activity holds a single item of that category and required otherwise.
+when the activity holds a single item of that category. With several, a check
+(`conferma: false`) may omit it: compatibility depends on the activity, not on
+the piece replaced, so the tablet scans in any order and pairs each substitute
+with a planned piece left over only at start (`"Stai usando MND-117 al posto di
+uno dei mandrini previsti, va bene?"`, `atteso: null`). The confirmed write
+(`conferma: true`) still requires it.
 
 Resource updates through `update_attivita` (web and bridge) replace the full
 assignment list, but a category **absent** from `risorse` keeps its current
