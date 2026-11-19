@@ -1,3 +1,0 @@
-# Renaming an inventory uid via PUT duplicates or overwrites a row
-
-ui/services/inventory.py `update_resource` (PUT `/api/inventario/<table>/<uid>/`, sent by the detail modal in ui/templates/ui/inventario.html): renaming a `uid` does not rename the row. `uid` is the primary key of the five inventory models, and the function sets the new value on the loaded instance and calls `obj.save()`, so a free new uid inserts a second row and leaves the old one, and a uid owned by another item overwrites that item with no error; the `IntegrityError` → "già presente" branch never fires. Write through `model_class.objects.filter(uid=original_uid).update(...)` as `patch_resource` does in the same file, and add a rename test and a collision test to ui/tests/test_inventory_api.py.

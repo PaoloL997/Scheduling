@@ -263,16 +263,18 @@ def update_resource(table: str, original_uid: str, data: dict) -> None:
     old_plant = obj.plant
     old_uid = obj.uid
     was_maintenance = bool(getattr(obj, "in_manutenzione", False))
-    for col, val in row.items():
-        setattr(obj, col, val)
+    updates = dict(row)
     if maintenance is not None:
-        obj.in_manutenzione = maintenance
+        updates["in_manutenzione"] = maintenance
     elif table in _MAINTENANCE_TABLES:
-        obj.in_manutenzione = False
+        updates["in_manutenzione"] = False
         maintenance = False
+    # ``uid`` is the primary key: setting it on the instance and calling
+    # ``save()`` would insert a new row (or overwrite another one) instead of
+    # renaming this one, so the row is written with a queryset update.
     try:
         with transaction.atomic():
-            obj.save()
+            model_class.objects.filter(uid=original_uid).update(**updates)
     except IntegrityError as exc:
         raise ValueError(f"uid '{data.get('uid')}' già presente in {table}.") from exc
 
