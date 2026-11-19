@@ -83,6 +83,36 @@ class InventoryApiTest(TestCase):
         self.assertFalse(GeneratoreItem.objects.filter(uid="G100").exists())
         self.assertTrue(GeneratoreItem.objects.filter(uid="G101").exists())
 
+    def test_put_rename_uid(self) -> None:
+        resp = self.client.put(
+            reverse(
+                "api_inventario_detail",
+                kwargs={"table": "Generatore", "uid": "G100"},
+            ),
+            data=json.dumps({"uid": "G101", "model": "g1", "plant": "Valbrembo"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertFalse(GeneratoreItem.objects.filter(uid="G100").exists())
+        self.assertEqual(GeneratoreItem.objects.count(), 1)
+        self.assertEqual(GeneratoreItem.objects.get(uid="G101").model, "g1")
+
+    def test_put_rename_to_existing_uid_conflicts(self) -> None:
+        GeneratoreItem.objects.create(uid="G200", model="g2", plant="Plant A")
+        resp = self.client.put(
+            reverse(
+                "api_inventario_detail",
+                kwargs={"table": "Generatore", "uid": "G100"},
+            ),
+            data=json.dumps({"uid": "G200", "model": "g1", "plant": "Valbrembo"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn("già presente", resp.json()["error"])
+        self.assertEqual(GeneratoreItem.objects.get(uid="G100").model, "g1")
+        self.assertEqual(GeneratoreItem.objects.get(uid="G200").model, "g2")
+        self.assertEqual(GeneratoreItem.objects.count(), 2)
+
     def test_patch_no_valid_fields(self) -> None:
         resp = self.client.patch(
             reverse(
