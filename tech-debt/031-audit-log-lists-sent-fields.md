@@ -1,0 +1,3 @@
+# Audit log lists the fields sent, not the fields changed
+
+ui/services/operation_log.py `describe_attivita_update` (called by `tasks_update_response` in ui/views.py): the audit line "Modificati: …" lists every key present in the payload (`if key in data`), not the fields that changed. The Pianificazione panel always sends start, finish, actual dates, plant, responsible and predecessors, so every save is logged as a change to all of them. The label for `tp60_custom` is "sporgenza personalizzata", while the UI calls the flag "TP60 Custom". Make `update_attivita` in ui/services/bridge_write.py return the list of fields whose value really changed (it already holds old and new values), describe that list in the log, and rename the label to "TP60 Custom".

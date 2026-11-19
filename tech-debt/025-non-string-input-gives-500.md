@@ -1,0 +1,3 @@
+# Non-string text fields and a null bore give a 500
+
+ui/views_attivita.py `api_salva_attivita` and ui/views_anagrafiche.py `_text`, `create_view`, `detail_view`: text fields are read as `data.get(...).strip()` or `(raw or default).strip()`, so a JSON `null` or number for `commessa`, `nome` or `colore` raises `AttributeError`; `"bore": null` breaks the later `bore.get(...)`, and a non-string `data_inizio` / `data_fine` raises `TypeError` past the `except (KeyError, ValueError)`. All of these come back as a 500. Coerce text fields through one helper in ui/services/parsing.py that returns a stripped string for strings and refuses other types with a 400, treat a non-dict `bore` as `{}`, and add `TypeError` to the date `except`.
