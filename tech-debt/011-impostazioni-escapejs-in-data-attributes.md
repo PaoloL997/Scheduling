@@ -1,0 +1,3 @@
+# escapejs inside data- attributes corrupts model names
+
+ui/templates/ui/impostazioni.html, the three `data-modello="{{ ...|escapejs }}"` attributes in `#tbody-config-testa`: `escapejs` is only decoded in a JavaScript context, so in an HTML attribute a model such as "HT-200" is read back by `dataset.modello` as the literal `HT-200`. For any model containing `-`, `&`, `=`, `;` or quotes the "add configuration" dropdown offers models already configured, the edit modal title shows the escaped text, and re-adding a generator chip posts the escaped string as `modello_generatore`. Drop `|escapejs` from the three attributes (template autoescaping is enough there).

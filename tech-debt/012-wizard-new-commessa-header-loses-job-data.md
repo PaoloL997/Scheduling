@@ -1,0 +1,3 @@
+# Commessa created by the wizard loses deadline, cost and penalty on first edit
+
+ui/templates/ui/pianificazione.html `_wizAppendRow`: when the wizard creates a new commessa the group header is built with `_pianGroupHeadHtml({ commessa: r.commessa, n_activities: 0 })`, ignoring the `job` argument that carries the server's `job_id`, `delivery_date`, `total_cost` and `penalty`. Until the page is reloaded the card shows no deadline and its edit modal opens empty, so saving any change from it sends nulls and `api_jobs_update` in ui/views.py overwrites the three fields. Build the header from `job` when it is present.

@@ -1,0 +1,3 @@
+# seed_overlap_demo uses fixed August 2026 dates
+
+ui/management/commands/seed_overlap_demo.py `_seed_activities` and `_seed_reschedule_activities` (default run and `--reschedule`): activities and deliveries carry fixed dates (`date(2026, 8, 10)` … `date(2026, 9, 12)`, `"delivery_date": "2026-09-15"` / `"2026-09-30"`), so run after September 2026 every "blocked" activity is also overdue and every reschedule proposal lands past its deadline: the demo no longer shows the scenario the module docstring and README.md describe. Anchor the dates on `localdate()` with the same offsets, as `_handle_overdue` in the same file already does, and update the docstring and the literal dates asserted in ui/tests/test_seed_demo_commands.py.

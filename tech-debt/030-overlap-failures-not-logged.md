@@ -1,0 +1,3 @@
+# Overlap swap and reschedule failures are not logged
+
+ui/services/overlap_reassign.py: two failures of the automatic handling of an overlap leave no trace. In `auto_resolve_resource_overlaps` the `except OverlapReassignError: continue` drops the reason a replacement could not be applied, and `propose_reschedule` returns `None` both when `build_reschedule_problem` raises `OptimizationProblemError` and when `check_feasibility` says the instance is infeasible, so the planner only sees that there is no proposal. Log each of the three cases with `logger.warning` (activity id and reason; for infeasibility the messages of the feasibility report).

@@ -1,0 +1,3 @@
+# HTML-escape helpers duplicated and esc leaves the apostrophe unescaped
+
+ui/static/ui/common.js `esc`, ui/templates/ui/impostazioni.html `_escapeHtml` and `escHtml`, ui/templates/ui/ottimizzazione_risultati.html `escHtml`: common.js says templates "define nothing of their own", but three more HTML-escape helpers exist and they differ from `esc`, which is the only one that leaves `'` unescaped, so a value containing an apostrophe breaks any single-quoted attribute or inline handler built with `esc` (for example the row buttons rendered by ui/templates/ui/inventario.html). Escape `'` as `&#39;` in `esc`, delete the three copies and call `esc` in their place.

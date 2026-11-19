@@ -1,0 +1,3 @@
+# Unused helpers, dead modal and duplicate _s5ShowError in pianificazione.html
+
+ui/templates/ui/pianificazione.html, helpers that are defined and never called: `problemsBadgeInner`, `_resolveActivityName`, `_PIAN_STATUS_SORT_ORDER`, `_s1PredecessorsHtml`, `_s1SelectPredecessor`, `s5Toggle`, `_s5RenderCat`, `_s5RefreshItems`, `_s5UpdateLabel`, `step5Save`, and `openAddCommessaModal` with the "simple commessa creation" modal it opens (markup, `closeAddCommessaModal` and its save handler; commesse are created from the wizard). `_s5ShowError` is defined twice, the second definition silently replacing the first. Delete the unused functions and the modal and keep a single `_s5ShowError`, checking each name with a search across ui/ before removing it.

@@ -1,0 +1,3 @@
+# Gantt fixtures hard-coded to 2026 and one fixture never run
+
+ui/tests/fixtures/gantt_actual_window_test.mjs, gantt_badge_anchor_test.mjs, gantt_badge_anchor_rules_test.mjs, gantt_badge_completed_test.mjs, gantt_badge_inprogress_test.mjs, gantt_dependency_test.mjs, gantt_stable_width_test.mjs: they use literal 2026 dates with `chart.render(tasks, 'year')`, and the year view of ui/static/ui/gantt.js `render` is the current calendar year (`floorYear(today)`), so from 1 January 2027 no bar is drawn and the seven fixtures fail. Build the dates relative to today as gantt_overrun_test.mjs does. Also ui/tests/fixtures/gantt_start_offscreen_test.mjs is run by no Python test: register it next to the others in ui/tests/test_gantt_results.py.
