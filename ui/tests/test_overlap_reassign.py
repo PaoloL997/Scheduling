@@ -224,8 +224,9 @@ class RescheduleProposalTest(TestCase):
             min_generatori=0,
         )
         TestaItem.objects.create(uid="OV-T1", model="TP60", plant="Valbrembo")
+        today = localdate()
         Job.objects.create(
-            commessa="C205", delivery_date=localdate() + timedelta(days=90)
+            commessa="C205", delivery_date=today + timedelta(days=90)
         )
         self.late = Attivita.objects.create(
             commessa="C101",
@@ -233,9 +234,9 @@ class RescheduleProposalTest(TestCase):
             activity="Saldatura",
             stabilimento="Valbrembo",
             modello_testa="TP60",
-            data_inizio=date(2026, 8, 10),
-            data_fine=date(2026, 8, 19),
-            actual_start=date(2026, 8, 17),
+            data_inizio=today - timedelta(days=16),
+            data_fine=today - timedelta(days=7),
+            actual_start=today - timedelta(days=9),
         )
         self.blocked = Attivita.objects.create(
             commessa="C205",
@@ -243,8 +244,8 @@ class RescheduleProposalTest(TestCase):
             activity="Montaggio",
             stabilimento="Valbrembo",
             modello_testa="TP60",
-            data_inizio=date(2026, 8, 20),
-            data_fine=date(2026, 8, 29),
+            data_inizio=today - timedelta(days=6),
+            data_fine=today + timedelta(days=3),
         )
         for att in (self.late, self.blocked):
             RisorsaAttivita.objects.create(
@@ -290,7 +291,7 @@ class RescheduleProposalTest(TestCase):
         auto_resolve_resource_overlaps()
         first = compute_reschedule_proposal(self.blocked.pk)
         # The blocker now holds OV-T1 well past the first proposed slot.
-        self.late.data_fine = date(2026, 10, 15)
+        self.late.data_fine = localdate() + timedelta(days=30)
         self.late.save(update_fields=["data_fine"])
         second = compute_reschedule_proposal(self.blocked.pk)
         self.assertNotEqual(first["blocked"]["start"], second["blocked"]["start"])
@@ -333,9 +334,10 @@ class RescheduleProposalTest(TestCase):
     def test_apply_reschedule_resolves_overlap(self) -> None:
         auto_resolve_resource_overlaps()
         compute_reschedule_proposal(self.blocked.pk)
+        original_start = self.blocked.data_inizio
         apply_reschedule(self.blocked.pk)
         self.blocked.refresh_from_db()
-        self.assertNotEqual(self.blocked.data_inizio, date(2026, 8, 20))
+        self.assertNotEqual(self.blocked.data_inizio, original_start)
         self.assertEqual(
             list(
                 RisorsaAttivita.objects.filter(attivita=self.blocked).values_list(
