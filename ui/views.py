@@ -9,6 +9,7 @@ from django.db import transaction
 from django.db.models import F
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import render
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
@@ -992,7 +993,9 @@ def _serialize_log_entry(entry) -> dict:
     """
     return {
         "id": entry.pk,
-        "timestamp_display": entry.timestamp.strftime("%d/%m/%Y %H:%M"),
+        "timestamp_display": timezone.localtime(entry.timestamp).strftime(
+            "%d/%m/%Y %H:%M"
+        ),
         "source": entry.source,
         "source_label": dict(entry.SOURCE_CHOICES).get(entry.source, entry.source),
         "username": entry.username or "Sistema",

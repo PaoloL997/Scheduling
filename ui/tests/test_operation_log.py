@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timezone as dt_timezone
 from unittest.mock import patch
 
-from django.test import Client, RequestFactory, TestCase
+from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from ui.models import (
@@ -614,3 +614,26 @@ class OperationLogPaginationTest(TestCase):
         resp = api_operation_log(request)
         data = json.loads(resp.content)
         self.assertLessEqual(len(data["items"]), 200)
+
+
+@override_settings(TIME_ZONE="Europe/Rome")
+class OperationLogTimestampTest(TestCase):
+    """The log endpoint shows timestamps in local time, not UTC."""
+
+    def test_timestamp_display_uses_local_time(self) -> None:
+        user = create_writer("tz-reader", password="pass")
+        entry = OperationLog.objects.create(
+            username="Sistema",
+            source=OperationLog.SOURCE_SISTEMA,
+            azione="sistema_test",
+            descrizione="Evento",
+        )
+        # 10:30 UTC on a winter day is 11:30 in Europe/Rome (CET, UTC+1).
+        OperationLog.objects.filter(pk=entry.pk).update(
+            timestamp=datetime(2026, 1, 15, 10, 30, tzinfo=dt_timezone.utc)
+        )
+        request = RequestFactory().get("/api/log/")
+        request.user = user
+        data = json.loads(api_operation_log(request).content)
+        item = next(i for i in data["items"] if i["id"] == entry.pk)
+        self.assertEqual(item["timestamp_display"], "15/01/2026 11:30")
